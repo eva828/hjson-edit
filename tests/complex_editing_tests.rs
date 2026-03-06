@@ -3,7 +3,8 @@
 //! These tests verify advanced editing operations.
 
 use hjson_edit::{
-    create_token, green_to_string, parse_to_red, red_to_string, RedNodeEdit, RedNodeExt, SyntaxKind,
+    create_token, green_to_string, parse_to_red, red_to_string, GreenNodeEdit, RedNodeEdit,
+    RedNodeExt, SyntaxKind,
 };
 
 /// 深くネストされたオブジェクトの値を編集できることを検証
@@ -72,7 +73,9 @@ fn test_edit_nested_value() {
     }
 
     let target_idx = target_idx.expect("Target token not found");
-    let new_value_green = target_green.replace_child(target_idx, new_token.into());
+    let new_value_green = target_green
+        .replace_child(target_idx, new_token.into())
+        .unwrap();
 
     // Verify the change
     let new_text = green_to_string(&new_value_green);
@@ -122,16 +125,18 @@ fn test_edit_array_element() {
     }
 
     let target_idx = target_idx.expect("Target token not found");
-    let new_element_green = element_green.replace_child(target_idx, new_token.into());
+    let new_element_green = element_green
+        .replace_child(target_idx, new_token.into())
+        .unwrap();
 
     // Verify the change
     let new_text = green_to_string(&new_element_green);
     assert!(new_text.contains("modified"));
 }
 
-/// オブジェクトに新しいキーを追加する操作の基盤テスト
+/// オブジェクトに新しいキーを追加する操作を低レベルAPIで実装
 ///
-/// 現時点では既存Pairの存在確認とラウンドトリップを検証する。
+/// 既存Pairの後に新しいPair（Key + Colon + Value）を追加する
 #[test]
 fn test_edit_add_new_key() {
     let input = r#"{
@@ -157,7 +162,73 @@ fn test_edit_add_new_key() {
     let output = green_to_string(&green);
     assert_eq!(output, input, "Round-trip should preserve content");
 
-    // TODO: insert_childでPairノード（Key + Colon + Value）を構築・追加するテストを実装
+    // 新しいキーを追加するためのPairノードを構築
+    // Pair構造: Key(Ident) + Whitespace + Colon + Whitespace + Value(String)
+    let new_key_ident = create_token(SyntaxKind::Ident, "new_key");
+    let whitespace1 = create_token(SyntaxKind::Whitespace, " ");
+    let colon = create_token(SyntaxKind::Colon, ":");
+    let whitespace2 = create_token(SyntaxKind::Whitespace, " ");
+    let new_value = create_token(SyntaxKind::String, "\"new_value\"");
+
+    let new_pair = hjson_edit::create_node(
+        SyntaxKind::Pair,
+        vec![
+            new_key_ident.into(),
+            whitespace1.into(),
+            colon.into(),
+            whitespace2.into(),
+            new_value.into(),
+        ],
+    );
+
+    // Objectに新しいPairを追加
+    // Objectの構造を確認: LBrace, Whitespace(newline + indent), Pair, RBrace
+    // 新しいPairを既存Pairの後、RBraceの前に挿入
+    let object_green = object.to_green();
+
+    // Objectの子要素を確認
+    let children: Vec<_> = object_green.children().collect();
+    assert_eq!(
+        children.len(),
+        4,
+        "Object should have 4 children: LBrace, Whitespace, Pair, RBrace"
+    );
+
+    // 段階的に挿入（apply_editsの降順ソートによりインデックスが複雑になるため）
+    let comma = create_token(SyntaxKind::Comma, ",");
+    let newline = create_token(SyntaxKind::Whitespace, "\n  ");
+
+    // 1. RBraceの前にカンマを挿入（インデックス3）
+    let object_green = object_green.insert_child(3, comma.into()).unwrap();
+    // 2. カンマの後に改行を挿入（インデックス4）
+    let object_green = object_green.insert_child(4, newline.into()).unwrap();
+    // 3. 改行の後に新しいPairを挿入（インデックス5）
+    let new_object_green = object_green.insert_child(5, new_pair.into()).unwrap();
+    let new_object_text = green_to_string(&new_object_green);
+
+    // 新しいキーが追加されたことを確認
+    assert!(
+        new_object_text.contains("new_key"),
+        "New key should be present, got: {}",
+        new_object_text
+    );
+    assert!(
+        new_object_text.contains("new_value"),
+        "New value should be present, got: {}",
+        new_object_text
+    );
+    assert!(
+        new_object_text.contains("existing"),
+        "Existing key should be preserved, got: {}",
+        new_object_text
+    );
+
+    // カンマと改行が追加されていることを確認
+    assert!(
+        new_object_text.contains(","),
+        "Comma should be present between pairs, got: {}",
+        new_object_text
+    );
 }
 
 /// オブジェクトのキー名をトークン置換で変更できることを検証
@@ -197,7 +268,9 @@ fn test_edit_change_key_name() {
     }
 
     let target_idx = target_idx.expect("Key token not found");
-    let new_key_green = key_green.replace_child(target_idx, new_token.into());
+    let new_key_green = key_green
+        .replace_child(target_idx, new_token.into())
+        .unwrap();
 
     // Verify the change
     let new_text = green_to_string(&new_key_green);
@@ -242,7 +315,7 @@ fn test_edit_multiple_values() {
                     if text.contains("value") {
                         let new_text = text.replace("value", "modified");
                         let new_token = create_token(SyntaxKind::String, &new_text);
-                        let new_value = value_green.replace_child(i, new_token.into());
+                        let new_value = value_green.replace_child(i, new_token.into()).unwrap();
 
                         // 各編集結果が正しいことを検証
                         let result_text = green_to_string(&new_value);
@@ -371,7 +444,9 @@ fn test_edit_in_array_of_objects() {
     }
 
     let target_idx = target_idx.expect("Target token (100) not found");
-    let new_value_green = value_green.replace_child(target_idx, new_token.into());
+    let new_value_green = value_green
+        .replace_child(target_idx, new_token.into())
+        .unwrap();
 
     // 編集結果が正しいことを検証
     let new_text = green_to_string(&new_value_green);
@@ -429,7 +504,9 @@ fn test_edit_hex_value() {
     }
 
     let target_idx = target_idx.expect("Hex token not found");
-    let new_value_green = value_green.replace_child(target_idx, new_token.into());
+    let new_value_green = value_green
+        .replace_child(target_idx, new_token.into())
+        .unwrap();
 
     // Verify the change
     let new_text = green_to_string(&new_value_green);
