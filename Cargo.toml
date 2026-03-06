@@ -1,0 +1,18 @@
+[package]
+name = "hjson-edit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rowan = "0.15"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[[bin]]
+name = "hjson-edit"
+path = "src/main.rs"
+
+[lib]
+name = "hjson_edit"
+path = "src/lib.rs"

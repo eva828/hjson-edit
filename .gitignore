@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Nix
+result
+result-*
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Environment
+.env

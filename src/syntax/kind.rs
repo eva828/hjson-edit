@@ -1,0 +1,130 @@
+use rowan::Language;
+
+/// HJSON構文要素の種別
+/// 
+/// 行コメント、ブロックコメント、空白も重要な構文要素として保持する
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u16)]
+pub enum SyntaxKind {
+    // ===== 字句トークン =====
+    // 構文記号
+    LBrace,      // {
+    RBrace,      // }
+    LBracket,    // [
+    RBracket,    // ]
+    Colon,       // :
+    Comma,       // ,
+    
+    // リテラル値
+    True,        // true
+    False,       // false
+    Null,        // null
+    
+    // 数値
+    Integer,     // 整数（123）
+    Float,       // 浮動小数点（1.23）
+    HexInteger,  // 16進数（0xFF）
+    
+    // 特殊浮動小数点
+    NaN,         // NaN
+    Infinity,    // Infinity
+    NegInfinity, // -Infinity
+    
+    // 文字列
+    String,      // "..."
+    SingleQuoteString, // '...'
+    BlockString, // '''...'''
+    UnquotedString,    // 引用符なし文字列
+    
+    // 識別子（キーとして使用可能）
+    Ident,       // 識別子
+    
+    // コメント
+    LineComment,     // // 行コメント
+    HashComment,     // # 行コメント
+    BlockComment,    // /* ブロックコメント */
+    
+    // 空白・改行
+    Whitespace,  // 空白・タブ
+    Newline,     // 改行
+    
+    // ===== 構文木ノード =====
+    // ルート
+    Root,
+    
+    // 値
+    Object,
+    Array,
+    Pair,        // キー: 値
+    Key,
+    Value,
+    
+    // エラー回復用
+    Error,
+    
+    // ===== Sentinel =====
+    #[doc(hidden)]
+    __Last,
+}
+
+impl From<SyntaxKind> for rowan::SyntaxKind {
+    fn from(kind: SyntaxKind) -> Self {
+        Self(kind as u16)
+    }
+}
+
+/// HJSON言語定義（rowan用）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HjsonLanguage {}
+
+impl Language for HjsonLanguage {
+    type Kind = SyntaxKind;
+    
+    fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
+        assert!(raw.0 < SyntaxKind::__Last as u16);
+        unsafe { std::mem::transmute::<u16, SyntaxKind>(raw.0) }
+    }
+    
+    fn kind_to_raw(kind: SyntaxKind) -> rowan::SyntaxKind {
+        kind.into()
+    }
+}
+
+/// トークンかどうか
+pub fn is_token(kind: SyntaxKind) -> bool {
+    use SyntaxKind::*;
+    matches!(
+        kind,
+        LBrace | RBrace | LBracket | RBracket | Colon | Comma |
+        True | False | Null |
+        Integer | Float | HexInteger | NaN | Infinity | NegInfinity |
+        String | SingleQuoteString | BlockString | UnquotedString | Ident |
+        LineComment | HashComment | BlockComment |
+        Whitespace | Newline
+    )
+}
+
+/// ノードかどうか
+pub fn is_node(kind: SyntaxKind) -> bool {
+    use SyntaxKind::*;
+    matches!(kind, Root | Object | Array | Pair | Key | Value | Error)
+}
+
+/// トリビア（空白・コメント）かどうか
+pub fn is_trivia(kind: SyntaxKind) -> bool {
+    use SyntaxKind::*;
+    matches!(kind, Whitespace | Newline | LineComment | HashComment | BlockComment)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_kind_conversion() {
+        let kind = SyntaxKind::LBrace;
+        let raw: rowan::SyntaxKind = kind.into();
+        let converted = HjsonLanguage::kind_from_raw(raw);
+        assert_eq!(kind, converted);
+    }
+}
