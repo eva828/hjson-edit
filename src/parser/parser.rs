@@ -54,7 +54,13 @@ impl Parser {
 
         // 先頭のトリビアを含めて値をパース
         if !self.is_at_end() {
-            self.parse_value();
+            self.eat_trivia();
+            // ブレースレスルートオブジェクトのチェック
+            if self.is_braceless_object_start() {
+                self.parse_braceless_object();
+            } else {
+                self.parse_value();
+            }
         }
 
         // 残りのトークンがあればエラー
@@ -283,8 +289,10 @@ impl Parser {
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
-                self.eat_trivia();
                 self.bump();
+
+                // カンマ後のトリビア（改行・コメントなど）を消費
+                self.eat_trivia();
 
                 // 末尾カンマ対応：}が続く場合は終了
                 if self.at(SyntaxKind::RBrace) {
@@ -350,6 +358,9 @@ impl Parser {
             }
 
             self.parse_value();
+
+            // 値の後のトリビア（改行・コメントなど）を消費
+            self.eat_trivia();
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
@@ -470,6 +481,44 @@ impl Parser {
     fn parse_string_or_key(&mut self) {
         // 単純にトークンを消費
         self.bump();
+    }
+
+    /// ブレースレスルートオブジェクトの開始かチェック
+    /// 引用符なしキー（Ident/UnquotedString）のみで開始される
+    fn is_braceless_object_start(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Some(SyntaxKind::Ident) | Some(SyntaxKind::UnquotedString)
+        )
+    }
+
+    /// ブレースレスルートオブジェクトを解析（中括弧なし）
+    fn parse_braceless_object(&mut self) {
+        self.builder.start_node(SyntaxKind::Object);
+
+        loop {
+            if self.is_at_end() {
+                break;
+            }
+
+            // トリビアをチェック（改行のみの場合は終了）
+            self.eat_trivia();
+            if self.is_at_end() {
+                break;
+            }
+
+            // ブレースレスオブジェクトの終了判定
+            if !self.is_braceless_object_start() {
+                break;
+            }
+
+            self.parse_pair();
+
+            // Pair後のトリビアを消費
+            self.eat_trivia();
+        }
+
+        self.builder.finish_node();
     }
 }
 

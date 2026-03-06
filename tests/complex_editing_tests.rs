@@ -362,12 +362,14 @@ fn test_edit_in_array_of_objects() {
     let elements: Vec<_> = array.children_nodes().collect();
     assert_eq!(elements.len(), 2);
 
-    // Edit first element's value
+    // Edit first element's value (value: 100)
     let first_obj = elements[0]
         .child_by_kind(SyntaxKind::Object)
         .expect("Object not found");
-    let first_pair = first_obj.children_nodes().next().expect("Pair not found");
-    let value_node = first_pair
+    let mut pairs: Vec<_> = first_obj.children_nodes().collect();
+    assert_eq!(pairs.len(), 2, "Should have 2 pairs: name and value");
+    let value_pair = pairs.pop().expect("Value pair not found"); // 2番目のPair (value: 100)
+    let value_node = value_pair
         .child_by_kind(SyntaxKind::Value)
         .expect("Value not found");
 
