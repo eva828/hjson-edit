@@ -285,7 +285,9 @@ impl Parser {
             self.parse_pair();
 
             // Pairの後のトリビアを消費（コメントなど）
+            let pos_before_trivia = self.position;
             self.eat_trivia();
+            let trivia_consumed = self.position > pos_before_trivia;
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
@@ -299,6 +301,12 @@ impl Parser {
                     break;
                 }
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
+                // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
+                if trivia_consumed {
+                    // カンマなし・改行ありは有効な区切り → ループ継続
+                    continue;
+                }
+                // 改行もなくカンマもない → エラー
                 let token = self.current().unwrap();
                 self.error("Expected ',' or '}'", token.line, token.column);
                 // エラー回復：次のペアまたは}までスキップ（トリビア含めて保持）
@@ -360,17 +368,28 @@ impl Parser {
             self.parse_value();
 
             // 値の後のトリビア（改行・コメントなど）を消費
+            let pos_before_trivia = self.position;
             self.eat_trivia();
+            let trivia_consumed = self.position > pos_before_trivia;
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
                 self.bump();
+
+                // カンマ後のトリビア（改行・コメントなど）を消費（複数行末尾カンマ対応）
+                self.eat_trivia();
 
                 // 末尾カンマ対応
                 if self.at(SyntaxKind::RBracket) {
                     break;
                 }
             } else if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
+                // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
+                if trivia_consumed {
+                    // カンマなし・改行ありは有効な区切り → ループ継続
+                    continue;
+                }
+                // 改行もなくカンマもない → エラー
                 let token = self.current().unwrap();
                 self.error("Expected ',' or ']'", token.line, token.column);
                 // エラー回復（トリビア含めて保持）
