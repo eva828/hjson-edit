@@ -83,14 +83,8 @@ fn test_edit_nested_value() {
 /// 複数行配列の要素を個別に編集できることを検証
 ///
 /// 3要素の配列から2番目の要素 "second" を "modified" に置換する。
-/// パーサーの改行付き配列バグにより現在は失敗する（既知の問題）
 #[test]
 fn test_edit_array_element() {
-    // 配列要素の編集テスト
-    // TODO: パーサーが改行付き配列を正しく処理するように修正
-    // 現在の問題:
-    // - 改行付き配列が「Unexpected token: RBracket」エラーになる
-    // - parse_array()で、要素間の改行処理を修正する必要がある
     let input = r#"[
   "first",
   "second",
@@ -138,11 +132,8 @@ fn test_edit_array_element() {
 /// オブジェクトに新しいキーを追加する操作の基盤テスト
 ///
 /// 現時点では既存Pairの存在確認とラウンドトリップを検証する。
-/// insert_child APIによるPairノード追加は将来のTODO
 #[test]
 fn test_edit_add_new_key() {
-    // 新しいキーを追加するテスト
-    // insert_childを使って新しいPairノードを既存Objectに追加する
     let input = r#"{
   existing: "value"
 }"#;
@@ -166,9 +157,7 @@ fn test_edit_add_new_key() {
     let output = green_to_string(&green);
     assert_eq!(output, input, "Round-trip should preserve content");
 
-    // TODO: insert_childを使って新しいPairノードを追加するテストを実装
-    // 現在のcreate_node APIでは、Pair > Key + Colon + Value の構造を
-    // 手動で構築してinsert_childで追加する必要がある
+    // TODO: insert_childでPairノード（Key + Colon + Value）を構築・追加するテストを実装
 }
 
 /// オブジェクトのキー名をトークン置換で変更できることを検証
@@ -335,14 +324,8 @@ fn test_edit_preserves_comments() {
 ///
 /// 配列の最初のオブジェクトの値 100 を 999 に置換し、
 /// 元のRedNodeが変更されないことも確認する。
-/// パーサーの改行付き配列バグにより現在は失敗する（既知の問題）
 #[test]
 fn test_edit_in_array_of_objects() {
-    // オブジェクトの配列の編集テスト
-    // TODO: パーサーが改行付き配列を正しく処理するように修正
-    // 現在の問題:
-    // - 配列内の改行で「Unexpected token: RBracket」エラーになる
-    // - parse_array()で、要素間の改行処理を修正する必要がある
     let input = r#"[
   { name: "item1", value: 100 },
   { name: "item2", value: 200 }

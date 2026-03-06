@@ -131,8 +131,6 @@ fn test_error_handling() {
 /// Root > Value > Object の階層と、2つ以上のPairが存在することを確認する
 #[test]
 fn test_root_object_with_braces() {
-    // NOTE: 現在パーサーが末尾カンマを正しく処理しないため、末尾カンマなしの形式を使用
-    // TODO: パーサー修正後に末尾カンマありのテストケースも追加
     let input = r#"{
   one: 0xFF00AA,
   two: 0x00FF00
@@ -197,8 +195,6 @@ fn test_root_null() {
 /// Root > Value > Array の階層と、3つ以上の要素が存在することを確認する
 #[test]
 fn test_root_array() {
-    // NOTE: 現在パーサーが改行付き配列を正しく処理しないため、1行形式を使用
-    // TODO: パーサー修正後に改行付きのテストケースも追加
     let input = r#"["first", "second", "third"]"#;
 
     let red = parse_to_red(input).unwrap();
@@ -217,14 +213,9 @@ fn test_root_array() {
 
 /// HJSON仕様のブレースレスルートオブジェクト（{}なし）のパースを検証
 ///
-/// パーサー未実装のため現在は失敗する（既知の問題）
+/// ブレースレスの場合、AST構造は Root > Object > Pair[]（Valueノードなし）
 #[test]
 fn test_root_object_without_braces() {
-    // HJSONでは中括弧なしのオブジェクトも許容される
-    // TODO: パーサーのparse()メソッドで、先頭がLBraceでない場合にもObjectとしてパースする処理を追加
-    // 実装ポイント:
-    // - parse()で、先頭トークンがLBraceでない場合、直接Pairをパース
-    // - AST構造は Root > Pair[] (Objectノードなし)
     let input = r#"one: 0xFF00AA
 two: 0x00FF00"#;
 
@@ -232,21 +223,23 @@ two: 0x00FF00"#;
     let output = red_to_string(&red);
     assert_eq!(output, input);
 
-    // AST構造: Root > Pair[] (Objectノードなし)
-    // TODO: パーサー修正後に具体的な検証を追加
+    // AST構造: Root > Object > Pair[]（Valueノードを経由しない）
+    let object = red
+        .child_by_kind(SyntaxKind::Object)
+        .expect("Object not found");
+    assert!(
+        red.child_by_kind(SyntaxKind::Value).is_none(),
+        "Braceless root should not have a Value wrapper"
+    );
+    assert!(
+        object.children_nodes().count() >= 2,
+        "Should have at least 2 pairs"
+    );
 }
 
 /// 深くネストされた構造（4階層のオブジェクト＋配列）のパースとラウンドトリップを検証
-///
-/// パーサーの改行付き配列バグにより現在は失敗する（既知の問題）
 #[test]
 fn test_complex_nested_structure() {
-    // HJSONの複雑な入れ子構造のテスト
-    // TODO: 以下の修正が必要:
-    // 1. オブジェクト内で2つ以上のキーがある場合、カンマが必要だが正しく処理しない問題
-    //    - parse_object()で、カンマ後に改行がある場合の処理を修正
-    // 2. 配列内の改行を正しく処理しない問題
-    //    - parse_array()で、要素間の改行を正しく処理
     let input = r#"{
   level1: {
     level2: {
@@ -270,8 +263,6 @@ fn test_complex_nested_structure() {
 /// 複数の16進数カラー値を持つオブジェクトのパースとラウンドトリップを検証
 #[test]
 fn test_hex_colors_in_object() {
-    // NOTE: 現在パーサーが末尾カンマを正しく処理しないため、末尾カンマなしの形式を使用
-    // TODO: パーサー修正後に末尾カンマありのテストケースも追加
     let input = r#"{
   primary: 0xFF5733,
   secondary: 0x33FF57,
@@ -284,16 +275,8 @@ fn test_hex_colors_in_object() {
 }
 
 /// HJSONの末尾カンマ（trailing comma）サポートを検証
-///
-/// パーサーのカンマ＋改行＋}パターンのバグにより現在は失敗する（既知の問題）
 #[test]
 fn test_trailing_comma() {
-    // HJSONの末尾カンマサポートのテスト
-    // TODO: パーサーのparse_object()とparse_array()で末尾カンマを正しく処理するように修正
-    // 問題: カンマの後にRBraceやRBracketが来る場合、現在はエラーになっている
-    // 修正ポイント:
-    // - parse_object(): カンマの後にRBraceが来たら正常終了とする
-    // - parse_array(): カンマの後にRBracketが来たら正常終了とする
     let input = r#"{
   a: 1,
   b: 2,
@@ -400,8 +383,6 @@ fn test_multiple_edits_sequence() {
 /// キーと値の両方に引用符なし文字列が使われるケースをテストする
 #[test]
 fn test_unquoted_strings() {
-    // NOTE: 現在パーサーが末尾カンマを正しく処理しないため、末尾カンマなしの形式を使用
-    // TODO: パーサー修正後に末尾カンマありのテストケースも追加
     let input = r#"{
   key1: unquoted_value,
   key2: another_unquoted_value,
