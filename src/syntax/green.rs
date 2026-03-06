@@ -1,5 +1,5 @@
 use super::kind::SyntaxKind;
-use rowan::{GreenNodeBuilder};
+use rowan::GreenNodeBuilder;
 
 /// GreenElement型エイリアス（NodeまたはToken）
 pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
@@ -15,22 +15,22 @@ impl GreenTreeBuilder {
             inner: GreenNodeBuilder::new(),
         }
     }
-    
+
     /// ノード開始
     pub fn start_node(&mut self, kind: SyntaxKind) {
         self.inner.start_node(kind.into());
     }
-    
+
     /// ノード終了
     pub fn finish_node(&mut self) {
         self.inner.finish_node();
     }
-    
+
     /// トークン追加
     pub fn token(&mut self, kind: SyntaxKind, text: &str) {
         self.inner.token(kind.into(), text);
     }
-    
+
     /// ビルド完了
     pub fn finish(self) -> rowan::GreenNode {
         self.inner.finish()
@@ -58,7 +58,8 @@ impl GreenNodeExt for rowan::GreenNode {
                     rowan::NodeOrToken::Node(n) => {
                         // n は &GreenNodeData
                         // cloneでArcを取得してGreenNodeを作成
-                        let green_node: rowan::GreenNode = rowan::GreenNode::from(std::borrow::Cow::Borrowed(n));
+                        let green_node: rowan::GreenNode =
+                            rowan::GreenNode::from(std::borrow::Cow::Borrowed(n));
                         result.push_str(&node_text_recursive(&green_node));
                     }
                     rowan::NodeOrToken::Token(t) => {
@@ -75,7 +76,8 @@ impl GreenNodeExt for rowan::GreenNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+    /// GreenTreeBuilderでRootノードを構築し、テキストが "{}" になることを検証
     #[test]
     fn test_build_simple() {
         let mut builder = GreenTreeBuilder::new();
@@ -83,7 +85,7 @@ mod tests {
         builder.token(SyntaxKind::LBrace, "{");
         builder.token(SyntaxKind::RBrace, "}");
         builder.finish_node();
-        
+
         let node = builder.finish();
         let node_ref: &rowan::GreenNode = &node;
         assert_eq!(node_ref.text(), "{}");

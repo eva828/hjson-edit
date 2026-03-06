@@ -12,22 +12,22 @@ pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;
 pub trait RedNodeExt {
     /// 指定されたkindの子ノードを探す
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode>;
-    
+
     /// 指定されたkindの子トークンを探す
     fn token_by_kind(&self, kind: SyntaxKind) -> Option<RedToken>;
-    
+
     /// すべての子ノードを取得
     fn children_nodes(&self) -> impl Iterator<Item = RedNode>;
-    
+
     /// テキスト表現（フォーマット保持）
     fn text(&self) -> String;
-    
+
     /// このノードに含まれる行番号範囲を取得（1始まり）
     fn line_range(&self, source: &str) -> (usize, usize);
-    
+
     /// 子をインデックスで取得
     fn child_at(&self, index: usize) -> Option<RedElement>;
-    
+
     /// 子の数を取得
     fn child_count(&self) -> usize;
 }
@@ -114,10 +114,7 @@ impl RedElementExt for RedElement {
 pub fn red_to_green(node: &RedNode) -> rowan::GreenNode {
     use rowan::GreenNodeBuilder;
 
-    fn build_recursive(
-        builder: &mut GreenNodeBuilder<'static>,
-        element: &RedElement,
-    ) {
+    fn build_recursive(builder: &mut GreenNodeBuilder<'static>, element: &RedElement) {
         match element {
             rowan::NodeOrToken::Node(node) => {
                 builder.start_node(node.kind().into());
@@ -139,8 +136,8 @@ pub fn red_to_green(node: &RedNode) -> rowan::GreenNode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::green::GreenTreeBuilder;
+    use super::*;
 
     fn create_test_node() -> RedNode {
         let mut builder = GreenTreeBuilder::new();
@@ -153,21 +150,23 @@ mod tests {
         let green = builder.finish();
         RedNode::new_root(green)
     }
-    
+
+    /// child_by_kindで指定したSyntaxKindの子ノードが取得できることを検証
     #[test]
     fn test_child_by_kind() {
         let node = create_test_node();
         let object = node.child_by_kind(SyntaxKind::Object);
         assert!(object.is_some());
     }
-    
+
+    /// line_rangeが1行のHJSON入力に対して (1, 1) を返すことを検証
     #[test]
     fn test_line_range() {
         // 実際のパース結果を使ってテスト
         let input = "{ \"key\": \"value\" }";
         let result = crate::parser::parser::parse(input).unwrap();
         let node = RedNode::new_root(result.green);
-        
+
         // ルートノードは1行目
         let (start, end) = node.line_range(input);
         assert_eq!(start, 1);

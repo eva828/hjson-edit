@@ -1,0 +1,14 @@
+{
+  level1: {
+    level2: {
+      level3: {
+        deeply_nested_value: "found it!"
+      }
+    }
+  },
+  array_of_objects: [
+    { name: "item1", value: 100 },
+    { name: "item2", value: 200 },
+    { name: "item3", value: 300 }
+  ]
+}

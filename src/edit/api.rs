@@ -3,7 +3,7 @@
 /// Green/Red Treeを操作するための基本的な編集機能
 use super::super::syntax::green::GreenElement;
 use super::super::syntax::kind::SyntaxKind;
-use super::super::syntax::red::{RedNode, RedNodeExt};
+use super::super::syntax::red::RedNode;
 use rowan::GreenNodeBuilder;
 
 /// 編集操作
@@ -20,8 +20,14 @@ pub enum EditOp {
 /// 編集エラー
 #[derive(Debug, Clone)]
 pub enum EditError {
-    InvalidIndex { index: usize, count: usize },
-    InvalidNodeKind { expected: SyntaxKind, found: SyntaxKind },
+    InvalidIndex {
+        index: usize,
+        count: usize,
+    },
+    InvalidNodeKind {
+        expected: SyntaxKind,
+        found: SyntaxKind,
+    },
 }
 
 impl std::fmt::Display for EditError {
@@ -56,16 +62,10 @@ pub trait GreenNodeEdit {
     ) -> Result<rowan::GreenNode, EditError>;
 
     /// 指定インデックスの子を削除
-    fn remove_child(
-        &self,
-        index: usize,
-    ) -> Result<rowan::GreenNode, EditError>;
+    fn remove_child(&self, index: usize) -> Result<rowan::GreenNode, EditError>;
 
     /// 複数の編集を適用
-    fn apply_edits(
-        &self,
-        edits: Vec<EditOp>,
-    ) -> Result<rowan::GreenNode, EditError>;
+    fn apply_edits(&self, edits: Vec<EditOp>) -> Result<rowan::GreenNode, EditError>;
 }
 
 impl GreenNodeEdit for rowan::GreenNode {
@@ -97,7 +97,7 @@ impl GreenNodeEdit for rowan::GreenNode {
         builder.finish_node();
         Ok(builder.finish())
     }
-    
+
     fn insert_child(
         &self,
         index: usize,
@@ -130,11 +130,8 @@ impl GreenNodeEdit for rowan::GreenNode {
         builder.finish_node();
         Ok(builder.finish())
     }
-    
-    fn remove_child(
-        &self,
-        index: usize,
-    ) -> Result<rowan::GreenNode, EditError> {
+
+    fn remove_child(&self, index: usize) -> Result<rowan::GreenNode, EditError> {
         let children: Vec<GreenElement> = self.children().map(child_to_green_element).collect();
 
         if index >= children.len() {
@@ -156,13 +153,11 @@ impl GreenNodeEdit for rowan::GreenNode {
         builder.finish_node();
         Ok(builder.finish())
     }
-    
-    fn apply_edits(
-        &self,
-        edits: Vec<EditOp>,
-    ) -> Result<rowan::GreenNode, EditError> {
+
+    fn apply_edits(&self, edits: Vec<EditOp>) -> Result<rowan::GreenNode, EditError> {
         // インデックスを計算してソート
-        let mut indexed_ops: Vec<(usize, EditOp)> = edits.into_iter()
+        let mut indexed_ops: Vec<(usize, EditOp)> = edits
+            .into_iter()
             .map(|op| {
                 let idx = match &op {
                     EditOp::Replace { index, .. } => *index,
@@ -172,10 +167,10 @@ impl GreenNodeEdit for rowan::GreenNode {
                 (idx, op)
             })
             .collect();
-        
+
         // インデックス降順でソート（後ろから処理）
         indexed_ops.sort_by(|a, b| b.0.cmp(&a.0));
-        
+
         // 重複チェック
         let mut seen = std::collections::HashSet::new();
         for (idx, _) in &indexed_ops {
@@ -186,23 +181,17 @@ impl GreenNodeEdit for rowan::GreenNode {
                 });
             }
         }
-        
+
         let mut result = self.clone();
-        
+
         for (_, op) in indexed_ops {
             result = match op {
-                EditOp::Replace { index, new } => {
-                    result.replace_child(index, new)?
-                }
-                EditOp::Insert { index, child } => {
-                    result.insert_child(index, child)?
-                }
-                EditOp::Delete { index } => {
-                    result.remove_child(index)?
-                }
+                EditOp::Replace { index, new } => result.replace_child(index, new)?,
+                EditOp::Insert { index, child } => result.insert_child(index, child)?,
+                EditOp::Delete { index } => result.remove_child(index)?,
             };
         }
-        
+
         Ok(result)
     }
 }
@@ -245,11 +234,13 @@ impl RedNodeEdit for RedNode {
 }
 
 /// 子要素をGreenElementに変換
-fn child_to_green_element(child: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>) -> GreenElement {
+fn child_to_green_element(
+    child: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
+) -> GreenElement {
     match child {
-        rowan::NodeOrToken::Node(node_data) => {
-            rowan::NodeOrToken::Node(rowan::GreenNode::from(std::borrow::Cow::Borrowed(node_data)))
-        }
+        rowan::NodeOrToken::Node(node_data) => rowan::NodeOrToken::Node(rowan::GreenNode::from(
+            std::borrow::Cow::Borrowed(node_data),
+        )),
         rowan::NodeOrToken::Token(token_data) => {
             rowan::NodeOrToken::Token(rowan::GreenToken::new(token_data.kind(), token_data.text()))
         }
@@ -292,9 +283,9 @@ pub fn create_node(kind: SyntaxKind, children: Vec<GreenElement>) -> rowan::Gree
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::syntax::green::GreenNodeExt;
     use super::super::super::syntax::green::GreenTreeBuilder;
+    use super::*;
 
     fn create_test_node() -> rowan::GreenNode {
         let mut builder = GreenTreeBuilder::new();
@@ -305,6 +296,9 @@ mod tests {
         builder.finish()
     }
 
+    /// replace_childで子トークンを置換できることを検証
+    ///
+    /// LBrace "{" を LBracket "[" に置換し、結果が "[}" になることを確認する
     #[test]
     fn test_replace_child() {
         let node = create_test_node();
@@ -315,6 +309,9 @@ mod tests {
         assert_eq!(result_ref.text(), "[}");
     }
 
+    /// insert_childで指定位置に新しいトークンを挿入できることを検証
+    ///
+    /// "{}" のインデックス1にWhitespaceを挿入し、"{ }" になることを確認する
     #[test]
     fn test_insert_child() {
         let node = create_test_node();
@@ -325,6 +322,9 @@ mod tests {
         assert_eq!(result_ref.text(), "{ }");
     }
 
+    /// remove_childで指定位置の子トークンを削除できることを検証
+    ///
+    /// "{}" のインデックス1（RBrace）を削除し、"{" になることを確認する
     #[test]
     fn test_remove_child() {
         let node = create_test_node();
@@ -334,6 +334,7 @@ mod tests {
         assert_eq!(result_ref.text(), "{");
     }
 
+    /// 範囲外のインデックスを指定するとEditError::InvalidIndexが返ることを検証
     #[test]
     fn test_invalid_index() {
         let node = create_test_node();

@@ -1,9 +1,9 @@
-/// HJSON構文解析器
-/// 
-/// Lexerのトークン列をGreen Treeに変換
-use super::lexer::Token;
 use super::super::syntax::green::GreenTreeBuilder;
 use super::super::syntax::kind::SyntaxKind;
+/// HJSON構文解析器
+///
+/// Lexerのトークン列をGreen Treeに変換
+use super::lexer::Token;
 
 /// 構文解析エラー
 #[derive(Debug, Clone, PartialEq)]
@@ -47,16 +47,16 @@ impl Parser {
             errors: Vec::new(),
         }
     }
-    
+
     /// 構文解析実行
     pub fn parse(mut self) -> ParseResult {
         self.builder.start_node(SyntaxKind::Root);
-        
+
         // 先頭のトリビアを含めて値をパース
         if !self.is_at_end() {
             self.parse_value();
         }
-        
+
         // 残りのトークンがあればエラー
         if !self.is_at_end() {
             let token = self.current().unwrap();
@@ -72,25 +72,25 @@ impl Parser {
             }
             self.finish_error_node();
         }
-        
+
         self.builder.finish_node();
-        
+
         ParseResult {
             green: self.builder.finish(),
             errors: self.errors,
         }
     }
-    
+
     /// 現在のトークン
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
-    
+
     /// 終了判定
     fn is_at_end(&self) -> bool {
         self.position >= self.tokens.len()
     }
-    
+
     /// 次のトークンを消費
     fn bump(&mut self) {
         if let Some(token) = self.tokens.get(self.position) {
@@ -98,12 +98,13 @@ impl Parser {
             self.position += 1;
         }
     }
-    
+
     /// 特定の非トリビアトークンを期待して消費（前のトリビアも含めて）
+    #[allow(dead_code)]
     fn expect(&mut self, kind: SyntaxKind, message: &str) -> bool {
         // 先にトリビアを消費
         self.eat_trivia();
-        
+
         if self.current().map(|t| t.kind == kind).unwrap_or(false) {
             self.bump();
             true
@@ -117,7 +118,7 @@ impl Parser {
             false
         }
     }
-    
+
     /// 特定の非トリビアトークンかチェック
     fn at(&self, kind: SyntaxKind) -> bool {
         self.current_kind() == Some(kind)
@@ -125,19 +126,16 @@ impl Parser {
 
     /// いずれかの非トリビアトークンかチェック
     fn at_any(&self, kinds: &[SyntaxKind]) -> bool {
-        self.current_kind().map(|k| kinds.contains(&k)).unwrap_or(false)
+        self.current_kind()
+            .map(|k| kinds.contains(&k))
+            .unwrap_or(false)
     }
-    
+
     /// エラーを記録
-    fn error(
-        &mut self,
-        message: impl Into<String>,
-        line: usize,
-        column: usize,
-    ) {
+    fn error(&mut self, message: impl Into<String>, line: usize, column: usize) {
         self.errors.push(ParseError::new(message, line, column));
     }
-    
+
     /// エラーノードを開始
     fn start_error_node(&mut self) {
         self.builder.start_node(SyntaxKind::Error);
@@ -156,7 +154,7 @@ impl Parser {
     }
 
     /// トリビア（空白・コメント・改行）を消費して追加
-    /// 
+    ///
     /// トリビアをGreen Treeに追加しつつ、現在位置を進める
     fn eat_trivia(&mut self) {
         while let Some(token) = self.current() {
@@ -167,7 +165,7 @@ impl Parser {
             }
         }
     }
-    
+
     /// 次の非トリビアトークンの種類を取得
     fn current_kind(&self) -> Option<SyntaxKind> {
         let mut pos = self.position;
@@ -180,12 +178,13 @@ impl Parser {
         }
         None
     }
-    
-    /// 次の非トリビアトークンまでスキップ（ eat_trivia() を使うため非推奨）
+
+    /// 次の非トリビアトークンまでスキップ（eat_trivia()のエイリアス）
+    #[allow(dead_code)]
     fn skip_trivia(&mut self) {
         self.eat_trivia();
     }
-    
+
     /// 値を解析
     fn parse_value(&mut self) {
         self.builder.start_node(SyntaxKind::Value);
@@ -208,25 +207,23 @@ impl Parser {
                 SyntaxKind::LBracket => {
                     self.parse_array();
                 }
-                SyntaxKind::String |
-                SyntaxKind::SingleQuoteString |
-                SyntaxKind::BlockString |
-                SyntaxKind::UnquotedString |
-                SyntaxKind::Ident => {
+                SyntaxKind::String
+                | SyntaxKind::SingleQuoteString
+                | SyntaxKind::BlockString
+                | SyntaxKind::UnquotedString
+                | SyntaxKind::Ident => {
                     self.parse_string_or_key();
                 }
-                SyntaxKind::Integer |
-                SyntaxKind::Float |
-                SyntaxKind::HexInteger |
-                SyntaxKind::NaN |
-                SyntaxKind::Infinity |
-                SyntaxKind::NegInfinity => {
+                SyntaxKind::Integer
+                | SyntaxKind::Float
+                | SyntaxKind::HexInteger
+                | SyntaxKind::NaN
+                | SyntaxKind::Infinity
+                | SyntaxKind::NegInfinity => {
                     self.eat_trivia();
                     self.bump();
                 }
-                SyntaxKind::True |
-                SyntaxKind::False |
-                SyntaxKind::Null => {
+                SyntaxKind::True | SyntaxKind::False | SyntaxKind::Null => {
                     self.eat_trivia();
                     self.bump();
                 }
@@ -238,11 +235,7 @@ impl Parser {
                         (0, 0)
                     };
                     self.start_error_node();
-                    self.error(
-                        format!("Unexpected token: {:?}", token_kind),
-                        line,
-                        col,
-                    );
+                    self.error(format!("Unexpected token: {:?}", token_kind), line, col);
                     self.bump();
                     self.finish_error_node();
                 }
@@ -251,11 +244,9 @@ impl Parser {
 
         self.builder.finish_node();
     }
-    
+
     /// オブジェクト { ... } を解析
-    fn parse_object(
-        &mut self,
-    ) {
+    fn parse_object(&mut self) {
         self.builder.start_node(SyntaxKind::Object);
 
         // {
@@ -301,11 +292,7 @@ impl Parser {
                 }
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
                 let token = self.current().unwrap();
-                self.error(
-                    "Expected ',' or '}'",
-                    token.line,
-                    token.column,
-                );
+                self.error("Expected ',' or '}'", token.line, token.column);
                 // エラー回復：次のペアまたは}までスキップ（トリビア含めて保持）
                 self.start_error_node();
                 self.consume_until_recovery(&[
@@ -330,11 +317,9 @@ impl Parser {
 
         self.builder.finish_node();
     }
-    
+
     /// 配列 [ ... ] を解析
-    fn parse_array(
-        &mut self,
-    ) {
+    fn parse_array(&mut self) {
         self.builder.start_node(SyntaxKind::Array);
 
         // [
@@ -376,17 +361,10 @@ impl Parser {
                 }
             } else if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
                 let token = self.current().unwrap();
-                self.error(
-                    "Expected ',' or ']'",
-                    token.line,
-                    token.column,
-                );
+                self.error("Expected ',' or ']'", token.line, token.column);
                 // エラー回復（トリビア含めて保持）
                 self.start_error_node();
-                self.consume_until_recovery(&[
-                    SyntaxKind::Comma,
-                    SyntaxKind::RBracket,
-                ]);
+                self.consume_until_recovery(&[SyntaxKind::Comma, SyntaxKind::RBracket]);
                 self.finish_error_node();
             }
         }
@@ -401,7 +379,7 @@ impl Parser {
 
         self.builder.finish_node();
     }
-    
+
     /// キー: 値 のペアを解析
     fn parse_pair(&mut self) {
         self.builder.start_node(SyntaxKind::Pair);
@@ -417,10 +395,10 @@ impl Parser {
 
         let token = self.current();
         match token.map(|t| t.kind) {
-            Some(SyntaxKind::String) |
-            Some(SyntaxKind::SingleQuoteString) |
-            Some(SyntaxKind::Ident) |
-            Some(SyntaxKind::UnquotedString) => {
+            Some(SyntaxKind::String)
+            | Some(SyntaxKind::SingleQuoteString)
+            | Some(SyntaxKind::Ident)
+            | Some(SyntaxKind::UnquotedString) => {
                 self.bump();
             }
             _ => {
@@ -487,11 +465,9 @@ impl Parser {
 
         self.builder.finish_node();
     }
-    
+
     /// 文字列またはキーを解析
-    fn parse_string_or_key(
-        &mut self,
-    ) {
+    fn parse_string_or_key(&mut self) {
         // 単純にトークンを消費
         self.bump();
     }
@@ -500,21 +476,20 @@ impl Parser {
 /// 公開API
 pub fn parse(input: &str) -> Result<ParseResult, Vec<ParseError>> {
     let lex_result = super::lexer::lex(input);
-    
+
     // 字句解析エラーがある場合
     if !lex_result.errors.is_empty() {
-        let parse_errors: Vec<ParseError> = lex_result.errors.iter().map(|e| {
-            ParseError::new(&e.message,
-                e.line,
-                e.column,
-            )
-        }).collect();
+        let parse_errors: Vec<ParseError> = lex_result
+            .errors
+            .iter()
+            .map(|e| ParseError::new(&e.message, e.line, e.column))
+            .collect();
         return Err(parse_errors);
     }
-    
+
     let parser = Parser::new(lex_result.tokens);
     let result = parser.parse();
-    
+
     if result.errors.is_empty() {
         Ok(result)
     } else {
@@ -524,16 +499,18 @@ pub fn parse(input: &str) -> Result<ParseResult, Vec<ParseError>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::syntax::green::GreenNodeExt;
-    
+    use super::*;
+
+    /// 空オブジェクト "{}" のパースとラウンドトリップを検証
     #[test]
     fn test_parse_empty_object() {
         let result = parse("{}").unwrap();
         let text = result.green.text();
         assert_eq!(text, "{}");
     }
-    
+
+    /// 1つのキー・値ペアを持つオブジェクトのパースとラウンドトリップを検証
     #[test]
     fn test_parse_simple_object() {
         let input = r#"{"key": "value"}"#;
@@ -541,7 +518,8 @@ mod tests {
         let text = result.green.text();
         assert_eq!(text, input);
     }
-    
+
+    /// 整数3要素の配列のパースとラウンドトリップを検証
     #[test]
     fn test_parse_array() {
         let input = "[1, 2, 3]";
@@ -549,7 +527,8 @@ mod tests {
         let text = result.green.text();
         assert_eq!(text, input);
     }
-    
+
+    /// 行コメント（// と #）を含むオブジェクトのパースとラウンドトリップを検証
     #[test]
     fn test_parse_with_comments() {
         let input = r#"{
@@ -560,7 +539,8 @@ mod tests {
         let text = result.green.text();
         assert_eq!(text, input);
     }
-    
+
+    /// 引用符なしキー・値のパースとラウンドトリップを検証
     #[test]
     fn test_parse_unquoted_keys() {
         let input = "{key: value}";
@@ -568,7 +548,8 @@ mod tests {
         let text = result.green.text();
         assert_eq!(text, input);
     }
-    
+
+    /// 末尾カンマ付き配列 "[1, 2,]" のパースとラウンドトリップを検証
     #[test]
     fn test_parse_trailing_comma() {
         let input = "[1, 2,]";
@@ -576,7 +557,8 @@ mod tests {
         let text = result.green.text();
         assert_eq!(text, input);
     }
-    
+
+    /// 16進数値とNaN特殊値のパースとラウンドトリップを検証
     #[test]
     fn test_parse_hex_and_special() {
         let input = "{hex: 0xFF, special: NaN}";
@@ -584,7 +566,8 @@ mod tests {
         let text = result.green.text();
         assert_eq!(text, input);
     }
-    
+
+    /// コロンなしの不正構文 "{key}" がErrになることを検証
     #[test]
     fn test_parse_error() {
         let input = "{key}";
