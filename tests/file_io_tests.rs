@@ -180,6 +180,36 @@ fn test_read_unquoted_strings() {
     assert_eq!(output, content, "Round-trip should preserve content");
 }
 
+/// カンマなし改行区切りオブジェクトのfixtureファイルを読み込みラウンドトリップを検証
+///
+/// HJSON仕様では改行がカンマの代わりに区切りとして使える。
+/// パーサー修正箇所: parser.rs parse_object() のカンマなし時のエラー処理（L301付近）
+#[test]
+fn test_read_no_comma_object() {
+    let path = format!("{}/no_comma_object.hjson", FIXTURES_DIR);
+    let content = fs::read_to_string(&path).expect("Failed to read file");
+
+    let red = parse_to_red(&content).expect("Failed to parse");
+    let output = red_to_string(&red);
+
+    assert_eq!(output, content, "Round-trip should preserve content");
+}
+
+/// カンマなし改行区切り配列のfixtureファイルを読み込みラウンドトリップを検証
+///
+/// HJSON仕様では改行がカンマの代わりに区切りとして使える。
+/// パーサー修正箇所: parser.rs parse_array() のカンマなし時のエラー処理（L373付近）
+#[test]
+fn test_read_no_comma_array() {
+    let path = format!("{}/no_comma_array.hjson", FIXTURES_DIR);
+    let content = fs::read_to_string(&path).expect("Failed to read file");
+
+    let red = parse_to_red(&content).expect("Failed to parse");
+    let output = red_to_string(&red);
+
+    assert_eq!(output, content, "Round-trip should preserve content");
+}
+
 /// ファイルへの書き込みと読み込みのラウンドトリップが一致することを検証
 ///
 /// /tmp に一時ファイルを作成し、書き込み→読み込み→パース→文字列化の一連を確認する
@@ -212,7 +242,7 @@ fn test_write_and_read_roundtrip() {
     fs::remove_file(temp_path).ok();
 }
 
-/// 全12種のfixtureファイルが tests/fixtures/ に存在することを検証
+/// 全14種のfixtureファイルが tests/fixtures/ に存在することを検証
 #[test]
 fn test_all_fixtures_exist() {
     let fixtures = vec![
@@ -228,6 +258,8 @@ fn test_all_fixtures_exist() {
         "invalid_syntax.hjson",
         "hex_colors.hjson",
         "unquoted_strings.hjson",
+        "no_comma_object.hjson",
+        "no_comma_array.hjson",
     ];
 
     for fixture in fixtures {

@@ -412,3 +412,72 @@ fn test_unquoted_strings() {
     let output = red_to_string(&red);
     assert_eq!(output, input);
 }
+
+/// HJSONオブジェクトのカンマなし改行区切りを検証
+///
+/// HJSON仕様では改行がカンマの代わりに区切りとして使える。
+/// パーサー修正箇所: parser.rs parse_object() のカンマなし時のエラー処理（L301付近）
+#[test]
+fn test_object_no_comma_newline_separated() {
+    let input = r#"{
+  a: 1
+  b: 2
+  c: 3
+}"#;
+
+    let red = parse_to_red(input).unwrap();
+    let output = red_to_string(&red);
+    assert_eq!(output, input);
+}
+
+/// HJSON配列のカンマなし改行区切りを検証
+///
+/// HJSON仕様では改行がカンマの代わりに区切りとして使える。
+/// パーサー修正箇所: parser.rs parse_array() のカンマなし時のエラー処理（L373付近）
+#[test]
+fn test_array_no_comma_newline_separated() {
+    let input = r#"[
+  1
+  2
+  3
+]"#;
+
+    let red = parse_to_red(input).unwrap();
+    let output = red_to_string(&red);
+    assert_eq!(output, input);
+}
+
+/// カンマあり/なし混在のオブジェクトを検証
+///
+/// HJSON仕様では一部のペアにだけカンマがあっても有効。
+/// パーサー修正箇所: parser.rs parse_object() のカンマなし時のエラー処理（L301付近）
+#[test]
+fn test_object_mixed_comma_and_newline() {
+    let input = r#"{
+  a: 1,
+  b: 2
+  c: 3,
+  d: 4
+}"#;
+
+    let red = parse_to_red(input).unwrap();
+    let output = red_to_string(&red);
+    assert_eq!(output, input);
+}
+
+/// 複数行配列の末尾カンマを検証
+///
+/// 既存の test_trailing_comma はオブジェクト版。これは配列版。
+/// パーサー修正箇所: parser.rs parse_array() の末尾カンマ後のeat_trivia（L369付近）
+#[test]
+fn test_array_trailing_comma_multiline() {
+    let input = r#"[
+  1,
+  2,
+  3,
+]"#;
+
+    let red = parse_to_red(input).unwrap();
+    let output = red_to_string(&red);
+    assert_eq!(output, input);
+}
