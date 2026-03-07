@@ -82,24 +82,7 @@ fn test_cli_format_command() {
     fs::remove_file(temp_path).ok();
 }
 
-/// editコマンドが現時点ではプレースホルダーメッセージを返すことを検証
-#[test]
-fn test_cli_edit_command() {
-    let binary = get_binary_path();
-
-    let output = Command::new(&binary)
-        .args(["edit"])
-        .output()
-        .expect("Failed to execute command");
-
-    // Edit command is currently a placeholder
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("placeholder"),
-        "Expected placeholder message"
-    );
-}
+// editコマンドのテストは以下で実装
 
 /// 引数なしで実行するとUsageメッセージが表示され、終了コードが非0であることを検証
 #[test]
@@ -116,7 +99,7 @@ fn test_cli_no_args() {
     assert!(stderr.contains("Usage"), "Should show usage message");
 }
 
-/// 未知のコマンドを渡すと "Unknown command" エラーで終了することを検証
+/// 未知のコマンドを渡すと "unrecognized subcommand" エラーで終了することを検証
 #[test]
 fn test_cli_unknown_command() {
     let binary = get_binary_path();
@@ -126,12 +109,12 @@ fn test_cli_unknown_command() {
         .output()
         .expect("Failed to execute command");
 
-    // Should fail with unknown command message
+    // Should fail with unrecognized subcommand message
     assert!(!output.status.success(), "Should fail with unknown command");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Unknown command"),
-        "Should show unknown command message"
+        stderr.contains("unrecognized subcommand"),
+        "Should show unrecognized subcommand message"
     );
 }
 
@@ -175,5 +158,541 @@ fn test_cli_parse_invalid_hjson() {
     assert!(stderr.contains("Parse errors"), "Should show parse errors");
 
     // Cleanup
+    fs::remove_file(temp_path).ok();
+}
+
+// =============================================================================
+// Edit Command Tests
+// =============================================================================
+
+/// editコマンドで既存キーの値を変更できることを検証
+#[test]
+fn test_edit_object_set_existing() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test", "value": 42}"#;
+    let temp_path = "/tmp/test_edit_set.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "value", "100"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("100"), "Value should be updated to 100");
+    assert!(!stdout.contains("42"), "Old value should be gone");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// editコマンドで新規キーを追加できることを検証
+#[test]
+fn test_edit_object_set_new_key() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_new.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "value", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("value"), "New key should exist");
+    assert!(stdout.contains("42"), "New value should be 42");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// editコマンドでキーを削除できることを検証
+#[test]
+fn test_edit_object_remove() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test", "value": 42}"#;
+    let temp_path = "/tmp/test_edit_remove.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-remove", "value"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("value"), "Removed key should not exist");
+    assert!(stdout.contains("name"), "Other key should still exist");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --setエイリアスが--object-setと同じ動作をすることを検証
+#[test]
+fn test_edit_alias_set() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_alias.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "value", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("value"));
+    assert!(stdout.contains("42"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --removeエイリアスが--object-removeと同じ動作をすることを検証
+#[test]
+fn test_edit_alias_remove() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test", "value": 42}"#;
+    let temp_path = "/tmp/test_edit_alias2.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--remove", "value"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("value"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --array-appendで配列に要素を追加できることを検証
+#[test]
+fn test_edit_array_append() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"items": [1, 2]}"#;
+    let temp_path = "/tmp/test_edit_append.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--array-append", "items", "3"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("3"), "Appended value should exist");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --array-insertで配列に要素を挿入できることを検証
+#[test]
+fn test_edit_array_insert() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"items": [1, 3]}"#;
+    let temp_path = "/tmp/test_edit_insert.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--array-insert", "items", "1", "2"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Check that 2 is between 1 and 3 (order matters in HJSON arrays)
+    let pos1 = stdout.find('1').unwrap_or(0);
+    let pos2 = stdout.find('2').unwrap_or(0);
+    let pos3 = stdout.find('3').unwrap_or(0);
+    assert!(pos1 < pos2 && pos2 < pos3, "2 should be between 1 and 3");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --array-removeで配列の要素を削除できることを検証
+#[test]
+fn test_edit_array_remove() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"items": [1, 2, 3]}"#;
+    let temp_path = "/tmp/test_edit_array_remove.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--array-remove", "items", "1"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("1"), "First item should still exist");
+    assert!(!stdout.contains("2"), "Removed item should not exist");
+    assert!(stdout.contains("3"), "Third item should still exist");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 複数の操作が正しい順序で実行されることを検証
+#[test]
+fn test_edit_chain_order() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"a": 1, "b": 2, "c": 3}"#;
+    let temp_path = "/tmp/test_edit_chain.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit", temp_path,
+            "--object-set", "a", "10",
+            "--object-remove", "b",
+            "--object-set", "c", "30",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("a"));
+    assert!(!stdout.contains("b"));
+    assert!(stdout.contains("c"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 整数の型推論が正しく動作することを検証
+#[test]
+fn test_edit_type_inference_int() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_type_int.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("42"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 浮動小数点の型推論が正しく動作することを検証
+#[test]
+fn test_edit_type_inference_float() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_type_float.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x", "3.14"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("3.14"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// boolの型推論が正しく動作することを検証
+#[test]
+fn test_edit_type_inference_bool() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_type_bool.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x", "true"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("true"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// nullの型推論が正しく動作することを検証
+#[test]
+fn test_edit_type_inference_null() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_type_null.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x", "null"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("null"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 16進数の型推論が正しく動作することを検証
+#[test]
+fn test_edit_type_inference_hex() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_type_hex.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x", "0xFF"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("0xFF") || stdout.contains("255"), "Hex value should be recognized");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// :str型指定で数値を文字列として設定できることを検証
+#[test]
+fn test_edit_type_hint_str() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_hint_str.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x:str", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"42\""), "Value should be quoted as string");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// :null型指定でnull値を設定できることを検証
+#[test]
+fn test_edit_type_hint_null() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{}"#;
+    let temp_path = "/tmp/test_edit_hint_null.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "x:null", "null"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("null"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --comment-setでキー直前のコメントを設定できることを検証
+#[test]
+fn test_edit_comment_set_before() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_comment.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--comment-set", "name", "This is a comment"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("This is a comment"), "Comment should be added");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --comment-set :headerでヘッダーコメントを設定できることを検証
+#[test]
+fn test_edit_comment_set_header() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_header.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--comment-set", ":header", "Config file"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Config file"), "Header comment should be added");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --comment-style hashでコメントスタイルを変更できることを検証
+#[test]
+fn test_edit_comment_style_hash() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_style.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit", temp_path,
+            "--comment-style", "hash",
+            "--comment-set", "name", "Comment",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("# "), "Hash-style comment should be used");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --in-placeでファイルが上書きされることを検証
+#[test]
+fn test_edit_in_place() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_inplace.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--in-place", "--set", "value", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let updated = fs::read_to_string(temp_path).unwrap();
+    assert!(updated.contains("value"));
+    assert!(updated.contains("42"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// --outputで別ファイルに出力されることを検証
+#[test]
+fn test_edit_output_file() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let input_path = "/tmp/test_edit_input.hjson";
+    let output_path = "/tmp/test_edit_output.hjson";
+    fs::write(input_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit", input_path,
+            "--output", output_path,
+            "--set", "value", "42",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // Original file should be unchanged
+    let original = fs::read_to_string(input_path).unwrap();
+    assert!(!original.contains("value"));
+
+    // Output file should have the new key
+    let output_content = fs::read_to_string(output_path).unwrap();
+    assert!(output_content.contains("value"));
+    assert!(output_content.contains("42"));
+
+    fs::remove_file(input_path).ok();
+    fs::remove_file(output_path).ok();
+}
+
+/// デフォルトでstdoutに出力されることを検証
+#[test]
+fn test_edit_stdout_default() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let temp_path = "/tmp/test_edit_stdout.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "value", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    // stdout should have the content
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("value"));
+
+    // Original file should be unchanged
+    let original = fs::read_to_string(temp_path).unwrap();
+    assert!(!original.contains("value"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// データ操作後もコメントが保持されることを検証
+#[test]
+fn test_edit_preserves_comments() {
+    let binary = get_binary_path();
+
+    let test_content = r#"// Header comment
+{
+    // Key comment
+    name: "test"
+}"#;
+    let temp_path = "/tmp/test_edit_preserve.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--set", "value", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Comments should be preserved
+    assert!(stdout.contains("Header comment"), "Header comment should be preserved");
+    assert!(stdout.contains("Key comment"), "Key comment should be preserved");
+
     fs::remove_file(temp_path).ok();
 }

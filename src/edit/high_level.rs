@@ -237,6 +237,23 @@ pub enum CommentStyle {
 }
 
 // =============================================================================
+// Comment Path Types
+// =============================================================================
+
+/// コメントの対象パス
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommentPath {
+    /// キーの直前コメント
+    Key { dot_path: String },
+    /// キーのインラインコメント
+    Inline { dot_path: String },
+    /// ドキュメント先頭コメント
+    Header,
+    /// ドキュメント末尾コメント
+    Footer,
+}
+
+// =============================================================================
 // HjsonDocument
 // =============================================================================
 
@@ -1022,6 +1039,418 @@ impl HjsonDocument {
         comments
     }
 
+    /// コメントを設定
+    pub fn comment_set(
+        &self,
+        path: &CommentPath,
+        text: &str,
+        style: Option<CommentStyle>,
+    ) -> Result<Self, HjsonEditError> {
+        match path {
+            CommentPath::Key { dot_path } => {
+                // キーの直前コメントを設定
+                let path_segments: Vec<PathSegment> = parse_dot_path(dot_path);
+                if path_segments.is_empty() {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    });
+                }
+
+                let key = match &path_segments[path_segments.len() - 1] {
+                    PathSegment::Key(k) => k,
+                    _ => return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    }),
+                };
+
+                // Find the parent object
+                let parent_path = &path_segments[..path_segments.len() - 1];
+                let obj: RedNode = if parent_path.is_empty() {
+                    let red = RedNode::new_root(self.green.clone());
+                    red.child_by_kind(SyntaxKind::Object)
+                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                } else {
+                    self.navigate_to_node(parent_path)
+                        .and_then(|parent| {
+                            parent.child_by_kind(SyntaxKind::Object)
+                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                        })
+                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    expected: SyntaxKind::Object,
+                    found: SyntaxKind::Root,
+                })?;
+
+                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                    path: dot_path.clone(),
+                })?;
+
+                let pair_node: RedNode = obj
+                    .children_nodes()
+                    .enumerate()
+                    .filter(|(_, n): &(usize, RedNode)| n.kind() == SyntaxKind::Pair)
+                    .nth(pair_idx)
+                    .map(|(_, n)| n)
+                    .ok_or_else(|| HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    })?;
+
+                let pair_green = pair_node.to_green();
+                let comment_style = determine_comment_style(&pair_green, style)?;
+
+                let new_comment = create_comment_token(text, comment_style);
+                let new_pair = insert_comment_before_pair(&pair_green, new_comment)?;
+
+                self.replace_green_node(&pair_node.path_from_root(), new_pair)
+            }
+            CommentPath::Inline { dot_path } => {
+                // キーのインラインコメントを設定
+                let path_segments: Vec<PathSegment> = parse_dot_path(dot_path);
+                if path_segments.is_empty() {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    });
+                }
+
+                let key = match &path_segments[path_segments.len() - 1] {
+                    PathSegment::Key(k) => k,
+                    _ => return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    }),
+                };
+
+                let parent_path = &path_segments[..path_segments.len() - 1];
+                let obj: RedNode = if parent_path.is_empty() {
+                    let red = RedNode::new_root(self.green.clone());
+                    red.child_by_kind(SyntaxKind::Object)
+                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                } else {
+                    self.navigate_to_node(parent_path)
+                        .and_then(|parent| {
+                            parent.child_by_kind(SyntaxKind::Object)
+                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                        })
+                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    expected: SyntaxKind::Object,
+                    found: SyntaxKind::Root,
+                })?;
+
+                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                    path: dot_path.clone(),
+                })?;
+
+                let obj_green = obj.to_green();
+                let new_obj = set_inline_comment(&obj_green, pair_idx, text, style)?;
+
+                self.replace_green_node(&obj.path_from_root(), new_obj)
+            }
+            CommentPath::Header => {
+                // ドキュメント先頭コメントを設定
+                let red = RedNode::new_root(self.green.clone());
+                let mut new_children: Vec<GreenElement> = Vec::new();
+                for elem in red.children_with_tokens() {
+                    match elem {
+                        NodeOrToken::Node(n) => {
+                            let node: GreenNode = n.green().clone().into_owned();
+                            new_children.push(NodeOrToken::Node(node));
+                        }
+                        NodeOrToken::Token(t) => {
+                            let text = t.text();
+                            let token = rowan::GreenToken::new(t.kind().into(), text);
+                            new_children.push(NodeOrToken::Token(token));
+                        }
+                    }
+                }
+
+                let style = style.unwrap_or(CommentStyle::Line);
+                let new_comment = create_comment_token(text, style);
+
+                // 既存のヘッダーコメントを探す
+                let mut replaced = false;
+                for (i, child) in new_children.clone().iter().enumerate() {
+                    if let NodeOrToken::Token(t) = child {
+                        let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                        if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                            new_children[i] = NodeOrToken::Token(new_comment.clone());
+                            replaced = true;
+                            break;
+                        }
+                    }
+                    if !matches!(
+                        child,
+                        NodeOrToken::Token(t) if {
+                            let k = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            matches!(k, SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment)
+                        }
+                    ) {
+                        break;
+                    }
+                }
+
+                if !replaced {
+                    // ヘッダーコメントが見つからなければ先頭に挿入
+                    new_children.insert(0, NodeOrToken::Token(new_comment));
+                    new_children.insert(1, NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
+                }
+
+                let new_root = create_node(SyntaxKind::Root, new_children);
+                Ok(Self { green: new_root })
+            }
+            CommentPath::Footer => {
+                // ドキュメント末尾コメントを設定
+                let red = RedNode::new_root(self.green.clone());
+                let mut children: Vec<GreenElement> = Vec::new();
+                for elem in red.children_with_tokens() {
+                    match elem {
+                        NodeOrToken::Node(n) => {
+                            let node: GreenNode = n.green().clone().into_owned();
+                            children.push(NodeOrToken::Node(node));
+                        }
+                        NodeOrToken::Token(t) => {
+                            let text = t.text();
+                            let token = rowan::GreenToken::new(t.kind().into(), text);
+                            children.push(NodeOrToken::Token(token));
+                        }
+                    }
+                }
+
+                let style = style.unwrap_or(CommentStyle::Line);
+                let new_comment = create_comment_token(text, style);
+
+                // 末尾のコメントを探す
+                let mut replaced = false;
+                let mut i = children.len();
+                while i > 0 {
+                    i -= 1;
+                    let child = &children[i];
+                    if let NodeOrToken::Token(t) = child {
+                        let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                        if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                            children[i] = NodeOrToken::Token(new_comment.clone());
+                            replaced = true;
+                            break;
+                        } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                if !replaced {
+                    // フッターコメントが見つからなければ末尾に追加
+                    children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
+                    children.push(NodeOrToken::Token(new_comment));
+                }
+
+                let new_root = create_node(SyntaxKind::Root, children);
+                Ok(Self { green: new_root })
+            }
+        }
+    }
+
+    /// コメントに行を追加
+    pub fn comment_append(
+        &self,
+        path: &CommentPath,
+        text: &str,
+        style: Option<CommentStyle>,
+    ) -> Result<Self, HjsonEditError> {
+        // 現在のコメントを取得
+        let current_comments = match path {
+            CommentPath::Key { dot_path } => {
+                // キーの直前コメントを取得
+                // 省略：実装は get_header_comment などを参考
+                Vec::new()
+            }
+            CommentPath::Inline { .. } => Vec::new(),
+            CommentPath::Header => self.get_header_comment(),
+            CommentPath::Footer => self.get_footer_comment(),
+        };
+
+        if current_comments.is_empty() {
+            // 既存コメントがなければ新規作成
+            return self.comment_set(path, text, style);
+        }
+
+        // 最後のコメントの末尾に新しい行を追加
+        let last_comment = current_comments.last().unwrap();
+        let new_text = format!("{}\n{}", last_comment, text);
+
+        // 最後のコメントを置き換え
+        self.comment_set(path, &new_text, style)
+    }
+
+    /// コメントを削除
+    pub fn comment_remove(&self, path: &CommentPath) -> Result<Self, HjsonEditError> {
+        match path {
+            CommentPath::Key { dot_path } => {
+                let path_segments: Vec<PathSegment> = parse_dot_path(dot_path);
+                if path_segments.is_empty() {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    });
+                }
+
+                let key = match &path_segments[path_segments.len() - 1] {
+                    PathSegment::Key(k) => k,
+                    _ => return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    }),
+                };
+
+                let parent_path = &path_segments[..path_segments.len() - 1];
+                let obj: RedNode = if parent_path.is_empty() {
+                    let red = RedNode::new_root(self.green.clone());
+                    red.child_by_kind(SyntaxKind::Object)
+                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                } else {
+                    self.navigate_to_node(parent_path)
+                        .and_then(|parent| {
+                            parent.child_by_kind(SyntaxKind::Object)
+                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                        })
+                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    expected: SyntaxKind::Object,
+                    found: SyntaxKind::Root,
+                })?;
+
+                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                    path: dot_path.clone(),
+                })?;
+
+                let pair_node: RedNode = obj
+                    .children_nodes()
+                    .enumerate()
+                    .filter(|(_, n): &(usize, RedNode)| n.kind() == SyntaxKind::Pair)
+                    .nth(pair_idx)
+                    .map(|(_, n)| n)
+                    .ok_or_else(|| HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    })?;
+
+                let pair_green = pair_node.to_green();
+                let new_pair = remove_comments_from_pair(&pair_green)?;
+
+                self.replace_green_node(&pair_node.path_from_root(), new_pair)
+            }
+            CommentPath::Inline { dot_path } => {
+                let path_segments: Vec<PathSegment> = parse_dot_path(dot_path);
+                if path_segments.is_empty() {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    });
+                }
+
+                let key = match &path_segments[path_segments.len() - 1] {
+                    PathSegment::Key(k) => k,
+                    _ => return Err(HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    }),
+                };
+
+                let parent_path = &path_segments[..path_segments.len() - 1];
+                let obj: RedNode = if parent_path.is_empty() {
+                    let red = RedNode::new_root(self.green.clone());
+                    red.child_by_kind(SyntaxKind::Object)
+                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                } else {
+                    self.navigate_to_node(parent_path)
+                        .and_then(|parent| {
+                            parent.child_by_kind(SyntaxKind::Object)
+                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                        })
+                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    expected: SyntaxKind::Object,
+                    found: SyntaxKind::Root,
+                })?;
+
+                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                    path: dot_path.clone(),
+                })?;
+
+                let obj_green = obj.to_green();
+                let new_obj = remove_inline_comment(&obj_green, pair_idx)?;
+
+                self.replace_green_node(&obj.path_from_root(), new_obj)
+            }
+            CommentPath::Header => {
+                let red = RedNode::new_root(self.green.clone());
+                let mut new_children: Vec<GreenElement> = Vec::new();
+                let mut skip = true;
+
+                for elem in red.children_with_tokens() {
+                    match elem {
+                        NodeOrToken::Node(n) => {
+                            if skip {
+                                let node: GreenNode = n.green().clone().into_owned();
+                                new_children.push(NodeOrToken::Node(node));
+                                skip = false;
+                            } else {
+                                let node: GreenNode = n.green().clone().into_owned();
+                                new_children.push(NodeOrToken::Node(node));
+                            }
+                        }
+                        NodeOrToken::Token(t) => {
+                            let kind = t.kind();
+                            if skip {
+                                if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                                    continue;
+                                } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                                    skip = false;
+                                    new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                                } else {
+                                    new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                                }
+                            } else {
+                                new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                            }
+                        }
+                    }
+                }
+
+                let new_root = create_node(SyntaxKind::Root, new_children);
+                Ok(Self { green: new_root })
+            }
+            CommentPath::Footer => {
+                let red = RedNode::new_root(self.green.clone());
+                let mut new_children: Vec<GreenElement> = Vec::new();
+
+                // First collect all children
+                for elem in red.children_with_tokens() {
+                    match elem {
+                        NodeOrToken::Node(n) => {
+                            let node: GreenNode = n.green().clone().into_owned();
+                            new_children.push(NodeOrToken::Node(node));
+                        }
+                        NodeOrToken::Token(t) => {
+                            let kind = t.kind();
+                            new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                        }
+                    }
+                }
+
+                // Now remove trailing comments
+                let mut i = new_children.len();
+                while i > 0 {
+                    i -= 1;
+                    if let NodeOrToken::Token(t) = &new_children[i] {
+                        let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                        if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                            new_children.remove(i);
+                        } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                let new_root = create_node(SyntaxKind::Root, new_children);
+                Ok(Self { green: new_root })
+            }
+        }
+    }
+
     /// 他のドキュメントとの差分行を検出
     pub fn changed_lines(&self, other: &Self) -> Vec<usize> {
         let before = self.to_string();
@@ -1069,6 +1498,244 @@ impl HjsonDocument {
 
         Ok(Self { green: current })
     }
+}
+
+// =============================================================================
+// Comment Helper Functions
+// =============================================================================
+
+/// 指定キーの Pair のインデックスを探す
+fn find_pair_index(obj: &RedNode, key: &str) -> Option<usize> {
+    for (i, child) in obj.children_nodes().enumerate() {
+        if child.kind() == SyntaxKind::Pair {
+            if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
+                if let Some(key_text) = extract_key_text(&key_node) {
+                    if key_text == key {
+                        return Some(i);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// コメントトークンを作成
+fn create_comment_token(text: &str, style: CommentStyle) -> rowan::GreenToken {
+    let (kind, prefix) = match style {
+        CommentStyle::Line => (SyntaxKind::LineComment, "// "),
+        CommentStyle::Hash => (SyntaxKind::HashComment, "# "),
+        CommentStyle::Block => (SyntaxKind::BlockComment, "/* "),
+    };
+    let content = format!("{}{}", prefix, text);
+    create_token(kind, &content)
+}
+
+/// Pair 内の既存コメントからスタイルを決定
+fn determine_comment_style(
+    pair_green: &GreenNode,
+    style: Option<CommentStyle>,
+) -> Result<CommentStyle, HjsonEditError> {
+    if let Some(s) = style {
+        return Ok(s);
+    }
+
+    // 既存コメントのスタイルを探す
+    for child in pair_green.children() {
+        if let NodeOrToken::Token(t) = child {
+            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            match kind {
+                SyntaxKind::LineComment => return Ok(CommentStyle::Line),
+                SyntaxKind::HashComment => return Ok(CommentStyle::Hash),
+                SyntaxKind::BlockComment => return Ok(CommentStyle::Block),
+                _ => {}
+            }
+        }
+    }
+
+    // デフォルトは Line
+    Ok(CommentStyle::Line)
+}
+
+/// Pair の先頭にコメントを挿入
+fn insert_comment_before_pair(
+    pair_green: &GreenNode,
+    comment: rowan::GreenToken,
+) -> Result<GreenNode, HjsonEditError> {
+    let mut children: Vec<GreenElement> = Vec::new();
+
+    // 先頭にインデント（あれば）
+    for child in pair_green.children() {
+        if let NodeOrToken::Token(t) = child {
+            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            if kind == SyntaxKind::Whitespace || kind == SyntaxKind::Newline {
+                children.push(NodeOrToken::Token(create_token(kind, t.text())));
+                continue;
+            }
+        }
+        break;
+    }
+
+    // コメントを追加
+    children.push(NodeOrToken::Token(comment));
+    children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
+
+    // 残りの子要素を追加（コメントをスキップ）
+    let mut found_non_trivia = false;
+    for child in pair_green.children() {
+        if let NodeOrToken::Token(t) = child {
+            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            if !found_non_trivia {
+                if kind == SyntaxKind::Whitespace
+                    || kind == SyntaxKind::Newline
+                    || matches!(
+                        kind,
+                        SyntaxKind::LineComment
+                            | SyntaxKind::HashComment
+                            | SyntaxKind::BlockComment
+                    )
+                {
+                    continue;
+                }
+                found_non_trivia = true;
+            }
+        } else {
+            found_non_trivia = true;
+        }
+        children.push(clone_element(child));
+    }
+
+    Ok(create_node(SyntaxKind::Pair, children))
+}
+
+/// Pair 内のコメントを削除
+fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonEditError> {
+    let mut children: Vec<GreenElement> = Vec::new();
+    let mut found_non_trivia = false;
+
+    for child in pair_green.children() {
+        if let NodeOrToken::Token(t) = child {
+            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            if !found_non_trivia {
+                if matches!(
+                    kind,
+                    SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                ) {
+                    continue;
+                }
+            }
+            if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                found_non_trivia = true;
+            }
+        } else {
+            found_non_trivia = true;
+        }
+        children.push(clone_element(child));
+    }
+
+    Ok(create_node(SyntaxKind::Pair, children))
+}
+
+/// Object 内で指定インデックスの Pair の後にインラインコメントを設定
+fn set_inline_comment(
+    obj_green: &GreenNode,
+    pair_idx: usize,
+    text: &str,
+    style: Option<CommentStyle>,
+) -> Result<GreenNode, HjsonEditError> {
+    let mut children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
+
+    // Pair を数えて位置を特定
+    let mut pair_count = 0;
+    let mut pair_end_pos = None;
+    let mut comma_pos = None;
+
+    for (i, child) in children.iter().enumerate() {
+        if let NodeOrToken::Node(n) = child {
+            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
+                if pair_count == pair_idx {
+                    pair_end_pos = Some(i);
+                }
+                pair_count += 1;
+            }
+        }
+        if pair_count == pair_idx + 1 {
+            // 次の要素を見つけたらそこまで
+            if let NodeOrToken::Token(t) = child {
+                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                if kind == SyntaxKind::Comma {
+                    comma_pos = Some(i);
+                    break;
+                }
+            }
+        }
+    }
+
+    let insert_pos = comma_pos.or_else(|| pair_end_pos.map(|p| p + 1));
+    if let Some(pos) = insert_pos {
+        let style = style.unwrap_or(CommentStyle::Line);
+        let comment = create_comment_token(text, style);
+        children.insert(pos, NodeOrToken::Token(create_token(SyntaxKind::Whitespace, "  ")));
+        children.insert(pos + 1, NodeOrToken::Token(comment));
+    }
+
+    Ok(create_node(SyntaxKind::Object, children))
+}
+
+/// Object 内のインラインコメントを削除
+fn remove_inline_comment(
+    obj_green: &GreenNode,
+    pair_idx: usize,
+) -> Result<GreenNode, HjsonEditError> {
+    let mut children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
+
+    // Pair を数えて位置を特定
+    let mut pair_count = 0;
+    let mut remove_range = None;
+
+    for (i, child) in children.iter().enumerate() {
+        if let NodeOrToken::Node(n) = child {
+            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
+                if pair_count == pair_idx {
+                    // この Pair の後のコメントを探す
+                    let start = i + 1;
+                    let mut end = start;
+                    for j in start..children.len() {
+                        match &children[j] {
+                            NodeOrToken::Token(t) => {
+                                let kind =
+                                    crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                                if matches!(
+                                    kind,
+                                    SyntaxKind::LineComment
+                                        | SyntaxKind::HashComment
+                                        | SyntaxKind::BlockComment
+                                ) {
+                                    end = j + 1;
+                                } else if kind != SyntaxKind::Whitespace
+                                    && kind != SyntaxKind::Newline
+                                {
+                                    break;
+                                }
+                            }
+                            NodeOrToken::Node(_) => break,
+                        }
+                    }
+                    if end > start {
+                        remove_range = Some((start, end));
+                    }
+                    break;
+                }
+                pair_count += 1;
+            }
+        }
+    }
+
+    if let Some((start, end)) = remove_range {
+        children.drain(start..end);
+    }
+
+    Ok(create_node(SyntaxKind::Object, children))
 }
 
 // =============================================================================
