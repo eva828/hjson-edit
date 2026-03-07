@@ -182,28 +182,30 @@ fn test_edit_add_new_key() {
     );
 
     // Objectに新しいPairを追加
-    // Objectの構造を確認: LBrace, Whitespace(newline + indent), Pair, RBrace
+    // Objectの構造を確認: LBrace, Whitespace(leading), Pair, Whitespace(trailing), RBrace
     // 新しいPairを既存Pairの後、RBraceの前に挿入
     let object_green = object.to_green();
 
-    // Objectの子要素を確認
+    // Objectの子要素を確認（Pairのleading/trailing triviaがObjectの子になった）
     let children: Vec<_> = object_green.children().collect();
     assert_eq!(
         children.len(),
-        4,
-        "Object should have 4 children: LBrace, Whitespace, Pair, RBrace"
+        6,
+        "Object should have 6 children: LBrace, Newline, Whitespace(indent), Pair, Newline(trailing), RBrace"
     );
 
     // 段階的に挿入（apply_editsの降順ソートによりインデックスが複雑になるため）
     let comma = create_token(SyntaxKind::Comma, ",");
     let newline = create_token(SyntaxKind::Whitespace, "\n  ");
 
-    // 1. RBraceの前にカンマを挿入（インデックス3）
-    let object_green = object_green.insert_child(3, comma.into()).unwrap();
-    // 2. カンマの後に改行を挿入（インデックス4）
-    let object_green = object_green.insert_child(4, newline.into()).unwrap();
-    // 3. 改行の後に新しいPairを挿入（インデックス5）
-    let new_object_green = object_green.insert_child(5, new_pair.into()).unwrap();
+    // Pairはインデックス3、RBraceはインデックス5
+    // trailing Newlineはインデックス4
+    // 1. trailing Newlineの前にカンマを挿入（インデックス4）
+    let object_green = object_green.insert_child(4, comma.into()).unwrap();
+    // 2. カンマの後に改行を挿入（インデックス5）
+    let object_green = object_green.insert_child(5, newline.into()).unwrap();
+    // 3. 改行の後に新しいPairを挿入（インデックス6）
+    let new_object_green = object_green.insert_child(6, new_pair.into()).unwrap();
     let new_object_text = green_to_string(&new_object_green);
 
     // 新しいキーが追加されたことを確認

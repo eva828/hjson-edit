@@ -187,6 +187,43 @@ fn test_edit_object_set_existing() {
     fs::remove_file(temp_path).ok();
 }
 
+/// --object-setで改行・インデントが保持されることを検証（バグ修正テスト）
+#[test]
+fn test_edit_object_set_preserves_newlines() {
+    let binary = get_binary_path();
+
+    // 改行ベースのHJSONフォーマット
+    let test_content = "{\n  DisplayName: test\n  Icon: test\n  ItemType: Test\n}";
+    let temp_path = "/tmp/test_edit_newlines.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "DisplayName", "\"ae\""])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    
+    // 値が変更されていることを確認
+    assert!(stdout.contains("\"ae\""), "Value should be updated to \"ae\"");
+    assert!(!stdout.contains("DisplayName: test"), "Old value should be gone");
+    
+    // 改行・インデントが保持されていることを確認（バグ修正の検証）
+    assert!(stdout.contains("\n  Icon:"), "Newline and indent before Icon should be preserved");
+    assert!(stdout.contains("\n  ItemType:"), "Newline and indent before ItemType should be preserved");
+    
+    // 全体の構造が保持されていることを確認（コロンの後のスペースはcreate_pair_nodeの挙動による）
+    // 重要なのは改行・インデントが保持されること
+    assert!(
+        stdout.starts_with("{\n  DisplayName:"),
+        "Format should start with opening brace and proper indent. Got:\n{}",
+        stdout
+    );
+
+    fs::remove_file(temp_path).ok();
+}
+
 /// editコマンドで新規キーを追加できることを検証
 #[test]
 fn test_edit_object_set_new_key() {

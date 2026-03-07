@@ -282,6 +282,13 @@ impl Parser {
                 break;
             }
 
+            // Pair前のトリビアを消費（改行・インデントなど）
+            self.eat_trivia();
+            // トリビア消費後に } が来たら終了、またはEOFの場合もループ先頭に戻って適切なエラーを出力
+            if self.at(SyntaxKind::RBrace) || self.is_at_end() {
+                break;
+            }
+
             self.parse_pair();
 
             // Pairの後のトリビアを消費（コメントなど）
@@ -414,14 +421,8 @@ impl Parser {
     fn parse_pair(&mut self) {
         self.builder.start_node(SyntaxKind::Pair);
 
-        // 先頭のトリビアを消費（インデントなど）
-        self.eat_trivia();
-
         // キー
         self.builder.start_node(SyntaxKind::Key);
-
-        // トリビアを消費してからキーを確認
-        self.eat_trivia();
 
         let token = self.current();
         match token.map(|t| t.kind) {
