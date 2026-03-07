@@ -16,6 +16,9 @@ pub mod syntax;
 // 公開APIを再エクスポート
 pub use diff::{detect_changed_lines, simple_line_diff, ChangeInfo, ChangeType};
 pub use edit::api::{create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeEdit};
+pub use edit::high_level::{
+    CommentPosition, CommentStyle, HjsonDocument, HjsonEditError, HjsonValue, IntoPath, PathSegment,
+};
 pub use parser::lexer::{lex, LexError, LexResult, Token};
 pub use parser::parser::{parse, ParseError, ParseResult};
 pub use syntax::green::{GreenElement, GreenNodeExt, GreenTreeBuilder};
