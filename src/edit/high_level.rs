@@ -424,16 +424,15 @@ impl HjsonDocument {
                     if found {
                         break;
                     }
-                    // Get the Pair node at this index from obj_node (RedNode)
-                    if let Some(pair_red) = obj_node.children_nodes().nth(idx) {
+                    // Get the Pair node at this index directly from children
+                    if let NodeOrToken::Node(pair_green) = &children[idx] {
+                        // Create a RedNode from the GreenNode to access Key
+                        let pair_red = RedNode::new_root(pair_green.clone());
                         if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
                             if let Some(key_text) = extract_key_text(&key_node) {
                                 if key_text == *key {
                                     // Found the Pair to replace
                                     let new_pair = create_pair_node(key, &value)?;
-                                    
-                                    // Build new_children by replacing this Pair
-                                    new_children = children.clone();
                                     new_children[idx] = NodeOrToken::Node(new_pair);
                                     found = true;
                                 }
@@ -468,7 +467,7 @@ impl HjsonDocument {
                 }
 
                 let new_obj = create_node(SyntaxKind::Object, new_children);
-                self.replace_node(parent_path, new_obj)
+                self.replace_green_node(&obj_node.path_from_root(), new_obj)
             }
             PathSegment::Index(idx) => {
                 // 配列内のインデックスを更新
@@ -519,7 +518,7 @@ impl HjsonDocument {
                 new_children[target_idx] = NodeOrToken::Node(new_value);
 
                 let new_arr = create_node(SyntaxKind::Array, new_children);
-                self.replace_node(parent_path, new_arr)
+                self.replace_green_node(&arr_node.path_from_root(), new_arr)
             }
         }
     }
@@ -574,11 +573,8 @@ impl HjsonDocument {
 
                     if let NodeOrToken::Node(n) = child {
                         if n.kind() == SyntaxKind::Pair.into() {
-                            // Pairノードのキーを確認
-                            let pair_red = obj_node
-                                .children_nodes()
-                                .find(|c| c.kind() == SyntaxKind::Pair)
-                                .unwrap();
+                            // Pairノードのキーを確認（children[i] から直接取得）
+                            let pair_red = RedNode::new_root(n.clone());
                             if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
                                 if let Some(key_text) = extract_key_text(&key_node) {
                                     if key_text == *key {
@@ -610,7 +606,7 @@ impl HjsonDocument {
                 }
 
                 let new_obj = create_node(SyntaxKind::Object, new_children);
-                self.replace_node(parent_path, new_obj)
+                self.replace_green_node(&obj_node.path_from_root(), new_obj)
             }
             PathSegment::Index(idx) => {
                 let arr_node = if let Some(arr) = parent.child_by_kind(SyntaxKind::Array) {
@@ -654,7 +650,7 @@ impl HjsonDocument {
 
                 let remove_idx = value_indices[*idx];
                 let new_arr = arr_green.remove_child(remove_idx)?;
-                self.replace_node(parent_path, new_arr)
+                self.replace_green_node(&arr_node.path_from_root(), new_arr)
             }
         }
     }
@@ -741,7 +737,7 @@ impl HjsonDocument {
         }
 
         let new_arr = create_node(SyntaxKind::Array, new_children);
-        self.replace_node(&path, new_arr)
+        self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
     /// 配列の末尾の要素を削除
@@ -812,7 +808,7 @@ impl HjsonDocument {
 
         let remove_idx = *value_indices.last().unwrap();
         let new_arr = arr_green.remove_child(remove_idx)?;
-        self.replace_node(&path, new_arr)
+        self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
     /// 配列の指定位置に要素を挿入
@@ -901,7 +897,7 @@ impl HjsonDocument {
         }
 
         let new_arr = create_node(SyntaxKind::Array, new_children);
-        self.replace_node(&path, new_arr)
+        self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
     /// 配列の指定位置の要素を削除
@@ -973,7 +969,7 @@ impl HjsonDocument {
 
         let remove_idx = value_indices[index];
         let new_arr = arr_green.remove_child(remove_idx)?;
-        self.replace_node(&path, new_arr)
+        self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
     /// ドキュメント先頭のコメントを取得
@@ -1044,31 +1040,31 @@ impl HjsonDocument {
         navigate_from_node(&red, path)
     }
 
-    fn replace_node(
+    /// GreenNodeのインデックスパスに基づいてノードを置換
+    fn replace_green_node(
         &self,
-        path: &[PathSegment],
+        path_from_root: &[usize],
         new_node: GreenNode,
     ) -> Result<Self, HjsonEditError> {
-        if path.is_empty() {
+        if path_from_root.is_empty() {
             return Ok(Self { green: new_node });
         }
 
-        let target = self
-            .navigate_to_node(path)
-            .ok_or_else(|| HjsonEditError::InvalidPath {
-                path: format!("{:?}", path),
-            })?;
-
-        let path_from_root = target.path_from_root();
-
         let mut current = new_node;
-        for &idx in path_from_root.iter().rev() {
-            current = rebuild_at_index(
-                &self.green,
-                &path_from_root[..path_from_root.len() - 1],
-                idx,
-                current,
-            )?;
+        // ボトムアップで再構築：最も深い階層から順に親を再構築
+        for (i, &idx) in path_from_root.iter().enumerate().rev() {
+            // この階層の親ノードを取得（元のツリーからパスをたどる）
+            let mut parent_node = self.green.clone();
+            for &ancestor_idx in &path_from_root[..i] {
+                if let Some(NodeOrToken::Node(n)) = parent_node.children().nth(ancestor_idx) {
+                    parent_node = n.to_owned();
+                } else {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: format!("{:?}", path_from_root),
+                    });
+                }
+            }
+            current = parent_node.replace_child(idx, current.into())?;
         }
 
         Ok(Self { green: current })
@@ -1078,36 +1074,6 @@ impl HjsonDocument {
 // =============================================================================
 // Internal Helper Functions
 // =============================================================================
-
-fn rebuild_at_index(
-    root: &GreenNode,
-    path: &[usize],
-    index: usize,
-    new_child: GreenNode,
-) -> Result<GreenNode, HjsonEditError> {
-    let mut current: GreenNode = root.clone();
-
-    for &idx in path {
-        let children: Vec<GreenElement> = current.children().map(clone_element).collect();
-        if idx >= children.len() {
-            return Err(HjsonEditError::InvalidIndex {
-                index: idx,
-                count: children.len(),
-            });
-        }
-
-        if let NodeOrToken::Node(n) = &children[idx] {
-            current = n.clone();
-        } else {
-            return Err(HjsonEditError::InvalidNodeKind {
-                expected: SyntaxKind::Object,
-                found: crate::syntax::kind::HjsonLanguage::kind_from_raw(children[idx].kind()),
-            });
-        }
-    }
-
-    Ok(current.replace_child(index, new_child.into())?)
-}
 
 fn navigate_from_node(start: &RedNode, path: &[PathSegment]) -> Option<RedNode> {
     let mut current: RedNode = start.clone();
