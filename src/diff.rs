@@ -1,7 +1,6 @@
 /// 差分検出モジュール
 ///
 /// 編集前後のGreen Treeを比較して変更された行番号を特定（1始まり）
-
 /// 変更情報
 #[derive(Debug, Clone)]
 pub struct ChangeInfo {
@@ -196,8 +195,8 @@ fn calc_offset_at_path(root: &rowan::GreenNode, path: &[usize]) -> usize {
 
         let mut offset = 0;
         // 目標の子までのテキスト長を加算
-        for j in 0..child_idx {
-            match &children[j] {
+        for child in children.iter().take(child_idx) {
+            match child {
                 rowan::NodeOrToken::Node(n) => {
                     offset += node_text_ref(n).len();
                 }
@@ -305,7 +304,8 @@ mod tests {
                 '\n' => SyntaxKind::Newline,
                 _ => SyntaxKind::Ident,
             };
-            builder.token(kind, &c.to_string());
+            let text = c.to_string();
+            builder.token(kind, &text);
         }
         builder.finish_node();
         builder.finish()

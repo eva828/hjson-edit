@@ -501,10 +501,10 @@ impl Lexer {
             "-Infinity" => SyntaxKind::NegInfinity,
             _ => {
                 // 16進数かチェック
-                if text.starts_with("0x") || text.starts_with("0X") {
-                    if text[2..].chars().all(|c| c.is_ascii_hexdigit()) {
-                        return SyntaxKind::HexInteger;
-                    }
+                if (text.starts_with("0x") || text.starts_with("0X"))
+                    && text[2..].chars().all(|c| c.is_ascii_hexdigit())
+                {
+                    return SyntaxKind::HexInteger;
                 }
 
                 // 数値かチェック
@@ -513,13 +513,12 @@ impl Lexer {
                     .next()
                     .map(|c| c.is_ascii_digit() || c == '-' || c == '+')
                     .unwrap_or(false)
+                    && (text.parse::<f64>().is_ok() || text.parse::<i64>().is_ok())
                 {
-                    if text.parse::<f64>().is_ok() || text.parse::<i64>().is_ok() {
-                        if text.contains('.') || text.contains('e') || text.contains('E') {
-                            return SyntaxKind::Float;
-                        } else {
-                            return SyntaxKind::Integer;
-                        }
+                    if text.contains('.') || text.contains('e') || text.contains('E') {
+                        return SyntaxKind::Float;
+                    } else {
+                        return SyntaxKind::Integer;
                     }
                 }
 

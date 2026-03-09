@@ -3,9 +3,7 @@
 use clap::{Arg, ArgAction, Command};
 use std::path::PathBuf;
 
-use hjson_edit::{
-    CommentPath, CommentStyle, HjsonDocument, HjsonValue,
-};
+use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue};
 
 // =============================================================================
 // EditOp - Internal representation of edit operations
@@ -13,14 +11,39 @@ use hjson_edit::{
 
 #[derive(Debug, Clone)]
 enum EditOp {
-    ObjectSet { path: String, value: HjsonValue },
-    ObjectRemove { path: String },
-    ArrayAppend { path: String, value: HjsonValue },
-    ArrayInsert { path: String, index: usize, value: HjsonValue },
-    ArrayRemove { path: String, index: usize },
-    CommentSet { path: CommentPath, text: String, style: Option<CommentStyle> },
-    CommentAppend { path: CommentPath, text: String, style: Option<CommentStyle> },
-    CommentRemove { path: CommentPath },
+    ObjectSet {
+        path: String,
+        value: HjsonValue,
+    },
+    ObjectRemove {
+        path: String,
+    },
+    ArrayAppend {
+        path: String,
+        value: HjsonValue,
+    },
+    ArrayInsert {
+        path: String,
+        index: usize,
+        value: HjsonValue,
+    },
+    ArrayRemove {
+        path: String,
+        index: usize,
+    },
+    CommentSet {
+        path: CommentPath,
+        text: String,
+        style: Option<CommentStyle>,
+    },
+    CommentAppend {
+        path: CommentPath,
+        text: String,
+        style: Option<CommentStyle>,
+    },
+    CommentRemove {
+        path: CommentPath,
+    },
     SetCommentStyle(CommentStyle),
 }
 
@@ -62,17 +85,29 @@ fn build_cli() -> Command {
         .subcommand(
             Command::new("parse")
                 .about("Parse HJSON file and output AST")
-                .arg(Arg::new("file").required(true).value_parser(clap::value_parser!(PathBuf))),
+                .arg(
+                    Arg::new("file")
+                        .required(true)
+                        .value_parser(clap::value_parser!(PathBuf)),
+                ),
         )
         .subcommand(
             Command::new("format")
                 .about("Parse and re-output (format preservation test)")
-                .arg(Arg::new("file").required(true).value_parser(clap::value_parser!(PathBuf))),
+                .arg(
+                    Arg::new("file")
+                        .required(true)
+                        .value_parser(clap::value_parser!(PathBuf)),
+                ),
         )
         .subcommand(
             Command::new("edit")
                 .about("Edit HJSON file with various operations")
-                .arg(Arg::new("file").required(true).value_parser(clap::value_parser!(PathBuf)))
+                .arg(
+                    Arg::new("file")
+                        .required(true)
+                        .value_parser(clap::value_parser!(PathBuf)),
+                )
                 // Object operations
                 .arg(
                     Arg::new("object-set")
@@ -140,8 +175,16 @@ fn build_cli() -> Command {
                         .value_parser(["line", "hash", "block"]),
                 )
                 // Output options
-                .arg(Arg::new("in-place").long("in-place").action(ArgAction::SetTrue))
-                .arg(Arg::new("output").long("output").value_parser(clap::value_parser!(PathBuf))),
+                .arg(
+                    Arg::new("in-place")
+                        .long("in-place")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("output")
+                        .long("output")
+                        .value_parser(clap::value_parser!(PathBuf)),
+                ),
         )
 }
 
@@ -168,7 +211,10 @@ fn run_parse(matches: &clap::ArgMatches) {
         Err(errors) => {
             eprintln!("Parse errors:");
             for err in errors {
-                eprintln!("  Line {}, Column {}: {}", err.line, err.column, err.message);
+                eprintln!(
+                    "  Line {}, Column {}: {}",
+                    err.line, err.column, err.message
+                );
             }
             std::process::exit(1);
         }
@@ -193,7 +239,10 @@ fn run_format(matches: &clap::ArgMatches) {
         Err(errors) => {
             eprintln!("Parse errors:");
             for err in errors {
-                eprintln!("  Line {}, Column {}: {}", err.line, err.column, err.message);
+                eprintln!(
+                    "  Line {}, Column {}: {}",
+                    err.line, err.column, err.message
+                );
             }
             std::process::exit(1);
         }
@@ -215,7 +264,10 @@ fn run_edit(matches: &clap::ArgMatches) {
         Err(errors) => {
             eprintln!("Parse errors:");
             for err in errors {
-                eprintln!("  Line {}, Column {}: {}", err.line, err.column, err.message);
+                eprintln!(
+                    "  Line {}, Column {}: {}",
+                    err.line, err.column, err.message
+                );
             }
             std::process::exit(1);
         }
@@ -337,14 +389,23 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
     // Object set operations - get_raw returns flat list, group by num_args(2)
     if let Some(sets) = matches.get_raw("object-set") {
         let vals: Vec<_> = sets.collect();
-        let indices: Vec<_> = matches.indices_of("object-set").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("object-set")
+            .unwrap_or_default()
+            .collect();
         for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
             if chunk.len() == 2 {
                 let path = chunk[0].to_string_lossy().to_string();
                 let value_str = chunk[1].to_string_lossy().to_string();
                 match parse_set_arg(&path, &value_str) {
                     Ok((parsed_path, value)) => {
-                        ops_with_indices.push((idx_chunk[0], EditOp::ObjectSet { path: parsed_path, value }));
+                        ops_with_indices.push((
+                            idx_chunk[0],
+                            EditOp::ObjectSet {
+                                path: parsed_path,
+                                value,
+                            },
+                        ));
                     }
                     Err(e) => {
                         eprintln!("Invalid set argument '{}': {}", path, e);
@@ -357,7 +418,10 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
 
     // Object remove operations
     if let Some(removes) = matches.get_raw("object-remove") {
-        let indices: Vec<_> = matches.indices_of("object-remove").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("object-remove")
+            .unwrap_or_default()
+            .collect();
         for (idx, val) in indices.iter().zip(removes) {
             let path = val.to_string_lossy().to_string();
             ops_with_indices.push((*idx, EditOp::ObjectRemove { path }));
@@ -367,7 +431,10 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
     // Array append operations - get_raw returns flat list, group by num_args(2)
     if let Some(appends) = matches.get_raw("array-append") {
         let vals: Vec<_> = appends.collect();
-        let indices: Vec<_> = matches.indices_of("array-append").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("array-append")
+            .unwrap_or_default()
+            .collect();
         for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
             if chunk.len() == 2 {
                 let path = chunk[0].to_string_lossy().to_string();
@@ -380,7 +447,10 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
     // Array insert operations - get_raw returns flat list, group by num_args(3)
     if let Some(inserts) = matches.get_raw("array-insert") {
         let vals: Vec<_> = inserts.collect();
-        let indices: Vec<_> = matches.indices_of("array-insert").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("array-insert")
+            .unwrap_or_default()
+            .collect();
         for (chunk, idx_chunk) in vals.chunks(3).zip(indices.chunks(3)) {
             if chunk.len() == 3 {
                 let path = chunk[0].to_string_lossy().to_string();
@@ -400,7 +470,10 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
     // Array remove operations - get_raw returns flat list, group by num_args(2)
     if let Some(removes) = matches.get_raw("array-remove") {
         let vals: Vec<_> = removes.collect();
-        let indices: Vec<_> = matches.indices_of("array-remove").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("array-remove")
+            .unwrap_or_default()
+            .collect();
         for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
             if chunk.len() == 2 {
                 let path = chunk[0].to_string_lossy().to_string();
@@ -419,13 +492,23 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
     // Comment set operations - get_raw returns flat list, group by num_args(2)
     if let Some(sets) = matches.get_raw("comment-set") {
         let vals: Vec<_> = sets.collect();
-        let indices: Vec<_> = matches.indices_of("comment-set").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("comment-set")
+            .unwrap_or_default()
+            .collect();
         for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
             if chunk.len() == 2 {
                 let path_str = chunk[0].to_string_lossy().to_string();
                 let text = chunk[1].to_string_lossy().to_string();
                 let path = parse_comment_path(&path_str);
-                ops_with_indices.push((idx_chunk[0], EditOp::CommentSet { path, text, style: None }));
+                ops_with_indices.push((
+                    idx_chunk[0],
+                    EditOp::CommentSet {
+                        path,
+                        text,
+                        style: None,
+                    },
+                ));
             }
         }
     }
@@ -433,20 +516,33 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
     // Comment append operations - get_raw returns flat list, group by num_args(2)
     if let Some(appends) = matches.get_raw("comment-append") {
         let vals: Vec<_> = appends.collect();
-        let indices: Vec<_> = matches.indices_of("comment-append").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("comment-append")
+            .unwrap_or_default()
+            .collect();
         for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
             if chunk.len() == 2 {
                 let path_str = chunk[0].to_string_lossy().to_string();
                 let text = chunk[1].to_string_lossy().to_string();
                 let path = parse_comment_path(&path_str);
-                ops_with_indices.push((idx_chunk[0], EditOp::CommentAppend { path, text, style: None }));
+                ops_with_indices.push((
+                    idx_chunk[0],
+                    EditOp::CommentAppend {
+                        path,
+                        text,
+                        style: None,
+                    },
+                ));
             }
         }
     }
 
     // Comment remove operations
     if let Some(removes) = matches.get_raw("comment-remove") {
-        let indices: Vec<_> = matches.indices_of("comment-remove").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("comment-remove")
+            .unwrap_or_default()
+            .collect();
         for (idx, val) in indices.iter().zip(removes) {
             let path_str = val.to_string_lossy().to_string();
             let path = parse_comment_path(&path_str);
@@ -456,7 +552,10 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
 
     // Comment style operations
     if let Some(styles) = matches.get_raw("comment-style") {
-        let indices: Vec<_> = matches.indices_of("comment-style").unwrap_or_default().collect();
+        let indices: Vec<_> = matches
+            .indices_of("comment-style")
+            .unwrap_or_default()
+            .collect();
         for (idx, val) in indices.iter().zip(styles) {
             let style_str = val.to_string_lossy().to_string();
             let style = match style_str.as_str() {
@@ -575,8 +674,8 @@ fn parse_comment_path(s: &str) -> CommentPath {
         CommentPath::Header
     } else if s == ":footer" {
         CommentPath::Footer
-    } else if s.ends_with(":inline") {
-        let dot_path = s[..s.len() - 7].to_string();
+    } else if let Some(stripped) = s.strip_suffix(":inline") {
+        let dot_path = stripped.to_string();
         CommentPath::Inline { dot_path }
     } else {
         CommentPath::Key {

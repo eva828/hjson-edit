@@ -286,12 +286,6 @@ impl HjsonDocument {
         Self { green }
     }
 
-    /// ドキュメントを文字列に変換（フォーマット保持）
-    pub fn to_string(&self) -> String {
-        use crate::syntax::green::GreenNodeExt;
-        self.green.text()
-    }
-
     /// GreenNodeへの参照を取得
     pub fn green_node(&self) -> &GreenNode {
         &self.green
@@ -1070,7 +1064,7 @@ impl HjsonDocument {
                         })
                     })
                 }
-                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                .ok_or(HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
@@ -1132,7 +1126,7 @@ impl HjsonDocument {
                         })
                     })
                 }
-                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                .ok_or(HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
@@ -1274,7 +1268,7 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         // 現在のコメントを取得
         let current_comments = match path {
-            CommentPath::Key { dot_path } => {
+            CommentPath::Key { dot_path: _ } => {
                 // キーの直前コメントを取得
                 // 省略：実装は get_header_comment などを参考
                 Vec::new()
@@ -1333,7 +1327,7 @@ impl HjsonDocument {
                         })
                     })
                 }
-                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                .ok_or(HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
@@ -1391,7 +1385,7 @@ impl HjsonDocument {
                         })
                     })
                 }
-                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                .ok_or(HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
@@ -1555,6 +1549,13 @@ impl HjsonDocument {
     }
 }
 
+impl std::fmt::Display for HjsonDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::syntax::green::GreenNodeExt;
+        f.write_str(&self.green.text())
+    }
+}
+
 // =============================================================================
 // Comment Helper Functions
 // =============================================================================
@@ -1671,13 +1672,13 @@ fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonE
     for child in pair_green.children() {
         if let NodeOrToken::Token(t) = child {
             let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-            if !found_non_trivia {
-                if matches!(
+            if !found_non_trivia
+                && matches!(
                     kind,
                     SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-                ) {
-                    continue;
-                }
+                )
+            {
+                continue;
             }
             if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
                 found_non_trivia = true;
@@ -1758,8 +1759,8 @@ fn remove_inline_comment(
                     // この Pair の後のコメントを探す
                     let start = i + 1;
                     let mut end = start;
-                    for j in start..children.len() {
-                        match &children[j] {
+                    for (j, child) in children.iter().enumerate().skip(start) {
+                        match child {
                             NodeOrToken::Token(t) => {
                                 let kind =
                                     crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
@@ -1975,15 +1976,15 @@ fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
 fn value_to_green_element(value: &HjsonValue) -> Result<GreenElement, HjsonEditError> {
     match value {
         HjsonValue::String(s) => {
-            let token = create_token(SyntaxKind::String, &format!("\"{}\"", s));
+            let token = create_token(SyntaxKind::String, format!("\"{}\"", s));
             Ok(NodeOrToken::Token(token))
         }
         HjsonValue::Integer(n) => {
-            let token = create_token(SyntaxKind::Integer, &n.to_string());
+            let token = create_token(SyntaxKind::Integer, n.to_string());
             Ok(NodeOrToken::Token(token))
         }
         HjsonValue::Float(n) => {
-            let token = create_token(SyntaxKind::Float, &format!("{}", n));
+            let token = create_token(SyntaxKind::Float, format!("{}", n));
             Ok(NodeOrToken::Token(token))
         }
         HjsonValue::Bool(true) => {
@@ -2011,7 +2012,7 @@ fn value_to_green_element(value: &HjsonValue) -> Result<GreenElement, HjsonEditE
             Ok(NodeOrToken::Token(token))
         }
         HjsonValue::HexInteger(n) => {
-            let token = create_token(SyntaxKind::HexInteger, &format!("0x{:X}", n));
+            let token = create_token(SyntaxKind::HexInteger, format!("0x{:X}", n));
             Ok(NodeOrToken::Token(token))
         }
         HjsonValue::Array(items) => {
@@ -2071,7 +2072,7 @@ fn create_pair_node(key: &str, value: &HjsonValue) -> Result<GreenNode, HjsonEdi
     let key_token = if key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         create_token(SyntaxKind::Ident, key)
     } else {
-        create_token(SyntaxKind::String, &format!("\"{}\"", key))
+        create_token(SyntaxKind::String, format!("\"{}\"", key))
     };
     let key_node = create_node(SyntaxKind::Key, vec![NodeOrToken::Token(key_token)]);
     children.push(NodeOrToken::Node(key_node));
@@ -2111,7 +2112,7 @@ fn replace_pair_value(
             &extract_key_text(
                 &RedNode::new_root(pair_green.clone())
                     .child_by_kind(SyntaxKind::Key)
-                    .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    .ok_or(HjsonEditError::InvalidNodeKind {
                         expected: SyntaxKind::Key,
                         found: SyntaxKind::Pair,
                     })?,

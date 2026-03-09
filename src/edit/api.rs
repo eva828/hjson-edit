@@ -84,7 +84,7 @@ impl GreenNodeEdit for rowan::GreenNode {
         }
 
         let mut builder = GreenNodeBuilder::new();
-        builder.start_node(self.kind().into());
+        builder.start_node(self.kind());
 
         for (i, child) in children.iter().enumerate() {
             if i == index {
@@ -113,7 +113,7 @@ impl GreenNodeEdit for rowan::GreenNode {
         }
 
         let mut builder = GreenNodeBuilder::new();
-        builder.start_node(self.kind().into());
+        builder.start_node(self.kind());
 
         for (i, c) in children.iter().enumerate() {
             if i == index {
@@ -142,7 +142,7 @@ impl GreenNodeEdit for rowan::GreenNode {
         }
 
         let mut builder = GreenNodeBuilder::new();
-        builder.start_node(self.kind().into());
+        builder.start_node(self.kind());
 
         for (i, child) in children.iter().enumerate() {
             if i != index {
@@ -169,7 +169,7 @@ impl GreenNodeEdit for rowan::GreenNode {
             .collect();
 
         // インデックス降順でソート（後ろから処理）
-        indexed_ops.sort_by(|a, b| b.0.cmp(&a.0));
+        indexed_ops.sort_by_key(|item| std::cmp::Reverse(item.0));
 
         // 重複チェック
         let mut seen = std::collections::HashSet::new();
@@ -251,7 +251,7 @@ fn child_to_green_element(
 fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement) {
     match element {
         rowan::NodeOrToken::Node(node) => {
-            builder.start_node(node.kind().into());
+            builder.start_node(node.kind());
             for child in node.children() {
                 let elem = child_to_green_element(child);
                 push_element(builder, &elem);
@@ -259,7 +259,7 @@ fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement)
             builder.finish_node();
         }
         rowan::NodeOrToken::Token(token) => {
-            let kind: rowan::SyntaxKind = token.kind().into();
+            let kind: rowan::SyntaxKind = token.kind();
             builder.token(kind, token.text());
         }
     }
