@@ -410,7 +410,6 @@ impl HjsonDocument {
 
         match last {
             PathSegment::Key(key) => {
-                // オブジェクト内のキーを探して更新
                 let obj_node = if let Some(obj) = parent.child_by_kind(SyntaxKind::Object) {
                     obj
                 } else if let Some(val) = parent.child_by_kind(SyntaxKind::Value) {
@@ -430,75 +429,71 @@ impl HjsonDocument {
                 let obj_green: GreenNode = obj_node.to_green();
                 let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
 
-                // キーを探して置換または追加
-                let mut new_children = children.clone();
-                let mut found = false;
-
-                // Find Pair nodes in the children and check their keys
-                let pair_indices: Vec<usize> = children
+                let lbrace = children
                     .iter()
-                    .enumerate()
-                    .filter_map(|(i, c)| {
-                        if let NodeOrToken::Node(n) = c {
-                            if n.kind() == SyntaxKind::Pair.into() {
-                                return Some(i);
-                            }
-                        }
-                        None
-                    })
-                    .collect();
+                    .find(|c| is_token_of_kind(c, SyntaxKind::LBrace))
+                    .cloned();
+                let rbrace = children
+                    .iter()
+                    .find(|c| is_token_of_kind(c, SyntaxKind::RBrace))
+                    .cloned();
+                let items = build_object_items(&children);
+                let mut found = false;
+                let mut new_items = Vec::new();
 
-                for idx in pair_indices {
-                    if found {
-                        break;
-                    }
-                    // Get the Pair node at this index directly from children
-                    if let NodeOrToken::Node(pair_green) = &children[idx] {
-                        // Create a RedNode from the GreenNode to access Key
-                        let pair_red = RedNode::new_root(pair_green.clone());
-                        if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
-                            if let Some(key_text) = extract_key_text(&key_node) {
-                                if key_text == *key {
-                                    // Found the Pair to replace
-                                    let new_pair = create_pair_node(key, &value)?;
-                                    new_children[idx] = NodeOrToken::Node(new_pair);
-                                    found = true;
+                for item in items {
+                    match item {
+                        ObjectItem::Entry(mut entry) => {
+                            if let NodeOrToken::Node(pair_green) = &entry.pair {
+                                let pair_red = RedNode::new_root(pair_green.clone());
+                                if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
+                                    if let Some(key_text) = extract_key_text(&key_node) {
+                                        if key_text == *key {
+                                            entry.pair = NodeOrToken::Node(replace_pair_value(
+                                                pair_green, &value,
+                                            )?);
+                                            found = true;
+                                        }
+                                    }
                                 }
                             }
+                            new_items.push(ObjectItem::Entry(entry));
+                        }
+                        ObjectItem::Standalone(block) => {
+                            new_items.push(ObjectItem::Standalone(block))
                         }
                     }
                 }
 
                 if !found {
-                    // 新規追加
-                    let new_pair = create_pair_node(key, &value)?;
-
-                    // RBraceの前に挿入
-                    let insert_pos = new_children
-                        .iter()
-                        .position(|c| is_token_of_kind(c, SyntaxKind::RBrace))
-                        .unwrap_or(new_children.len());
-
-                    if insert_pos > 1 && !new_children.is_empty() {
-                        new_children.insert(
-                            insert_pos,
-                            NodeOrToken::Token(create_token(SyntaxKind::Comma, ",")),
-                        );
-                        new_children.insert(
-                            insert_pos + 1,
-                            NodeOrToken::Token(create_token(SyntaxKind::Whitespace, " ")),
-                        );
-                        new_children.insert(insert_pos + 2, NodeOrToken::Node(new_pair));
-                    } else {
-                        new_children.insert(insert_pos, NodeOrToken::Node(new_pair));
-                    }
+                    let new_pair = NodeOrToken::Node(create_pair_node(key, &value)?);
+                    let new_entry = ObjectEntry {
+                        leading_line_trivia: if new_items
+                            .iter()
+                            .any(|item| matches!(item, ObjectItem::Entry(_)))
+                        {
+                            vec![
+                                NodeOrToken::Token(create_token(SyntaxKind::Comma, ",")),
+                                NodeOrToken::Token(create_token(SyntaxKind::Whitespace, " ")),
+                            ]
+                        } else {
+                            Vec::new()
+                        },
+                        leading_comments: Vec::new(),
+                        pair: new_pair,
+                        trailing_inline_trivia: Vec::new(),
+                        terminator: EntryTerminator::EndOfContainer,
+                    };
+                    new_items.push(ObjectItem::Entry(new_entry));
                 }
 
-                let new_obj = create_node(SyntaxKind::Object, new_children);
+                let new_obj = create_node(
+                    SyntaxKind::Object,
+                    rebuild_object_children(lbrace, new_items, rbrace),
+                );
                 self.replace_green_node(&obj_node.path_from_root(), new_obj)
             }
             PathSegment::Index(idx) => {
-                // 配列内のインデックスを更新
                 let arr_node = if let Some(arr) = parent.child_by_kind(SyntaxKind::Array) {
                     arr
                 } else if let Some(val) = parent.child_by_kind(SyntaxKind::Value) {
@@ -518,34 +513,46 @@ impl HjsonDocument {
                 let arr_green: GreenNode = arr_node.to_green();
                 let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
 
-                // 値インデックスを探す
-                let value_indices: Vec<usize> = children
+                let lbracket = children
                     .iter()
-                    .enumerate()
-                    .filter_map(|(i, c)| {
-                        if let NodeOrToken::Node(n) = c {
-                            if n.kind() == SyntaxKind::Value.into() {
-                                return Some(i);
-                            }
-                        }
-                        None
-                    })
-                    .collect();
+                    .find(|c| is_token_of_kind(c, SyntaxKind::LBracket))
+                    .cloned();
+                let rbracket = children
+                    .iter()
+                    .find(|c| is_token_of_kind(c, SyntaxKind::RBracket))
+                    .cloned();
+                let items = build_array_items(&children);
+                let mut entry_index = 0usize;
+                let mut found = false;
+                let mut new_items = Vec::new();
 
-                if *idx >= value_indices.len() {
+                for item in items {
+                    match item {
+                        ArrayItem::Entry(mut entry) => {
+                            if entry_index == *idx {
+                                entry.value = NodeOrToken::Node(create_value_node(&value)?);
+                                found = true;
+                            }
+                            entry_index += 1;
+                            new_items.push(ArrayItem::Entry(entry));
+                        }
+                        ArrayItem::Standalone(block) => {
+                            new_items.push(ArrayItem::Standalone(block))
+                        }
+                    }
+                }
+
+                if !found {
                     return Err(HjsonEditError::InvalidIndex {
                         index: *idx,
-                        count: value_indices.len(),
+                        count: entry_index,
                     });
                 }
 
-                let target_idx = value_indices[*idx];
-                let new_value = create_value_node(&value)?;
-
-                let mut new_children = children;
-                new_children[target_idx] = NodeOrToken::Node(new_value);
-
-                let new_arr = create_node(SyntaxKind::Array, new_children);
+                let new_arr = create_node(
+                    SyntaxKind::Array,
+                    rebuild_array_children(lbracket, new_items, rbracket),
+                );
                 self.replace_green_node(&arr_node.path_from_root(), new_arr)
             }
         }
@@ -623,6 +630,7 @@ impl HjsonDocument {
                 let mut found = false;
                 let mut new_items: Vec<ObjectItem> = Vec::new();
                 let mut pending_terminator: Option<EntryTerminator> = None;
+                let mut has_surviving_entry = false;
 
                 for item in items {
                     match &item {
@@ -636,7 +644,9 @@ impl HjsonDocument {
                                             // 削除対象のエントリをスキップ
                                             // その terminator は次のエントリに統合
                                             found = true;
-                                            pending_terminator = Some(entry.terminator.clone());
+                                            if !has_surviving_entry {
+                                                pending_terminator = Some(entry.terminator.clone());
+                                            }
                                             continue;
                                         }
                                     }
@@ -655,6 +665,7 @@ impl HjsonDocument {
                             }
 
                             new_items.push(ObjectItem::Entry(modified_entry));
+                            has_surviving_entry = true;
                         }
                         ObjectItem::Standalone(_) => {
                             // 独立トリビアは常に保持
@@ -726,31 +737,7 @@ impl HjsonDocument {
                     });
                 };
 
-                let arr_green: GreenNode = arr_node.to_green();
-                let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
-
-                let value_indices: Vec<usize> = children
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, c)| {
-                        if let NodeOrToken::Node(n) = c {
-                            if n.kind() == SyntaxKind::Value.into() {
-                                return Some(i);
-                            }
-                        }
-                        None
-                    })
-                    .collect();
-
-                if *idx >= value_indices.len() {
-                    return Err(HjsonEditError::InvalidIndex {
-                        index: *idx,
-                        count: value_indices.len(),
-                    });
-                }
-
-                let remove_idx = value_indices[*idx];
-                let new_arr = arr_green.remove_child(remove_idx)?;
+                let new_arr = remove_array_entry(&arr_node, *idx)?;
                 self.replace_green_node(&arr_node.path_from_root(), new_arr)
             }
         }
@@ -818,29 +805,7 @@ impl HjsonDocument {
             }
         };
 
-        let arr_green: GreenNode = arr_node.to_green();
-        let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
-
-        // RBracketの前に挿入
-        let insert_pos = children
-            .iter()
-            .position(|c| is_token_of_kind(c, SyntaxKind::RBracket))
-            .unwrap_or(children.len());
-
-        let mut new_children = children;
-        let new_value = create_value_node(&value)?;
-
-        if insert_pos > 1 {
-            new_children.insert(
-                insert_pos,
-                NodeOrToken::Token(create_token(SyntaxKind::Comma, ",")),
-            );
-            new_children.insert(insert_pos + 1, NodeOrToken::Node(new_value));
-        } else {
-            new_children.insert(insert_pos, NodeOrToken::Node(new_value));
-        }
-
-        let new_arr = create_node(SyntaxKind::Array, new_children);
+        let new_arr = insert_array_entry(&arr_node, usize::MAX, &value)?;
         self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
@@ -961,46 +926,7 @@ impl HjsonDocument {
             }
         };
 
-        let arr_green: GreenNode = arr_node.to_green();
-        let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
-
-        let value_indices: Vec<usize> = children
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| {
-                if let NodeOrToken::Node(n) = c {
-                    if n.kind() == SyntaxKind::Value.into() {
-                        return Some(i);
-                    }
-                }
-                None
-            })
-            .collect();
-
-        let insert_pos = if index >= value_indices.len() {
-            // 末尾に追加
-            children
-                .iter()
-                .position(|c| is_token_of_kind(c, SyntaxKind::RBracket))
-                .unwrap_or(children.len())
-        } else {
-            value_indices[index]
-        };
-
-        let mut new_children = children;
-        let new_value = create_value_node(&value)?;
-
-        if !value_indices.is_empty() && insert_pos > 0 {
-            new_children.insert(
-                insert_pos,
-                NodeOrToken::Token(create_token(SyntaxKind::Comma, ",")),
-            );
-            new_children.insert(insert_pos + 1, NodeOrToken::Node(new_value));
-        } else {
-            new_children.insert(insert_pos, NodeOrToken::Node(new_value));
-        }
-
-        let new_arr = create_node(SyntaxKind::Array, new_children);
+        let new_arr = insert_array_entry(&arr_node, index, &value)?;
         self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
@@ -1047,31 +973,7 @@ impl HjsonDocument {
             }
         };
 
-        let arr_green: GreenNode = arr_node.to_green();
-        let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
-
-        let value_indices: Vec<usize> = children
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| {
-                if let NodeOrToken::Node(n) = c {
-                    if n.kind() == SyntaxKind::Value.into() {
-                        return Some(i);
-                    }
-                }
-                None
-            })
-            .collect();
-
-        if index >= value_indices.len() {
-            return Err(HjsonEditError::InvalidIndex {
-                index,
-                count: value_indices.len(),
-            });
-        }
-
-        let remove_idx = value_indices[index];
-        let new_arr = arr_green.remove_child(remove_idx)?;
+        let new_arr = remove_array_entry(&arr_node, index)?;
         self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
@@ -2182,6 +2084,48 @@ fn create_pair_node(key: &str, value: &HjsonValue) -> Result<GreenNode, HjsonEdi
     Ok(create_node(SyntaxKind::Pair, children))
 }
 
+fn replace_pair_value(
+    pair_green: &GreenNode,
+    value: &HjsonValue,
+) -> Result<GreenNode, HjsonEditError> {
+    let new_value = NodeOrToken::Node(create_value_node(value)?);
+    let mut replaced = false;
+    let mut children = Vec::new();
+
+    for child in pair_green.children() {
+        let cloned = clone_element(child);
+        match &cloned {
+            NodeOrToken::Node(n)
+                if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind())
+                    == SyntaxKind::Value =>
+            {
+                children.push(new_value.clone());
+                replaced = true;
+            }
+            _ => children.push(cloned),
+        }
+    }
+
+    if !replaced {
+        return create_pair_node(
+            &extract_key_text(
+                &RedNode::new_root(pair_green.clone())
+                    .child_by_kind(SyntaxKind::Key)
+                    .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                        expected: SyntaxKind::Key,
+                        found: SyntaxKind::Pair,
+                    })?,
+            )
+            .ok_or_else(|| HjsonEditError::InvalidPath {
+                path: "pair key".to_string(),
+            })?,
+            value,
+        );
+    }
+
+    Ok(create_node(SyntaxKind::Pair, children))
+}
+
 fn clone_element(
     elem: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
 ) -> GreenElement {
@@ -2249,6 +2193,26 @@ pub struct StandaloneTriviaBlock {
 #[derive(Debug, Clone)]
 pub enum ObjectItem {
     Entry(ObjectEntry),
+    Standalone(StandaloneTriviaBlock),
+}
+
+/// Array の1エントリ（1要素分）
+#[derive(Debug, Clone)]
+pub struct ArrayEntry {
+    /// 対象要素行の直前にある改行と行頭インデント
+    pub leading_line_trivia: Vec<GreenElement>,
+    /// 実際の値ノード (SyntaxKind::Value)
+    pub value: GreenElement,
+    /// 同じ行にある後ろの空白やインラインコメント
+    pub trailing_inline_trivia: Vec<GreenElement>,
+    /// カンマ区切り / 改行区切り / 末尾終端
+    pub terminator: EntryTerminator,
+}
+
+/// Array の要素（エントリまたは独立トリビア）
+#[derive(Debug, Clone)]
+pub enum ArrayItem {
+    Entry(ArrayEntry),
     Standalone(StandaloneTriviaBlock),
 }
 
@@ -2423,6 +2387,359 @@ fn build_object_items(children: &[GreenElement]) -> Vec<ObjectItem> {
     }
 
     items
+}
+
+/// Array の children から ArrayItem のリストを構築
+fn build_array_items(children: &[GreenElement]) -> Vec<ArrayItem> {
+    let mut items: Vec<ArrayItem> = Vec::new();
+    let mut pending_trivia: Vec<GreenElement> = Vec::new();
+
+    let mut i = 0;
+    while i < children.len() {
+        let elem = &children[i];
+
+        match elem {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value.into() => {
+                let value = elem.clone();
+                let leading_line_trivia = pending_trivia.clone();
+                pending_trivia.clear();
+
+                let mut trailing_inline_trivia = Vec::new();
+                i += 1;
+                while i < children.len() {
+                    match &children[i] {
+                        NodeOrToken::Token(t) => {
+                            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            if kind == SyntaxKind::Whitespace || is_comment(kind) {
+                                trailing_inline_trivia.push(children[i].clone());
+                                i += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+
+                let terminator = if i < children.len() {
+                    match &children[i] {
+                        NodeOrToken::Token(t) => {
+                            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            if kind == SyntaxKind::Comma {
+                                let comma = children[i].clone();
+                                i += 1;
+                                let mut suffix = vec![comma];
+                                while i < children.len() {
+                                    match &children[i] {
+                                        NodeOrToken::Token(t) => {
+                                            let kind =
+                                                crate::syntax::kind::HjsonLanguage::kind_from_raw(
+                                                    t.kind(),
+                                                );
+                                            if kind == SyntaxKind::Newline
+                                                || kind == SyntaxKind::Whitespace
+                                            {
+                                                suffix.push(children[i].clone());
+                                                i += 1;
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                                EntryTerminator::Comma(suffix)
+                            } else if kind == SyntaxKind::Newline {
+                                let newline = children[i].clone();
+                                i += 1;
+                                if i < children.len() {
+                                    if let NodeOrToken::Token(t) = &children[i] {
+                                        let kind =
+                                            crate::syntax::kind::HjsonLanguage::kind_from_raw(
+                                                t.kind(),
+                                            );
+                                        if kind == SyntaxKind::Whitespace {
+                                            pending_trivia.push(children[i].clone());
+                                            i += 1;
+                                        }
+                                    }
+                                }
+                                EntryTerminator::Newline(vec![newline])
+                            } else {
+                                EntryTerminator::EndOfContainer
+                            }
+                        }
+                        _ => EntryTerminator::EndOfContainer,
+                    }
+                } else {
+                    EntryTerminator::EndOfContainer
+                };
+
+                items.push(ArrayItem::Entry(ArrayEntry {
+                    leading_line_trivia,
+                    value,
+                    trailing_inline_trivia,
+                    terminator,
+                }));
+            }
+            NodeOrToken::Token(t) => {
+                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                if kind == SyntaxKind::RBracket {
+                    break;
+                } else if is_trivia(kind) {
+                    pending_trivia.push(elem.clone());
+                    if has_blank_line(&pending_trivia) {
+                        let split_idx = find_blank_line_split(&pending_trivia);
+                        if split_idx > 0 {
+                            let standalone_elements: Vec<_> =
+                                pending_trivia.drain(0..split_idx).collect();
+                            items.push(ArrayItem::Standalone(StandaloneTriviaBlock {
+                                elements: standalone_elements,
+                            }));
+                        }
+                    }
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    if !pending_trivia.is_empty() {
+        items.push(ArrayItem::Standalone(StandaloneTriviaBlock {
+            elements: pending_trivia,
+        }));
+    }
+
+    items
+}
+
+fn rebuild_object_children(
+    lbrace: Option<GreenElement>,
+    items: Vec<ObjectItem>,
+    rbrace: Option<GreenElement>,
+) -> Vec<GreenElement> {
+    let mut new_children = Vec::new();
+    if let Some(lbrace) = lbrace {
+        new_children.push(lbrace);
+    }
+    for item in items {
+        match item {
+            ObjectItem::Entry(entry) => {
+                new_children.extend(entry.leading_line_trivia);
+                new_children.push(entry.pair);
+                new_children.extend(entry.trailing_inline_trivia);
+                match entry.terminator {
+                    EntryTerminator::Comma(suffix) | EntryTerminator::Newline(suffix) => {
+                        new_children.extend(suffix);
+                    }
+                    EntryTerminator::EndOfContainer => {}
+                }
+            }
+            ObjectItem::Standalone(block) => new_children.extend(block.elements),
+        }
+    }
+    if let Some(rbrace) = rbrace {
+        new_children.push(rbrace);
+    }
+    new_children
+}
+
+fn rebuild_array_children(
+    lbracket: Option<GreenElement>,
+    items: Vec<ArrayItem>,
+    rbracket: Option<GreenElement>,
+) -> Vec<GreenElement> {
+    let mut new_children = Vec::new();
+    if let Some(lbracket) = lbracket {
+        new_children.push(lbracket);
+    }
+    for item in items {
+        match item {
+            ArrayItem::Entry(entry) => {
+                new_children.extend(entry.leading_line_trivia);
+                new_children.push(entry.value);
+                new_children.extend(entry.trailing_inline_trivia);
+                match entry.terminator {
+                    EntryTerminator::Comma(suffix) | EntryTerminator::Newline(suffix) => {
+                        new_children.extend(suffix);
+                    }
+                    EntryTerminator::EndOfContainer => {}
+                }
+            }
+            ArrayItem::Standalone(block) => new_children.extend(block.elements),
+        }
+    }
+    if let Some(rbracket) = rbracket {
+        new_children.push(rbracket);
+    }
+    new_children
+}
+
+fn remove_array_entry(arr_node: &RedNode, index: usize) -> Result<GreenNode, HjsonEditError> {
+    let arr_green: GreenNode = arr_node.to_green();
+    let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
+    let lbracket = children
+        .iter()
+        .find(|c| is_token_of_kind(c, SyntaxKind::LBracket))
+        .cloned();
+    let rbracket = children
+        .iter()
+        .find(|c| is_token_of_kind(c, SyntaxKind::RBracket))
+        .cloned();
+    let items = build_array_items(&children);
+
+    let mut found = false;
+    let mut entry_index = 0usize;
+    let mut new_items: Vec<ArrayItem> = Vec::new();
+    let mut pending_leading: Vec<GreenElement> = Vec::new();
+
+    for item in items {
+        match item {
+            ArrayItem::Entry(mut entry) => {
+                if entry_index == index {
+                    found = true;
+                    if new_items
+                        .iter()
+                        .all(|item| !matches!(item, ArrayItem::Entry(_)))
+                    {
+                        pending_leading = entry.leading_line_trivia.clone();
+                    }
+                    entry_index += 1;
+                    continue;
+                }
+
+                if !pending_leading.is_empty() {
+                    let mut merged = pending_leading;
+                    merged.extend(entry.leading_line_trivia);
+                    entry.leading_line_trivia = merged;
+                    pending_leading = Vec::new();
+                }
+
+                new_items.push(ArrayItem::Entry(entry));
+                entry_index += 1;
+            }
+            ArrayItem::Standalone(block) => new_items.push(ArrayItem::Standalone(block)),
+        }
+    }
+
+    if !found {
+        return Err(HjsonEditError::InvalidIndex {
+            index,
+            count: entry_index,
+        });
+    }
+
+    Ok(create_node(
+        SyntaxKind::Array,
+        rebuild_array_children(lbracket, new_items, rbracket),
+    ))
+}
+
+fn insert_array_entry(
+    arr_node: &RedNode,
+    index: usize,
+    value: &HjsonValue,
+) -> Result<GreenNode, HjsonEditError> {
+    let arr_green: GreenNode = arr_node.to_green();
+    let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
+    let lbracket = children
+        .iter()
+        .find(|c| is_token_of_kind(c, SyntaxKind::LBracket))
+        .cloned();
+    let rbracket = children
+        .iter()
+        .find(|c| is_token_of_kind(c, SyntaxKind::RBracket))
+        .cloned();
+    let items = build_array_items(&children);
+
+    let mut new_items = Vec::new();
+    let mut entry_index = 0usize;
+    let insert_at = index;
+    let is_append = index == usize::MAX;
+    let mut inserted = false;
+    let mut last_entry_indent: Option<GreenElement> = None;
+    let mut trailing_standalone = Vec::new();
+
+    for item in items {
+        match item {
+            ArrayItem::Entry(mut entry) => {
+                if let Some(indent) = entry
+                    .leading_line_trivia
+                    .iter()
+                    .rev()
+                    .find(|elem| is_token_of_kind(elem, SyntaxKind::Whitespace))
+                    .cloned()
+                {
+                    last_entry_indent = Some(indent);
+                }
+                if !is_append && !inserted && entry_index == insert_at {
+                    new_items.push(ArrayItem::Entry(ArrayEntry {
+                        leading_line_trivia: entry.leading_line_trivia.clone(),
+                        value: NodeOrToken::Node(create_value_node(value)?),
+                        trailing_inline_trivia: Vec::new(),
+                        terminator: EntryTerminator::Newline(vec![NodeOrToken::Token(
+                            create_token(SyntaxKind::Newline, "\n"),
+                        )]),
+                    }));
+                    entry.leading_line_trivia = vec![NodeOrToken::Token(create_token(
+                        SyntaxKind::Whitespace,
+                        "\t\t",
+                    ))];
+                    inserted = true;
+                }
+
+                entry_index += 1;
+                new_items.push(ArrayItem::Entry(entry));
+            }
+            ArrayItem::Standalone(block) => {
+                if is_append {
+                    trailing_standalone.push(ArrayItem::Standalone(block));
+                } else {
+                    new_items.push(ArrayItem::Standalone(block));
+                }
+            }
+        }
+    }
+
+    if !inserted {
+        let leading_line_trivia = if new_items
+            .iter()
+            .any(|item| matches!(item, ArrayItem::Entry(_)))
+        {
+            let mut trivia = Vec::new();
+            if let Some(indent) = last_entry_indent {
+                trivia.push(indent);
+            }
+            trivia
+        } else {
+            Vec::new()
+        };
+        new_items.push(ArrayItem::Entry(ArrayEntry {
+            leading_line_trivia,
+            value: NodeOrToken::Node(create_value_node(value)?),
+            trailing_inline_trivia: Vec::new(),
+            terminator: if trailing_standalone.is_empty() {
+                EntryTerminator::EndOfContainer
+            } else {
+                EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
+                    SyntaxKind::Newline,
+                    "\n",
+                ))])
+            },
+        }));
+    }
+
+    new_items.extend(trailing_standalone);
+
+    Ok(create_node(
+        SyntaxKind::Array,
+        rebuild_array_children(lbracket, new_items, rbracket),
+    ))
 }
 
 /// 保留中のトリビアに空行が含まれるか判定（\n\s*\n のパターンを検出）

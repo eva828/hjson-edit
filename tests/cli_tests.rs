@@ -362,6 +362,201 @@ fn test_edit_object_remove_does_not_duplicate_trailing_standalone_trivia() {
     fs::remove_file(temp_path).ok();
 }
 
+/// 複数行配列の要素削除で空行が残らないことを検証
+#[test]
+fn test_edit_array_remove_multiline_preserves_layout() {
+    let binary = get_binary_path();
+
+    let test_content = "{\n\titems: [\n\t\t1\n\t\t2\n\t\t3\n\t]\n}";
+    let expected = "{\n\titems: [\n\t\t1\n\t\t3\n\t]\n}";
+    let temp_path = std::env::temp_dir().join("test_edit_array_remove_multiline.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--array-remove",
+            "items",
+            "1",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, expected);
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 配列削除で他の要素間の意図的な空行を潰さないことを検証
+#[test]
+fn test_edit_array_remove_preserves_existing_blank_lines() {
+    let binary = get_binary_path();
+
+    let test_content = "{\n\titems: [\n\t\t1\n\n\t\t2\n\n\t\t3\n\t]\n}";
+    let expected = "{\n\titems: [\n\t\t1\n\n\t\t3\n\t]\n}";
+    let temp_path = std::env::temp_dir().join("test_edit_array_remove_blank_lines.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--array-remove",
+            "items",
+            "1",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, expected);
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 配列削除で削除対象に付いた inline comment を残さないことを検証
+#[test]
+fn test_edit_array_remove_drops_inline_comment_with_entry() {
+    let binary = get_binary_path();
+
+    let test_content = "{\n\titems: [\n\t\t1 # keep\n\t\t2 # drop\n\t\t3\n\t]\n}";
+    let temp_path = std::env::temp_dir().join("test_edit_array_remove_comment.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--array-remove",
+            "items",
+            "1",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("# keep"));
+    assert!(!stdout.contains("# drop"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 複数行配列への append で改行レイアウトが維持されることを検証
+#[test]
+fn test_edit_array_append_multiline_preserves_layout() {
+    let binary = get_binary_path();
+
+    let test_content = "{\n\titems: [\n\t\t1\n\t\t2\n\t]\n}";
+    let expected = "{\n\titems: [\n\t\t1\n\t\t2\n\t\t3\n\t]\n}";
+    let temp_path = std::env::temp_dir().join("test_edit_array_append_multiline.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--array-append",
+            "items",
+            "3",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, expected);
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 複数行配列への insert で改行レイアウトが維持されることを検証
+#[test]
+fn test_edit_array_insert_multiline_preserves_layout() {
+    let binary = get_binary_path();
+
+    let test_content = "{\n\titems: [\n\t\t1\n\t\t3\n\t]\n}";
+    let expected = "{\n\titems: [\n\t\t1\n\t\t2\n\t\t3\n\t]\n}";
+    let temp_path = std::env::temp_dir().join("test_edit_array_insert_multiline.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--array-insert",
+            "items",
+            "1",
+            "2",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, expected);
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 複数行オブジェクトの既存キー更新でレイアウトが崩れないことを検証
+#[test]
+fn test_edit_object_set_multiline_preserves_layout() {
+    let binary = get_binary_path();
+
+    let test_content =
+        "Items: {\n\tRegrowthHamaxe: {\n\t\tDisplayName: old\n\t\tTooltip: keep\n\t}\n}\n";
+    let temp_path = std::env::temp_dir().join("test_edit_object_set_multiline.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--object-set",
+            "Items.RegrowthHamaxe.DisplayName",
+            "new",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\t\tDisplayName:"));
+    assert!(stdout.contains("\t\tTooltip: keep"));
+    assert!(stdout.contains("\n\t\tTooltip: keep\n"));
+
+    fs::remove_file(temp_path).ok();
+}
+
 /// --setエイリアスが--object-setと同じ動作をすることを検証
 #[test]
 fn test_edit_alias_set() {
