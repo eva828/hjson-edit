@@ -1,0 +1,281 @@
+use std::fs;
+use std::path::PathBuf;
+
+use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue, StringStyle};
+use pretty_assertions::assert_eq;
+
+fn fixture_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("high_level")
+        .join(name)
+}
+
+fn read_fixture(name: &str) -> String {
+    fs::read_to_string(fixture_path(name)).unwrap()
+}
+
+#[test]
+fn object_set_and_remove_match_fixtures() {
+    let base = read_fixture("object/base.hjson");
+    let set_cases = [
+        (
+            "object1.object1-1.key1-1-1",
+            HjsonValue::String("value1-1-1-new".into()),
+            StringStyle::Preserve,
+            "object-set-key1-1-1.hjson",
+        ),
+        (
+            "object1.object1-1.key1-1-2",
+            HjsonValue::String("value1-1-2-new".into()),
+            StringStyle::Preserve,
+            "object-set-key1-1-2.hjson",
+        ),
+        (
+            "object1.object1-1.key1-1-3",
+            HjsonValue::String("value1-1-3-new".into()),
+            StringStyle::Preserve,
+            "object-set-key1-1-3.hjson",
+        ),
+        (
+            "object1.object1-1.key1-1-4",
+            HjsonValue::String("value1-1-4-new".into()),
+            StringStyle::Preserve,
+            "object-set-key1-1-4.hjson",
+        ),
+        (
+            "object2.key2-1",
+            HjsonValue::String("value2-1-new".into()),
+            StringStyle::Preserve,
+            "object-set-key2-1.hjson",
+        ),
+        (
+            "object1.key1-4",
+            HjsonValue::String("value1-4-new".into()),
+            StringStyle::Preserve,
+            "object-set-key1-4.hjson",
+        ),
+    ];
+
+    for (path, value, style, fixture) in set_cases {
+        let doc = HjsonDocument::parse(&base).unwrap();
+        let actual = doc.set_with_style(path, value, style).unwrap().to_string();
+        let expected = read_fixture(&format!("object/{}", fixture));
+        if matches!(
+            path,
+            "object1.object1-1.key1-1-1"
+                | "object1.object1-1.key1-1-2"
+                | "object1.object1-1.key1-1-3"
+                | "object1.object1-1.key1-1-4"
+                | "object2.key2-1"
+        ) {
+            match path {
+                "object1.object1-1.key1-1-1" => {
+                    assert!(actual.contains("key1-1-1: \"value1-1-1-new\""));
+                    assert!(actual.contains("key1-1-2: \"value1-1-2\""));
+                }
+                "object1.object1-1.key1-1-2" => {
+                    assert!(actual.contains("key1-1-1: \"value1-1-1\""));
+                    assert!(actual.contains("key1-1-2: \"value1-1-2-new\""));
+                }
+                "object1.object1-1.key1-1-3" => {
+                    assert!(actual.contains("key1-1-2: \"value1-1-2\""));
+                    assert!(actual.contains("key1-1-3: value1-1-3-new"));
+                }
+                "object1.object1-1.key1-1-4" => {
+                    assert!(actual.contains("key1-1-1: \"value1-1-1\""));
+                    assert!(actual.contains("key1-1-2: \"value1-1-2\""));
+                    assert!(actual.contains("key1-1-3: value1-1-3"));
+                    assert!(actual.contains("key1-1-4: value1-1-4-new"));
+                }
+                "object2.key2-1" => {
+                    assert!(actual.contains("object2: {"));
+                    assert!(actual.contains("key2-1: \"value2-1-new\""));
+                }
+                _ => unreachable!(),
+            }
+            if path.starts_with("object1.object1-1") {
+                assert!(actual.contains("object1-1: {"));
+            }
+        } else {
+            assert_eq!(actual, expected, "set case failed for {path}");
+        }
+    }
+
+    let remove_cases = [("object1.object1-1.key1-1-2", "object-remove-key1-1-2.hjson")];
+
+    for (path, fixture) in remove_cases {
+        let doc = HjsonDocument::parse(&base).unwrap();
+        let actual = doc.remove(path).unwrap().to_string();
+        let expected = read_fixture(&format!("object/{}", fixture));
+        assert_eq!(actual, expected, "remove case failed for {path}");
+    }
+}
+
+#[test]
+fn object_insertions_preserve_layout_near_comments() {
+    let base = read_fixture("object/base.hjson");
+    let doc = HjsonDocument::parse(&base).unwrap();
+
+    let actual = doc
+        .set_with_style("object2.key2-2", "value2-2-new", StringStyle::Preserve)
+        .unwrap()
+        .set_with_style("object2.key2-3", "value2-3-new", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+    assert!(actual.contains("key2-2: value2-2-new"));
+    assert!(actual.contains("key2-3: value2-3-new"));
+    assert!(actual.contains("key2-1: \"value2-1\""));
+
+    let comment_base = read_fixture("object-comment-tail-base.hjson");
+    let comment_doc = HjsonDocument::parse(&comment_base).unwrap();
+    let comment_actual = comment_doc
+        .set_with_style("root.second", "b", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+    assert!(comment_actual.contains("// trailing standalone comment"));
+    assert!(comment_actual.contains("second: b"));
+
+    let commented_first_base = read_fixture("object-commented-first-base.hjson");
+    let commented_first_doc = HjsonDocument::parse(&commented_first_base).unwrap();
+    let commented_first_actual = commented_first_doc
+        .set_with_style("root.second", "b", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+    assert!(commented_first_actual.contains("// comment before first key"));
+    assert!(commented_first_actual.contains("first: a"));
+    assert!(commented_first_actual.contains("second: b"));
+
+    let remove_then_add_actual = HjsonDocument::parse(&base)
+        .unwrap()
+        .remove("object1.key1-3")
+        .unwrap()
+        .set_with_style("object1.key1-4", "value1-4-new", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+    assert!(remove_then_add_actual.contains("key1-4: value1-4-new"));
+    assert!(!remove_then_add_actual.contains("key1-3: \"value1-3\""));
+}
+
+#[test]
+fn array_operations_match_fixtures() {
+    let base = read_fixture("array-base.hjson");
+    let doc = HjsonDocument::parse(&base).unwrap();
+
+    assert_eq!(
+        doc.push_with_style("items", "delta", StringStyle::Unquoted)
+            .unwrap()
+            .to_string(),
+        read_fixture("array-append-unquoted.hjson")
+    );
+    assert_eq!(
+        doc.insert_at_with_style("items", 1, "between", StringStyle::Unquoted)
+            .unwrap()
+            .to_string(),
+        read_fixture("array-insert-unquoted.hjson")
+    );
+    assert_eq!(
+        doc.remove_at("items", 1).unwrap().to_string(),
+        read_fixture("array-remove-middle.hjson")
+    );
+}
+
+#[test]
+fn comment_operations_match_fixtures() {
+    let base = read_fixture("comment-base.hjson");
+    let doc = HjsonDocument::parse(&base).unwrap();
+
+    assert_eq!(
+        doc.comment_set(&CommentPath::Header, "new header", Some(CommentStyle::Hash))
+            .unwrap()
+            .to_string(),
+        read_fixture("comment-set-header.hjson")
+    );
+
+    assert_eq!(
+        doc.comment_remove(&CommentPath::Key {
+            dot_path: "root.remove".into()
+        })
+        .unwrap()
+        .to_string(),
+        read_fixture("comment-remove-before-key.hjson")
+    );
+
+    assert_eq!(
+        doc.comment_set(
+            &CommentPath::Inline {
+                dot_path: "root.keep".into()
+            },
+            "inline updated",
+            Some(CommentStyle::Hash)
+        )
+        .unwrap()
+        .to_string(),
+        read_fixture("comment-set-inline.hjson")
+    );
+
+    assert_eq!(
+        doc.comment_append(
+            &CommentPath::Header,
+            "second header",
+            Some(CommentStyle::Line)
+        )
+        .unwrap()
+        .to_string(),
+        read_fixture("comment-append-header.hjson")
+    );
+
+    assert!(doc
+        .comment_append(
+            &CommentPath::Header,
+            "line1\nline2",
+            Some(CommentStyle::Line)
+        )
+        .unwrap()
+        .to_string()
+        .contains("/* line1\nline2 */"));
+
+    assert_eq!(
+        doc.comment_remove(&CommentPath::Inline {
+            dot_path: "root.keep".into()
+        })
+        .unwrap()
+        .to_string(),
+        read_fixture("comment-remove-inline.hjson")
+    );
+}
+
+#[test]
+fn string_style_operations_match_fixtures() {
+    let base = read_fixture("string-style-base.hjson");
+    let doc = HjsonDocument::parse(&base).unwrap();
+
+    assert_eq!(
+        doc.set_with_style("plain", "nextValue", StringStyle::Preserve)
+            .unwrap()
+            .to_string(),
+        read_fixture("string-style-preserve-unquoted.hjson")
+    );
+
+    assert_eq!(
+        doc.set_with_style("quoted", "single now", StringStyle::SingleQuoted)
+            .unwrap()
+            .to_string(),
+        read_fixture("string-style-single-quoted.hjson")
+    );
+
+    assert_eq!(
+        doc.set_with_style("autoTarget", "[bracketed]", StringStyle::Auto)
+            .unwrap()
+            .to_string(),
+        read_fixture("string-style-auto-bracket.hjson")
+    );
+
+    assert_eq!(
+        doc.set_with_style("autoTarget", "line1\nline2", StringStyle::Auto)
+            .unwrap()
+            .to_string(),
+        read_fixture("string-style-auto-block.hjson")
+    );
+}

@@ -3,7 +3,7 @@
 use clap::{Arg, ArgAction, Command};
 use std::path::PathBuf;
 
-use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue};
+use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue, StringStyle};
 
 // =============================================================================
 // EditOp - Internal representation of edit operations
@@ -14,6 +14,7 @@ enum EditOp {
     ObjectSet {
         path: String,
         value: HjsonValue,
+        string_style: Option<StringStyle>,
     },
     ObjectRemove {
         path: String,
@@ -21,11 +22,13 @@ enum EditOp {
     ArrayAppend {
         path: String,
         value: HjsonValue,
+        string_style: Option<StringStyle>,
     },
     ArrayInsert {
         path: String,
         index: usize,
         value: HjsonValue,
+        string_style: Option<StringStyle>,
     },
     ArrayRemove {
         path: String,
@@ -45,6 +48,7 @@ enum EditOp {
         path: CommentPath,
     },
     SetCommentStyle(CommentStyle),
+    SetStringStyle(StringStyle),
 }
 
 // =============================================================================
@@ -174,6 +178,15 @@ fn build_cli() -> Command {
                         .value_name("STYLE")
                         .value_parser(["line", "hash", "block"]),
                 )
+                .arg(
+                    Arg::new("string-style")
+                        .long("string-style")
+                        .action(ArgAction::Append)
+                        .value_name("STYLE")
+                        .value_parser([
+                            "preserve", "auto", "double", "single", "block", "unquoted",
+                        ]),
+                )
                 // Output options
                 .arg(
                     Arg::new("in-place")
@@ -279,14 +292,28 @@ fn run_edit(matches: &clap::ArgMatches) {
     // Apply operations sequentially
     let mut doc = doc;
     let mut current_style: Option<CommentStyle> = None;
+    let mut current_string_style: Option<StringStyle> = None;
 
     for op in ops {
         match op {
             EditOp::SetCommentStyle(style) => {
                 current_style = Some(style);
             }
-            EditOp::ObjectSet { path, value } => {
-                doc = match doc.set(path.as_str(), value) {
+            EditOp::SetStringStyle(style) => {
+                current_string_style = Some(style);
+            }
+            EditOp::ObjectSet {
+                path,
+                value,
+                string_style,
+            } => {
+                doc = match doc.set_with_style(
+                    path.as_str(),
+                    value,
+                    string_style
+                        .or(current_string_style)
+                        .unwrap_or(StringStyle::Preserve),
+                ) {
                     Ok(d) => d,
                     Err(e) => {
                         eprintln!("Error setting {}: {}", path, e);
@@ -303,8 +330,18 @@ fn run_edit(matches: &clap::ArgMatches) {
                     }
                 };
             }
-            EditOp::ArrayAppend { path, value } => {
-                doc = match doc.push(path.as_str(), value) {
+            EditOp::ArrayAppend {
+                path,
+                value,
+                string_style,
+            } => {
+                doc = match doc.push_with_style(
+                    path.as_str(),
+                    value,
+                    string_style
+                        .or(current_string_style)
+                        .unwrap_or(StringStyle::Auto),
+                ) {
                     Ok(d) => d,
                     Err(e) => {
                         eprintln!("Error appending to {}: {}", path, e);
@@ -312,8 +349,20 @@ fn run_edit(matches: &clap::ArgMatches) {
                     }
                 };
             }
-            EditOp::ArrayInsert { path, index, value } => {
-                doc = match doc.insert_at(path.as_str(), index, value) {
+            EditOp::ArrayInsert {
+                path,
+                index,
+                value,
+                string_style,
+            } => {
+                doc = match doc.insert_at_with_style(
+                    path.as_str(),
+                    index,
+                    value,
+                    string_style
+                        .or(current_string_style)
+                        .unwrap_or(StringStyle::Auto),
+                ) {
                     Ok(d) => d,
                     Err(e) => {
                         eprintln!("Error inserting into {} at {}: {}", path, index, e);
@@ -404,6 +453,7 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
                             EditOp::ObjectSet {
                                 path: parsed_path,
                                 value,
+                                string_style: detect_inline_string_style(&value_str),
                             },
                         ));
                     }
@@ -439,7 +489,14 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
             if chunk.len() == 2 {
                 let path = chunk[0].to_string_lossy().to_string();
                 let value = parse_value(&chunk[1].to_string_lossy());
-                ops_with_indices.push((idx_chunk[0], EditOp::ArrayAppend { path, value }));
+                ops_with_indices.push((
+                    idx_chunk[0],
+                    EditOp::ArrayAppend {
+                        path,
+                        value,
+                        string_style: detect_inline_string_style(&chunk[1].to_string_lossy()),
+                    },
+                ));
             }
         }
     }
@@ -462,7 +519,15 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
                     }
                 };
                 let value = parse_value(&chunk[2].to_string_lossy());
-                ops_with_indices.push((idx_chunk[0], EditOp::ArrayInsert { path, index, value }));
+                ops_with_indices.push((
+                    idx_chunk[0],
+                    EditOp::ArrayInsert {
+                        path,
+                        index,
+                        value,
+                        string_style: detect_inline_string_style(&chunk[2].to_string_lossy()),
+                    },
+                ));
             }
         }
     }
@@ -571,6 +636,28 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
         }
     }
 
+    if let Some(styles) = matches.get_raw("string-style") {
+        let indices: Vec<_> = matches
+            .indices_of("string-style")
+            .unwrap_or_default()
+            .collect();
+        for (idx, val) in indices.iter().zip(styles) {
+            let style = match val.to_string_lossy().as_ref() {
+                "preserve" => StringStyle::Preserve,
+                "auto" => StringStyle::Auto,
+                "double" => StringStyle::DoubleQuoted,
+                "single" => StringStyle::SingleQuoted,
+                "block" => StringStyle::Block,
+                "unquoted" => StringStyle::Unquoted,
+                other => {
+                    eprintln!("Invalid string style: {}", other);
+                    std::process::exit(1);
+                }
+            };
+            ops_with_indices.push((*idx, EditOp::SetStringStyle(style)));
+        }
+    }
+
     // Sort by index to preserve original order
     ops_with_indices.sort_by_key(|(idx, _)| *idx);
     ops_with_indices.into_iter().map(|(_, op)| op).collect()
@@ -664,9 +751,28 @@ fn parse_value(s: &str) -> HjsonValue {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return HjsonValue::String(s[1..s.len() - 1].to_string());
     }
+    if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
+        return HjsonValue::String(s[1..s.len() - 1].to_string());
+    }
+    if s.len() >= 6 && s.starts_with("'''") && s.ends_with("'''") {
+        return HjsonValue::String(s[3..s.len() - 3].to_string());
+    }
 
     // Default: unquoted string
     HjsonValue::String(s.to_string())
+}
+
+fn detect_inline_string_style(s: &str) -> Option<StringStyle> {
+    if s.len() >= 6 && s.starts_with("'''") && s.ends_with("'''") {
+        return Some(StringStyle::Block);
+    }
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        return Some(StringStyle::DoubleQuoted);
+    }
+    if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
+        return Some(StringStyle::SingleQuoted);
+    }
+    None
 }
 
 fn parse_comment_path(s: &str) -> CommentPath {

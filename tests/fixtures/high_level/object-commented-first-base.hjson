@@ -1,0 +1,4 @@
+root: {
+    // comment before first key
+    first: a
+}

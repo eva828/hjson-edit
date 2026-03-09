@@ -1,0 +1,8 @@
+// header comment
+root: {
+    // keep comment
+    keep: value  # inline updated
+    remove: gone
+}
+
+// footer comment
