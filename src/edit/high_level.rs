@@ -2,12 +2,14 @@
 //!
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
-use crate::edit::api::{create_node, create_token, EditError as LowLevelEditError, GreenNodeEdit, RedNodeEdit};
+use crate::edit::api::{
+    create_node, create_token, EditError as LowLevelEditError, GreenNodeEdit, RedNodeEdit,
+};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeExt};
-use rowan::{GreenNode, NodeOrToken};
 use rowan::Language;
+use rowan::{GreenNode, NodeOrToken};
 
 // =============================================================================
 // Error Types
@@ -21,7 +23,10 @@ pub enum HjsonEditError {
     /// インデックスが無効
     InvalidIndex { index: usize, count: usize },
     /// ノードの種類が期待と異なる
-    InvalidNodeKind { expected: SyntaxKind, found: SyntaxKind },
+    InvalidNodeKind {
+        expected: SyntaxKind,
+        found: SyntaxKind,
+    },
     /// 低レベルAPIのエラー
     LowLevel(LowLevelEditError),
 }
@@ -36,7 +41,9 @@ impl std::fmt::Display for HjsonEditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HjsonEditError::InvalidPath { path } => write!(f, "Invalid path: {}", path),
-            HjsonEditError::InvalidIndex { index, count } => write!(f, "Invalid index: {} (child count: {})", index, count),
+            HjsonEditError::InvalidIndex { index, count } => {
+                write!(f, "Invalid index: {} (child count: {})", index, count)
+            }
             HjsonEditError::InvalidNodeKind { expected, found } => {
                 write!(f, "Expected {:?}, found {:?}", expected, found)
             }
@@ -73,7 +80,9 @@ impl IntoPath for &str {
 
 impl IntoPath for &[&str] {
     fn into_path(self) -> Vec<PathSegment> {
-        self.iter().map(|s| PathSegment::Key(s.to_string())).collect()
+        self.iter()
+            .map(|s| PathSegment::Key(s.to_string()))
+            .collect()
     }
 }
 
@@ -267,7 +276,9 @@ impl HjsonDocument {
     /// HJSON文字列をパースしてドキュメントを作成
     pub fn parse(input: &str) -> Result<Self, Vec<crate::parser::parser::ParseError>> {
         let result = crate::parser::parser::parse(input)?;
-        Ok(Self { green: result.green })
+        Ok(Self {
+            green: result.green,
+        })
     }
 
     /// GreenNodeからドキュメントを作成
@@ -391,11 +402,11 @@ impl HjsonDocument {
         let parent_path = &path[..path.len() - 1];
         let last = path.last().unwrap();
 
-        let parent = self
-            .navigate_to_node(parent_path)
-            .ok_or_else(|| HjsonEditError::InvalidPath {
-                path: format!("{:?}", parent_path),
-            })?;
+        let parent =
+            self.navigate_to_node(parent_path)
+                .ok_or_else(|| HjsonEditError::InvalidPath {
+                    path: format!("{:?}", parent_path),
+                })?;
 
         match last {
             PathSegment::Key(key) => {
@@ -553,11 +564,11 @@ impl HjsonDocument {
         let parent_path = &path[..path.len() - 1];
         let last = path.last().unwrap();
 
-        let parent = self
-            .navigate_to_node(parent_path)
-            .ok_or_else(|| HjsonEditError::InvalidPath {
-                path: format!("{:?}", parent_path),
-            })?;
+        let parent =
+            self.navigate_to_node(parent_path)
+                .ok_or_else(|| HjsonEditError::InvalidPath {
+                    path: format!("{:?}", parent_path),
+                })?;
 
         match last {
             PathSegment::Key(key) => {
@@ -580,46 +591,119 @@ impl HjsonDocument {
                 let obj_green: GreenNode = obj_node.to_green();
                 let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
 
-                // キーを探して削除
-                let mut new_children = Vec::new();
-                let mut i = 0;
+                // LBrace と RBrace を抽出
+                let lbrace = children
+                    .iter()
+                    .find(|e| {
+                        if let NodeOrToken::Token(t) = e {
+                            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            kind == SyntaxKind::LBrace
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned();
+
+                let rbrace = children
+                    .iter()
+                    .find(|e| {
+                        if let NodeOrToken::Token(t) = e {
+                            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            kind == SyntaxKind::RBrace
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned();
+
+                // 新しい ObjectItem モデルで解析（LBrace/RBrace は無視される）
+                let items = build_object_items(&children);
+
+                // 削除対象キーを探す
                 let mut found = false;
+                let mut new_items: Vec<ObjectItem> = Vec::new();
+                let mut pending_terminator: Option<EntryTerminator> = None;
 
-                while i < children.len() {
-                    let child = &children[i];
-
-                    if let NodeOrToken::Node(n) = child {
-                        if n.kind() == SyntaxKind::Pair.into() {
-                            // Pairノードのキーを確認（children[i] から直接取得）
-                            let pair_red = RedNode::new_root(n.clone());
-                            if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
-                                if let Some(key_text) = extract_key_text(&key_node) {
-                                    if key_text == *key {
-                                        found = true;
-                                        // このPairと後続のカンマをスキップ
-                                        i += 1;
-                                        if i < children.len() {
-                                            if let NodeOrToken::Token(t) = &children[i] {
-                                                if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Comma {
-                                                    i += 1;
-                                                }
-                                            }
+                for item in items {
+                    match &item {
+                        ObjectItem::Entry(entry) => {
+                            // キー名を取得
+                            if let NodeOrToken::Node(pair_node) = &entry.pair {
+                                let pair_red = RedNode::new_root(pair_node.clone());
+                                if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
+                                    if let Some(key_text) = extract_key_text(&key_node) {
+                                        if key_text == *key {
+                                            // 削除対象のエントリをスキップ
+                                            // その terminator は次のエントリに統合
+                                            found = true;
+                                            pending_terminator = Some(entry.terminator.clone());
+                                            continue;
                                         }
-                                        continue;
                                     }
                                 }
                             }
+
+                            // 削除したエントリの改行終端のみ、次のエントリの前置トリビアに統合
+                            let mut modified_entry = entry.clone();
+                            if let Some(ref term) = pending_terminator {
+                                if let EntryTerminator::Newline(suffix) = term {
+                                    let mut new_leading = suffix.clone();
+                                    new_leading.extend(entry.leading_line_trivia.iter().cloned());
+                                    modified_entry.leading_line_trivia = new_leading;
+                                }
+                                pending_terminator = None;
+                            }
+
+                            new_items.push(ObjectItem::Entry(modified_entry));
+                        }
+                        ObjectItem::Standalone(_) => {
+                            // 独立トリビアは常に保持
+                            new_items.push(item);
                         }
                     }
-
-                    new_children.push(child.clone());
-                    i += 1;
                 }
 
                 if !found {
-                    return Err(HjsonEditError::InvalidPath {
-                        path: key.clone(),
-                    });
+                    return Err(HjsonEditError::InvalidPath { path: key.clone() });
+                }
+
+                // ObjectItem から children を再構築
+                let mut new_children: Vec<GreenElement> = Vec::new();
+
+                // LBrace を追加
+                if let Some(lbrace) = lbrace {
+                    new_children.push(lbrace);
+                }
+
+                for item in new_items {
+                    match item {
+                        ObjectItem::Entry(entry) => {
+                            // エントリを再構成
+                            new_children.extend(entry.leading_line_trivia.into_iter());
+                            new_children.push(entry.pair);
+                            new_children.extend(entry.trailing_inline_trivia.into_iter());
+                            // terminator を追加
+                            match entry.terminator {
+                                EntryTerminator::Comma(suffix) => {
+                                    new_children.extend(suffix.into_iter());
+                                }
+                                EntryTerminator::Newline(suffix) => {
+                                    new_children.extend(suffix.into_iter());
+                                }
+                                EntryTerminator::EndOfContainer => {
+                                    // 何も追加しない
+                                }
+                            }
+                        }
+                        ObjectItem::Standalone(block) => {
+                            new_children.extend(block.elements.into_iter());
+                        }
+                    }
+                }
+
+                // RBrace を追加
+                if let Some(rbrace) = rbrace {
+                    new_children.push(rbrace);
                 }
 
                 let new_obj = create_node(SyntaxKind::Object, new_children);
@@ -688,7 +772,10 @@ impl HjsonDocument {
 
     /// 配列の末尾に要素を追加
     pub fn push(
-        &self, path: impl IntoPath, value: impl Into<HjsonValue>) -> Result<Self, HjsonEditError> {
+        &self,
+        path: impl IntoPath,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError> {
         let path = path.into_path();
         let value = value.into();
 
@@ -817,10 +904,7 @@ impl HjsonDocument {
             .collect();
 
         if value_indices.is_empty() {
-            return Err(HjsonEditError::InvalidIndex {
-                index: 0,
-                count: 0,
-            });
+            return Err(HjsonEditError::InvalidIndex { index: 0, count: 0 });
         }
 
         let remove_idx = *value_indices.last().unwrap();
@@ -830,7 +914,10 @@ impl HjsonDocument {
 
     /// 配列の指定位置に要素を挿入
     pub fn insert_at(
-        &self, path: impl IntoPath, index: usize, value: impl Into<HjsonValue>,
+        &self,
+        path: impl IntoPath,
+        index: usize,
+        value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError> {
         let path = path.into_path();
         let value = value.into();
@@ -918,8 +1005,7 @@ impl HjsonDocument {
     }
 
     /// 配列の指定位置の要素を削除
-    pub fn remove_at(&self, path: impl IntoPath, index: usize,
-    ) -> Result<Self, HjsonEditError> {
+    pub fn remove_at(&self, path: impl IntoPath, index: usize) -> Result<Self, HjsonEditError> {
         let path = path.into_path();
 
         let arr_node = if path.is_empty() {
@@ -1058,31 +1144,39 @@ impl HjsonDocument {
 
                 let key = match &path_segments[path_segments.len() - 1] {
                     PathSegment::Key(k) => k,
-                    _ => return Err(HjsonEditError::InvalidPath {
-                        path: dot_path.clone(),
-                    }),
+                    _ => {
+                        return Err(HjsonEditError::InvalidPath {
+                            path: dot_path.clone(),
+                        })
+                    }
                 };
 
                 // Find the parent object
                 let parent_path = &path_segments[..path_segments.len() - 1];
                 let obj: RedNode = if parent_path.is_empty() {
                     let red = RedNode::new_root(self.green.clone());
-                    red.child_by_kind(SyntaxKind::Object)
-                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    red.child_by_kind(SyntaxKind::Object).or_else(|| {
+                        red.child_by_kind(SyntaxKind::Value)?
+                            .child_by_kind(SyntaxKind::Object)
+                    })
                 } else {
-                    self.navigate_to_node(parent_path)
-                        .and_then(|parent| {
-                            parent.child_by_kind(SyntaxKind::Object)
-                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    self.navigate_to_node(parent_path).and_then(|parent| {
+                        parent.child_by_kind(SyntaxKind::Object).or_else(|| {
+                            parent
+                                .child_by_kind(SyntaxKind::Value)?
+                                .child_by_kind(SyntaxKind::Object)
                         })
-                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    })
+                }
+                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
 
-                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
-                    path: dot_path.clone(),
-                })?;
+                let pair_idx =
+                    find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    })?;
 
                 let pair_node: RedNode = obj
                     .children_nodes()
@@ -1113,30 +1207,38 @@ impl HjsonDocument {
 
                 let key = match &path_segments[path_segments.len() - 1] {
                     PathSegment::Key(k) => k,
-                    _ => return Err(HjsonEditError::InvalidPath {
-                        path: dot_path.clone(),
-                    }),
+                    _ => {
+                        return Err(HjsonEditError::InvalidPath {
+                            path: dot_path.clone(),
+                        })
+                    }
                 };
 
                 let parent_path = &path_segments[..path_segments.len() - 1];
                 let obj: RedNode = if parent_path.is_empty() {
                     let red = RedNode::new_root(self.green.clone());
-                    red.child_by_kind(SyntaxKind::Object)
-                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    red.child_by_kind(SyntaxKind::Object).or_else(|| {
+                        red.child_by_kind(SyntaxKind::Value)?
+                            .child_by_kind(SyntaxKind::Object)
+                    })
                 } else {
-                    self.navigate_to_node(parent_path)
-                        .and_then(|parent| {
-                            parent.child_by_kind(SyntaxKind::Object)
-                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    self.navigate_to_node(parent_path).and_then(|parent| {
+                        parent.child_by_kind(SyntaxKind::Object).or_else(|| {
+                            parent
+                                .child_by_kind(SyntaxKind::Value)?
+                                .child_by_kind(SyntaxKind::Object)
                         })
-                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    })
+                }
+                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
 
-                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
-                    path: dot_path.clone(),
-                })?;
+                let pair_idx =
+                    find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    })?;
 
                 let obj_green = obj.to_green();
                 let new_obj = set_inline_comment(&obj_green, pair_idx, text, style)?;
@@ -1169,7 +1271,12 @@ impl HjsonDocument {
                 for (i, child) in new_children.clone().iter().enumerate() {
                     if let NodeOrToken::Token(t) = child {
                         let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-                        if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                        if matches!(
+                            kind,
+                            SyntaxKind::LineComment
+                                | SyntaxKind::HashComment
+                                | SyntaxKind::BlockComment
+                        ) {
                             new_children[i] = NodeOrToken::Token(new_comment.clone());
                             replaced = true;
                             break;
@@ -1189,7 +1296,10 @@ impl HjsonDocument {
                 if !replaced {
                     // ヘッダーコメントが見つからなければ先頭に挿入
                     new_children.insert(0, NodeOrToken::Token(new_comment));
-                    new_children.insert(1, NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
+                    new_children.insert(
+                        1,
+                        NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")),
+                    );
                 }
 
                 let new_root = create_node(SyntaxKind::Root, new_children);
@@ -1224,7 +1334,12 @@ impl HjsonDocument {
                     let child = &children[i];
                     if let NodeOrToken::Token(t) = child {
                         let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-                        if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                        if matches!(
+                            kind,
+                            SyntaxKind::LineComment
+                                | SyntaxKind::HashComment
+                                | SyntaxKind::BlockComment
+                        ) {
                             children[i] = NodeOrToken::Token(new_comment.clone());
                             replaced = true;
                             break;
@@ -1293,30 +1408,38 @@ impl HjsonDocument {
 
                 let key = match &path_segments[path_segments.len() - 1] {
                     PathSegment::Key(k) => k,
-                    _ => return Err(HjsonEditError::InvalidPath {
-                        path: dot_path.clone(),
-                    }),
+                    _ => {
+                        return Err(HjsonEditError::InvalidPath {
+                            path: dot_path.clone(),
+                        })
+                    }
                 };
 
                 let parent_path = &path_segments[..path_segments.len() - 1];
                 let obj: RedNode = if parent_path.is_empty() {
                     let red = RedNode::new_root(self.green.clone());
-                    red.child_by_kind(SyntaxKind::Object)
-                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    red.child_by_kind(SyntaxKind::Object).or_else(|| {
+                        red.child_by_kind(SyntaxKind::Value)?
+                            .child_by_kind(SyntaxKind::Object)
+                    })
                 } else {
-                    self.navigate_to_node(parent_path)
-                        .and_then(|parent| {
-                            parent.child_by_kind(SyntaxKind::Object)
-                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    self.navigate_to_node(parent_path).and_then(|parent| {
+                        parent.child_by_kind(SyntaxKind::Object).or_else(|| {
+                            parent
+                                .child_by_kind(SyntaxKind::Value)?
+                                .child_by_kind(SyntaxKind::Object)
                         })
-                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    })
+                }
+                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
 
-                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
-                    path: dot_path.clone(),
-                })?;
+                let pair_idx =
+                    find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    })?;
 
                 let pair_node: RedNode = obj
                     .children_nodes()
@@ -1343,30 +1466,38 @@ impl HjsonDocument {
 
                 let key = match &path_segments[path_segments.len() - 1] {
                     PathSegment::Key(k) => k,
-                    _ => return Err(HjsonEditError::InvalidPath {
-                        path: dot_path.clone(),
-                    }),
+                    _ => {
+                        return Err(HjsonEditError::InvalidPath {
+                            path: dot_path.clone(),
+                        })
+                    }
                 };
 
                 let parent_path = &path_segments[..path_segments.len() - 1];
                 let obj: RedNode = if parent_path.is_empty() {
                     let red = RedNode::new_root(self.green.clone());
-                    red.child_by_kind(SyntaxKind::Object)
-                        .or_else(|| red.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    red.child_by_kind(SyntaxKind::Object).or_else(|| {
+                        red.child_by_kind(SyntaxKind::Value)?
+                            .child_by_kind(SyntaxKind::Object)
+                    })
                 } else {
-                    self.navigate_to_node(parent_path)
-                        .and_then(|parent| {
-                            parent.child_by_kind(SyntaxKind::Object)
-                                .or_else(|| parent.child_by_kind(SyntaxKind::Value)?.child_by_kind(SyntaxKind::Object))
+                    self.navigate_to_node(parent_path).and_then(|parent| {
+                        parent.child_by_kind(SyntaxKind::Object).or_else(|| {
+                            parent
+                                .child_by_kind(SyntaxKind::Value)?
+                                .child_by_kind(SyntaxKind::Object)
                         })
-                }.ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    })
+                }
+                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
                     expected: SyntaxKind::Object,
                     found: SyntaxKind::Root,
                 })?;
 
-                let pair_idx = find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
-                    path: dot_path.clone(),
-                })?;
+                let pair_idx =
+                    find_pair_index(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+                        path: dot_path.clone(),
+                    })?;
 
                 let obj_green = obj.to_green();
                 let new_obj = remove_inline_comment(&obj_green, pair_idx)?;
@@ -1393,16 +1524,32 @@ impl HjsonDocument {
                         NodeOrToken::Token(t) => {
                             let kind = t.kind();
                             if skip {
-                                if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                                if matches!(
+                                    kind,
+                                    SyntaxKind::LineComment
+                                        | SyntaxKind::HashComment
+                                        | SyntaxKind::BlockComment
+                                ) {
                                     continue;
-                                } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                                } else if kind != SyntaxKind::Whitespace
+                                    && kind != SyntaxKind::Newline
+                                {
                                     skip = false;
-                                    new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                                    new_children.push(NodeOrToken::Token(rowan::GreenToken::new(
+                                        kind.into(),
+                                        t.text(),
+                                    )));
                                 } else {
-                                    new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                                    new_children.push(NodeOrToken::Token(rowan::GreenToken::new(
+                                        kind.into(),
+                                        t.text(),
+                                    )));
                                 }
                             } else {
-                                new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                                new_children.push(NodeOrToken::Token(rowan::GreenToken::new(
+                                    kind.into(),
+                                    t.text(),
+                                )));
                             }
                         }
                     }
@@ -1424,7 +1571,10 @@ impl HjsonDocument {
                         }
                         NodeOrToken::Token(t) => {
                             let kind = t.kind();
-                            new_children.push(NodeOrToken::Token(rowan::GreenToken::new(kind.into(), t.text())));
+                            new_children.push(NodeOrToken::Token(rowan::GreenToken::new(
+                                kind.into(),
+                                t.text(),
+                            )));
                         }
                     }
                 }
@@ -1435,7 +1585,12 @@ impl HjsonDocument {
                     i -= 1;
                     if let NodeOrToken::Token(t) = &new_children[i] {
                         let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-                        if matches!(kind, SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+                        if matches!(
+                            kind,
+                            SyntaxKind::LineComment
+                                | SyntaxKind::HashComment
+                                | SyntaxKind::BlockComment
+                        ) {
                             new_children.remove(i);
                         } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
                             break;
@@ -1462,9 +1617,7 @@ impl HjsonDocument {
     // Internal Helpers
     // -------------------------------------------------------------------------
 
-    fn navigate_to_node(&self,
-        path: &[PathSegment],
-    ) -> Option<RedNode> {
+    fn navigate_to_node(&self, path: &[PathSegment]) -> Option<RedNode> {
         let red = RedNode::new_root(self.green.clone());
         navigate_from_node(&red, path)
     }
@@ -1675,7 +1828,10 @@ fn set_inline_comment(
     if let Some(pos) = insert_pos {
         let style = style.unwrap_or(CommentStyle::Line);
         let comment = create_comment_token(text, style);
-        children.insert(pos, NodeOrToken::Token(create_token(SyntaxKind::Whitespace, "  ")));
+        children.insert(
+            pos,
+            NodeOrToken::Token(create_token(SyntaxKind::Whitespace, "  ")),
+        );
         children.insert(pos + 1, NodeOrToken::Token(comment));
     }
 
@@ -1870,7 +2026,14 @@ fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
             let text = token.text();
 
             // Skip trivia (whitespace, comments)
-            if matches!(kind, SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment) {
+            if matches!(
+                kind,
+                SyntaxKind::Whitespace
+                    | SyntaxKind::Newline
+                    | SyntaxKind::LineComment
+                    | SyntaxKind::HashComment
+                    | SyntaxKind::BlockComment
+            ) {
                 continue;
             }
 
@@ -1886,7 +2049,9 @@ fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
                 SyntaxKind::Integer => text.parse::<i64>().ok().map(HjsonValue::Integer),
                 SyntaxKind::HexInteger => {
                     if text.starts_with("0x") || text.starts_with("0X") {
-                        i64::from_str_radix(&text[2..], 16).ok().map(HjsonValue::HexInteger)
+                        i64::from_str_radix(&text[2..], 16)
+                            .ok()
+                            .map(HjsonValue::HexInteger)
                     } else {
                         None
                     }
@@ -2017,7 +2182,9 @@ fn create_pair_node(key: &str, value: &HjsonValue) -> Result<GreenNode, HjsonEdi
     Ok(create_node(SyntaxKind::Pair, children))
 }
 
-fn clone_element(elem: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>) -> GreenElement {
+fn clone_element(
+    elem: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
+) -> GreenElement {
     match elem {
         NodeOrToken::Node(n) => {
             let node: GreenNode = std::borrow::Cow::Borrowed(n).into();
@@ -2042,6 +2209,277 @@ fn is_token_of_kind(elem: &GreenElement, kind: SyntaxKind) -> bool {
 }
 
 // =============================================================================
+// Object Entry Model
+// =============================================================================
+
+/// Object 要素の終端種別
+#[derive(Debug, Clone)]
+pub enum EntryTerminator {
+    /// カンマ区切り
+    Comma(Vec<GreenElement>),
+    /// 改行区切り
+    Newline(Vec<GreenElement>),
+    /// 末尾終端
+    EndOfContainer,
+}
+
+/// Object の1エントリ（1キー分）
+#[derive(Debug, Clone)]
+pub struct ObjectEntry {
+    /// 対象キー行の直前にある改行と行頭インデント
+    pub leading_line_trivia: Vec<GreenElement>,
+    /// 対象キーの直前にあるコメント群
+    pub leading_comments: Vec<GreenElement>,
+    /// キーと値のペア本体 (SyntaxKind::Pair)
+    pub pair: GreenElement,
+    /// 同じ行にある後ろの空白やインラインコメント
+    pub trailing_inline_trivia: Vec<GreenElement>,
+    /// カンマ区切り / 改行区切り / 末尾終端
+    pub terminator: EntryTerminator,
+}
+
+/// 独立したトリビアブロック（どのキーにも属さない）
+#[derive(Debug, Clone)]
+pub struct StandaloneTriviaBlock {
+    /// 独立コメント本体と、その直前の改行・インデントも含む
+    pub elements: Vec<GreenElement>,
+}
+
+/// Object の要素（エントリまたは独立トリビア）
+#[derive(Debug, Clone)]
+pub enum ObjectItem {
+    Entry(ObjectEntry),
+    Standalone(StandaloneTriviaBlock),
+}
+
+/// トリビアかどうかを判定
+fn is_trivia(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Whitespace
+            | SyntaxKind::Newline
+            | SyntaxKind::LineComment
+            | SyntaxKind::HashComment
+            | SyntaxKind::BlockComment
+    )
+}
+
+/// コメントかどうかを判定
+fn is_comment(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+    )
+}
+
+/// Object の children から ObjectItem のリストを構築
+/// 空行判定は \n\s*\n を検出
+fn build_object_items(children: &[GreenElement]) -> Vec<ObjectItem> {
+    let mut items: Vec<ObjectItem> = Vec::new();
+    let mut pending_trivia: Vec<GreenElement> = Vec::new();
+
+    let mut i = 0;
+    while i < children.len() {
+        let elem = &children[i];
+
+        match elem {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair.into() => {
+                // Pair を見つけたら、新しいエントリを開始
+                let pair = elem.clone();
+                let leading_line_trivia = pending_trivia.clone();
+                pending_trivia.clear();
+
+                // trailing_inline_trivia を収集
+                let mut trailing_inline_trivia = Vec::new();
+                i += 1;
+                while i < children.len() {
+                    match &children[i] {
+                        NodeOrToken::Token(t) => {
+                            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            if kind == SyntaxKind::Whitespace {
+                                // 同じ行内の空白は trailing inline
+                                trailing_inline_trivia.push(children[i].clone());
+                                i += 1;
+                            } else if is_comment(kind) {
+                                // インラインコメント
+                                trailing_inline_trivia.push(children[i].clone());
+                                i += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+
+                // terminator を収集
+                let terminator = if i < children.len() {
+                    match &children[i] {
+                        NodeOrToken::Token(t) => {
+                            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                            if kind == SyntaxKind::Comma {
+                                // Comma とその後の trivia
+                                let comma = children[i].clone();
+                                i += 1;
+                                let mut suffix = vec![comma];
+                                while i < children.len() {
+                                    match &children[i] {
+                                        NodeOrToken::Token(t) => {
+                                            let kind =
+                                                crate::syntax::kind::HjsonLanguage::kind_from_raw(
+                                                    t.kind(),
+                                                );
+                                            if kind == SyntaxKind::Newline
+                                                || kind == SyntaxKind::Whitespace
+                                            {
+                                                suffix.push(children[i].clone());
+                                                i += 1;
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                                EntryTerminator::Comma(suffix)
+                            } else if kind == SyntaxKind::Newline {
+                                // 改行区切り - 改行とインデントを terminator に含める
+                                let newline = children[i].clone();
+                                i += 1;
+                                let mut suffix = vec![newline];
+                                // インデントがあれば terminator に含める
+                                if i < children.len() {
+                                    if let NodeOrToken::Token(t) = &children[i] {
+                                        let kind =
+                                            crate::syntax::kind::HjsonLanguage::kind_from_raw(
+                                                t.kind(),
+                                            );
+                                        if kind == SyntaxKind::Whitespace {
+                                            suffix.push(children[i].clone());
+                                            i += 1;
+                                        }
+                                    }
+                                }
+                                EntryTerminator::Newline(suffix)
+                            } else {
+                                EntryTerminator::EndOfContainer
+                            }
+                        }
+                        _ => EntryTerminator::EndOfContainer,
+                    }
+                } else {
+                    EntryTerminator::EndOfContainer
+                };
+
+                // 現在のエントリを作成
+                let entry = ObjectEntry {
+                    leading_line_trivia: leading_line_trivia.clone(),
+                    leading_comments: leading_line_trivia.clone(),
+                    pair,
+                    trailing_inline_trivia,
+                    terminator,
+                };
+                items.push(ObjectItem::Entry(entry));
+            }
+            NodeOrToken::Token(t) => {
+                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+
+                if kind == SyntaxKind::RBrace {
+                    break;
+                } else if is_trivia(kind) {
+                    // trivia を保留
+                    pending_trivia.push(elem.clone());
+
+                    // 空行判定（\n\s*\n）
+                    if has_blank_line(&pending_trivia) {
+                        // 空白行を検出したら、それまでの trivia を standalone として確定
+                        let split_idx = find_blank_line_split(&pending_trivia);
+                        if split_idx > 0 {
+                            let standalone_elements: Vec<_> =
+                                pending_trivia.drain(0..split_idx).collect();
+                            items.push(ObjectItem::Standalone(StandaloneTriviaBlock {
+                                elements: standalone_elements,
+                            }));
+                        }
+                    }
+
+                    i += 1;
+                } else {
+                    // その他のトークンはスキップ
+                    i += 1;
+                }
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    // 残っているトリビアは末尾 standalone として扱う
+    if !pending_trivia.is_empty() {
+        items.push(ObjectItem::Standalone(StandaloneTriviaBlock {
+            elements: pending_trivia,
+        }));
+    }
+
+    items
+}
+
+/// 保留中のトリビアに空行が含まれるか判定（\n\s*\n のパターンを検出）
+fn has_blank_line(trivia: &[GreenElement]) -> bool {
+    let mut had_newline = false;
+
+    for elem in trivia {
+        if let NodeOrToken::Token(t) = elem {
+            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            if kind == SyntaxKind::Newline {
+                if had_newline {
+                    // \n\n のパターン（空白が含まれていてもよい）
+                    return true;
+                }
+                had_newline = true;
+            } else if kind == SyntaxKind::Whitespace {
+                // 改行後の空白は空行判定に含まれる
+            } else if is_comment(kind) {
+                // コメントがあると空行判定をリセット
+                had_newline = false;
+            } else {
+                had_newline = false;
+            }
+        }
+    }
+
+    false
+}
+
+/// 空行で split する位置を見つける
+fn find_blank_line_split(trivia: &[GreenElement]) -> usize {
+    let mut had_newline = false;
+
+    for (i, elem) in trivia.iter().enumerate() {
+        if let NodeOrToken::Token(t) = elem {
+            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            if kind == SyntaxKind::Newline {
+                if had_newline {
+                    // 2つ目の改行が見つかった位置で split
+                    return i;
+                }
+                had_newline = true;
+            } else if kind == SyntaxKind::Whitespace {
+                // 空白は無視
+            } else if is_comment(kind) {
+                // コメントがあればリセット
+                had_newline = false;
+            } else {
+                had_newline = false;
+            }
+        }
+    }
+
+    trivia.len()
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -2053,7 +2491,10 @@ mod tests {
     fn test_parse_dot_path() {
         assert_eq!(
             parse_dot_path("server.host"),
-            vec![PathSegment::Key("server".to_string()), PathSegment::Key("host".to_string())]
+            vec![
+                PathSegment::Key("server".to_string()),
+                PathSegment::Key("host".to_string())
+            ]
         );
 
         assert_eq!(
@@ -2116,7 +2557,10 @@ mod tests {
             println!("Node not found for path: {:?}", path);
         }
 
-        assert_eq!(doc.get("name"), Some(HjsonValue::String("test".to_string())));
+        assert_eq!(
+            doc.get("name"),
+            Some(HjsonValue::String("test".to_string()))
+        );
         assert_eq!(doc.get("count"), Some(HjsonValue::Integer(42)));
     }
 
@@ -2137,8 +2581,14 @@ mod tests {
         let input = r#"{"items": ["a", "b", "c"]}"#;
         let doc = HjsonDocument::parse(input).unwrap();
 
-        assert_eq!(doc.get("items[0]"), Some(HjsonValue::String("a".to_string())));
-        assert_eq!(doc.get("items[1]"), Some(HjsonValue::String("b".to_string())));
+        assert_eq!(
+            doc.get("items[0]"),
+            Some(HjsonValue::String("a".to_string()))
+        );
+        assert_eq!(
+            doc.get("items[1]"),
+            Some(HjsonValue::String("b".to_string()))
+        );
     }
 
     #[test]
@@ -2147,7 +2597,10 @@ mod tests {
         let doc = HjsonDocument::parse(input).unwrap();
 
         let new_doc = doc.set("key", "new").unwrap();
-        assert_eq!(new_doc.get("key"), Some(HjsonValue::String("new".to_string())));
+        assert_eq!(
+            new_doc.get("key"),
+            Some(HjsonValue::String("new".to_string()))
+        );
         assert_eq!(doc.get("key"), Some(HjsonValue::String("old".to_string())));
     }
 

@@ -204,15 +204,27 @@ fn test_edit_object_set_preserves_newlines() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // 値が変更されていることを確認
-    assert!(stdout.contains("\"ae\""), "Value should be updated to \"ae\"");
-    assert!(!stdout.contains("DisplayName: test"), "Old value should be gone");
-    
+    assert!(
+        stdout.contains("\"ae\""),
+        "Value should be updated to \"ae\""
+    );
+    assert!(
+        !stdout.contains("DisplayName: test"),
+        "Old value should be gone"
+    );
+
     // 改行・インデントが保持されていることを確認（バグ修正の検証）
-    assert!(stdout.contains("\n  Icon:"), "Newline and indent before Icon should be preserved");
-    assert!(stdout.contains("\n  ItemType:"), "Newline and indent before ItemType should be preserved");
-    
+    assert!(
+        stdout.contains("\n  Icon:"),
+        "Newline and indent before Icon should be preserved"
+    );
+    assert!(
+        stdout.contains("\n  ItemType:"),
+        "Newline and indent before ItemType should be preserved"
+    );
+
     // 全体の構造が保持されていることを確認（コロンの後のスペースはcreate_pair_nodeの挙動による）
     // 重要なのは改行・インデントが保持されること
     assert!(
@@ -264,6 +276,88 @@ fn test_edit_object_remove() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("value"), "Removed key should not exist");
     assert!(stdout.contains("name"), "Other key should still exist");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 複数行オブジェクトからキー削除時に空行が残らないことを検証
+#[test]
+fn test_edit_object_remove_multiline_preserves_layout() {
+    let binary = get_binary_path();
+
+    let test_content = "Items: {\n\tRegrowthHamaxe: {\n\t\tDisplayName: 成長のハンマーアックス\n\t\tTooltip:\n\t\t\t'''\n\t\t\t土に草を生やす\n\t\t\t植物を多めに収集できる\n\t\t\t木を伐採するときにドングリを植える\n\t\t\t'''\n\t}\n}\n";
+    let expected = "Items: {\n\tRegrowthHamaxe: {\n\t\tTooltip:\n\t\t\t'''\n\t\t\t土に草を生やす\n\t\t\t植物を多めに収集できる\n\t\t\t木を伐採するときにドングリを植える\n\t\t\t'''\n\t}\n}\n";
+    let temp_path = std::env::temp_dir().join("test_edit_remove_multiline.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            temp_path.to_str().unwrap(),
+            "--object-remove",
+            "Items.RegrowthHamaxe.DisplayName",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, expected);
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// カンマ区切り object の先頭要素削除で先頭にカンマが残らないことを検証
+#[test]
+fn test_edit_object_remove_inline_comma_object() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{a: 1, b: 2}"#;
+    let temp_path = std::env::temp_dir().join("test_edit_remove_inline_comma.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path.to_str().unwrap(), "--object-remove", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "{b: 2}");
+
+    fs::remove_file(temp_path).ok();
+}
+
+/// 末尾 standalone trivia が削除後に重複しないことを検証
+#[test]
+fn test_edit_object_remove_does_not_duplicate_trailing_standalone_trivia() {
+    let binary = get_binary_path();
+
+    let test_content = "{\n\ta: 1\n\n\t# footer\n}";
+    let expected = "{\n\t# footer\n}";
+    let temp_path = std::env::temp_dir().join("test_edit_remove_trailing_standalone.hjson");
+    fs::write(&temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path.to_str().unwrap(), "--object-remove", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, expected);
 
     fs::remove_file(temp_path).ok();
 }
@@ -391,10 +485,16 @@ fn test_edit_chain_order() {
 
     let output = Command::new(&binary)
         .args([
-            "edit", temp_path,
-            "--object-set", "a", "10",
-            "--object-remove", "b",
-            "--object-set", "c", "30",
+            "edit",
+            temp_path,
+            "--object-set",
+            "a",
+            "10",
+            "--object-remove",
+            "b",
+            "--object-set",
+            "c",
+            "30",
         ])
         .output()
         .expect("Failed to execute command");
@@ -508,7 +608,10 @@ fn test_edit_type_inference_hex() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("0xFF") || stdout.contains("255"), "Hex value should be recognized");
+    assert!(
+        stdout.contains("0xFF") || stdout.contains("255"),
+        "Hex value should be recognized"
+    );
 
     fs::remove_file(temp_path).ok();
 }
@@ -529,7 +632,10 @@ fn test_edit_type_hint_str() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"42\""), "Value should be quoted as string");
+    assert!(
+        stdout.contains("\"42\""),
+        "Value should be quoted as string"
+    );
 
     fs::remove_file(temp_path).ok();
 }
@@ -565,13 +671,22 @@ fn test_edit_comment_set_before() {
     fs::write(temp_path, test_content).unwrap();
 
     let output = Command::new(&binary)
-        .args(["edit", temp_path, "--comment-set", "name", "This is a comment"])
+        .args([
+            "edit",
+            temp_path,
+            "--comment-set",
+            "name",
+            "This is a comment",
+        ])
         .output()
         .expect("Failed to execute command");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("This is a comment"), "Comment should be added");
+    assert!(
+        stdout.contains("This is a comment"),
+        "Comment should be added"
+    );
 
     fs::remove_file(temp_path).ok();
 }
@@ -592,7 +707,10 @@ fn test_edit_comment_set_header() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Config file"), "Header comment should be added");
+    assert!(
+        stdout.contains("Config file"),
+        "Header comment should be added"
+    );
 
     fs::remove_file(temp_path).ok();
 }
@@ -608,9 +726,13 @@ fn test_edit_comment_style_hash() {
 
     let output = Command::new(&binary)
         .args([
-            "edit", temp_path,
-            "--comment-style", "hash",
-            "--comment-set", "name", "Comment",
+            "edit",
+            temp_path,
+            "--comment-style",
+            "hash",
+            "--comment-set",
+            "name",
+            "Comment",
         ])
         .output()
         .expect("Failed to execute command");
@@ -657,9 +779,13 @@ fn test_edit_output_file() {
 
     let output = Command::new(&binary)
         .args([
-            "edit", input_path,
-            "--output", output_path,
-            "--set", "value", "42",
+            "edit",
+            input_path,
+            "--output",
+            output_path,
+            "--set",
+            "value",
+            "42",
         ])
         .output()
         .expect("Failed to execute command");
@@ -728,8 +854,14 @@ fn test_edit_preserves_comments() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Comments should be preserved
-    assert!(stdout.contains("Header comment"), "Header comment should be preserved");
-    assert!(stdout.contains("Key comment"), "Key comment should be preserved");
+    assert!(
+        stdout.contains("Header comment"),
+        "Header comment should be preserved"
+    );
+    assert!(
+        stdout.contains("Key comment"),
+        "Key comment should be preserved"
+    );
 
     fs::remove_file(temp_path).ok();
 }

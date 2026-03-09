@@ -398,6 +398,10 @@ impl Lexer {
                 {
                     // ''' で始まる場合は既にブロック文字列として処理されているはず
                     // ここに来るのは ''' の2文字目以降の ' のみ
+                    // position を進めて通常の ' として処理
+                    self.advance();
+                    text.push('\'');
+                    continue;
                 }
 
                 self.advance();
