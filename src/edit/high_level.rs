@@ -5,7 +5,7 @@
 use crate::edit::api::{
     create_node, create_token, EditError as LowLevelEditError, GreenNodeEdit, RedNodeEdit,
 };
-use crate::format::{engine, normalize_targets, FormatTarget};
+use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeExt};
@@ -369,7 +369,7 @@ impl HjsonDocument {
         if normalized.is_empty() {
             return Ok(self.clone());
         }
-        engine::format_document(self, &normalized)
+crate::format::engine::format_document(self, &normalized)
     }
 
     /// GreenNodeへの参照を取得

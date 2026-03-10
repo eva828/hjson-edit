@@ -1,6 +1,10 @@
 /// 差分検出モジュール
 ///
-/// 編集前後のGreen Treeを比較して変更された行番号を特定（1始まり）
+/// 編集前後の Green Tree を比較して変更された行番号を特定する。
+/// 文字列の再構築を避け、主にテキスト長と改行数だけを走査して
+/// オフセット計算と行計算を行う。
+use rowan::{GreenNode, GreenNodeData, GreenTokenData, NodeOrToken};
+
 /// 変更情報
 #[derive(Debug, Clone)]
 pub struct ChangeInfo {
@@ -23,30 +27,27 @@ pub enum ChangeType {
     Deleted,
 }
 
-/// 2つのGreenNodeを比較して変更された行番号を返す
+/// 2つの GreenNode を比較して変更された行番号を返す
 ///
 /// # Arguments
-/// * `before` - 編集前のGreenNode
-/// * `after` - 編集後のGreenNode
+/// * `before` - 編集前の GreenNode
+/// * `after` - 編集後の GreenNode
 /// * `source_before` - 編集前のソース文字列（行番号計算用）
 ///
 /// # Returns
 /// 変更された行番号のリスト（1始まり、昇順）
 pub fn detect_changed_lines(
-    before: &rowan::GreenNode,
-    after: &rowan::GreenNode,
+    before: &GreenNode,
+    after: &GreenNode,
     source_before: &str,
 ) -> Vec<usize> {
     let mut changed_lines = Vec::new();
     let mut visited = std::collections::HashSet::new();
 
-    // 差分ノードを検出
-    let diffs = collect_differences(before, after, vec![]);
+    let diffs = collect_differences(before, after, Vec::new());
 
     for diff in diffs {
-        // 変更に関与する行番号を収集
         let lines = get_lines_for_diff(&diff, before, source_before);
-
         for line in lines {
             if visited.insert(line) {
                 changed_lines.push(line);
@@ -54,7 +55,6 @@ pub fn detect_changed_lines(
         }
     }
 
-    // ソートして返す
     changed_lines.sort_unstable();
     changed_lines
 }
@@ -68,43 +68,55 @@ struct DiffInfo {
     is_deletion: bool,
 }
 
-/// 要素のテキストを取得（参照版）
-fn elem_text(elem: &rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>) -> String {
+/// 要素の種類とテキスト長・改行数だけを比較するための要約情報
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ElementSummary {
+    kind: rowan::SyntaxKind,
+    text_len: usize,
+    newline_count: usize,
+}
+
+fn summarize_element(elem: &NodeOrToken<&GreenNodeData, &GreenTokenData>) -> ElementSummary {
     match elem {
-        rowan::NodeOrToken::Node(n) => {
-            let mut result = String::new();
-            for child in n.children() {
-                result.push_str(&elem_text(&child));
-            }
-            result
-        }
-        rowan::NodeOrToken::Token(t) => t.text().to_string(),
+        NodeOrToken::Node(node) => ElementSummary {
+            kind: node.kind(),
+            text_len: node_text_len_ref(node),
+            newline_count: node_newline_count_ref(node),
+        },
+        NodeOrToken::Token(token) => ElementSummary {
+            kind: token.kind(),
+            text_len: token.text().len(),
+            newline_count: token.text().bytes().filter(|&b| b == b'\n').count(),
+        },
     }
 }
 
-/// ノードのテキストを再帰的に取得（参照版）
-fn node_text_ref(node: &rowan::GreenNodeData) -> String {
-    let mut result = String::new();
-    for child in node.children() {
-        match child {
-            rowan::NodeOrToken::Node(n) => result.push_str(&node_text_ref(n)),
-            rowan::NodeOrToken::Token(t) => result.push_str(t.text()),
-        }
-    }
-    result
+/// ノード配下のテキスト長を再帰的に取得
+fn node_text_len_ref(node: &GreenNodeData) -> usize {
+    node.children()
+        .map(|child| match child {
+            NodeOrToken::Node(n) => node_text_len_ref(n),
+            NodeOrToken::Token(t) => t.text().len(),
+        })
+        .sum()
+}
+
+/// ノード配下の改行数を再帰的に取得
+fn node_newline_count_ref(node: &GreenNodeData) -> usize {
+    node.children()
+        .map(|child| match child {
+            NodeOrToken::Node(n) => node_newline_count_ref(n),
+            NodeOrToken::Token(t) => t.text().bytes().filter(|&b| b == b'\n').count(),
+        })
+        .sum()
 }
 
 /// 再帰的に差分を収集
-fn collect_differences(
-    before: &rowan::GreenNode,
-    after: &rowan::GreenNode,
-    path: Vec<usize>,
-) -> Vec<DiffInfo> {
+fn collect_differences(before: &GreenNode, after: &GreenNode, path: Vec<usize>) -> Vec<DiffInfo> {
     let mut diffs = Vec::new();
 
     let before_children: Vec<_> = before.children().collect();
     let after_children: Vec<_> = after.children().collect();
-
     let max_len = before_children.len().max(after_children.len());
 
     for i in 0..max_len {
@@ -113,31 +125,26 @@ fn collect_differences(
 
         match (before_children.get(i), after_children.get(i)) {
             (Some(b), Some(a)) => {
-                // 両方存在 - テキストで比較
-                let b_text = elem_text(b);
-                let a_text = elem_text(a);
-                if b.kind() != a.kind() || b_text != a_text {
+                let b_summary = summarize_element(b);
+                let a_summary = summarize_element(a);
+
+                if b_summary != a_summary {
                     diffs.push(DiffInfo {
                         path: child_path.clone(),
                         is_addition: false,
                         is_deletion: false,
                     });
 
-                    // 両方ともノードなら再帰
-                    if let (rowan::NodeOrToken::Node(bn), rowan::NodeOrToken::Node(an)) = (b, a) {
-                        // Arc::cloneを使ってGreenNodeを取得
-                        let before_node: rowan::GreenNode =
-                            rowan::GreenNode::from(std::borrow::Cow::Borrowed(*bn));
-                        let after_node: rowan::GreenNode =
-                            rowan::GreenNode::from(std::borrow::Cow::Borrowed(*an));
-                        let child_diffs =
-                            collect_differences(&before_node, &after_node, child_path);
-                        diffs.extend(child_diffs);
+                    if let (NodeOrToken::Node(bn), NodeOrToken::Node(an)) = (b, a) {
+                        let before_node: GreenNode =
+                            GreenNode::from(std::borrow::Cow::Borrowed(*bn));
+                        let after_node: GreenNode =
+                            GreenNode::from(std::borrow::Cow::Borrowed(*an));
+                        diffs.extend(collect_differences(&before_node, &after_node, child_path));
                     }
                 }
             }
             (Some(_), None) => {
-                // beforeにのみ存在（削除）
                 diffs.push(DiffInfo {
                     path: child_path,
                     is_addition: false,
@@ -145,7 +152,6 @@ fn collect_differences(
                 });
             }
             (None, Some(_)) => {
-                // afterにのみ存在（追加）
                 diffs.push(DiffInfo {
                     path: child_path,
                     is_addition: true,
@@ -160,108 +166,109 @@ fn collect_differences(
 }
 
 /// 差分に対応する行番号を取得
-fn get_lines_for_diff(diff: &DiffInfo, root: &rowan::GreenNode, source: &str) -> Vec<usize> {
-    let mut lines = Vec::new();
-
-    // パスに基づいてオフセットを計算
+fn get_lines_for_diff(diff: &DiffInfo, root: &GreenNode, source: &str) -> Vec<usize> {
     let offset = calc_offset_at_path(root, &diff.path);
-    let line = offset_to_line(source, offset);
-    lines.push(line);
+    let start_line = offset_to_line(source, offset);
+    let text_metrics = get_metrics_at_path(root, &diff.path);
 
-    // パスの先にある要素のテキスト長を取得
-    let elem_text = get_text_at_path(root, &diff.path);
-    let newline_count = elem_text.chars().filter(|&c| c == '\n').count();
-
-    for i in 1..=newline_count {
-        lines.push(line + i);
+    let mut lines = Vec::with_capacity(text_metrics.newline_count.saturating_add(1));
+    lines.push(start_line);
+    for i in 1..=text_metrics.newline_count {
+        lines.push(start_line + i);
     }
-
     lines
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct TextMetrics {
+    newline_count: usize,
+}
+
 /// パス位置のオフセットを計算
-fn calc_offset_at_path(root: &rowan::GreenNode, path: &[usize]) -> usize {
-    fn calc_offset_recursive(node: &rowan::GreenNode, path: &[usize]) -> usize {
+fn calc_offset_at_path(root: &GreenNode, path: &[usize]) -> usize {
+    fn calc_offset_recursive(node: &GreenNode, path: &[usize]) -> usize {
         if path.is_empty() {
             return 0;
         }
 
-        let children: Vec<_> = node.children().collect();
         let child_idx = path[0];
+        let mut iter = node.children();
 
-        if child_idx >= children.len() {
+        let mut offset = 0usize;
+        for child in iter.by_ref().take(child_idx) {
+            offset += match child {
+                NodeOrToken::Node(n) => node_text_len_ref(n),
+                NodeOrToken::Token(t) => t.text().len(),
+            };
+        }
+
+        let Some(target_child) = iter.next() else {
             return 0;
-        }
+        };
 
-        let mut offset = 0;
-        // 目標の子までのテキスト長を加算
-        for child in children.iter().take(child_idx) {
-            match child {
-                rowan::NodeOrToken::Node(n) => {
-                    offset += node_text_ref(n).len();
-                }
-                rowan::NodeOrToken::Token(t) => {
-                    offset += t.text().len();
-                }
+        match target_child {
+            NodeOrToken::Node(n) => {
+                let green_node: GreenNode = GreenNode::from(std::borrow::Cow::Borrowed(n));
+                offset + calc_offset_recursive(&green_node, &path[1..])
             }
+            NodeOrToken::Token(_) => offset,
         }
-
-        // 次のレベルへ
-        if child_idx < children.len() {
-            match &children[child_idx] {
-                rowan::NodeOrToken::Node(n) => {
-                    let green_node: rowan::GreenNode =
-                        rowan::GreenNode::from(std::borrow::Cow::Borrowed(*n));
-                    offset += calc_offset_recursive(&green_node, &path[1..]);
-                }
-                rowan::NodeOrToken::Token(_) => {
-                    // トークンならここで終了
-                }
-            }
-        }
-
-        offset
     }
 
     calc_offset_recursive(root, path)
 }
 
-/// パス位置のテキストを取得
-fn get_text_at_path(root: &rowan::GreenNode, path: &[usize]) -> String {
-    fn get_text_recursive(node: &rowan::GreenNode, path: &[usize]) -> String {
+/// パス位置のテキスト長と改行数を取得
+fn get_metrics_at_path(root: &GreenNode, path: &[usize]) -> TextMetrics {
+    fn get_metrics_recursive(node: &GreenNode, path: &[usize]) -> TextMetrics {
         if path.is_empty() {
-            // ノードの場合は全体のテキスト
-            let mut result = String::new();
-            for child in node.children() {
-                result.push_str(&elem_text(&child));
-            }
-            return result;
+            return TextMetrics {
+                newline_count: node
+                    .children()
+                    .map(|child| match child {
+                        NodeOrToken::Node(n) => node_newline_count_ref(n),
+                        NodeOrToken::Token(t) => t.text().bytes().filter(|&b| b == b'\n').count(),
+                    })
+                    .sum(),
+            };
         }
 
-        let children: Vec<_> = node.children().collect();
         let child_idx = path[0];
+        let Some(child) = node.children().nth(child_idx) else {
+            return TextMetrics::default();
+        };
 
-        if child_idx >= children.len() {
-            return String::new();
-        }
-
-        match &children[child_idx] {
-            rowan::NodeOrToken::Node(n) => {
-                let green_node: rowan::GreenNode =
-                    rowan::GreenNode::from(std::borrow::Cow::Borrowed(*n));
-                get_text_recursive(&green_node, &path[1..])
+        match child {
+            NodeOrToken::Node(n) => {
+                let green_node: GreenNode = GreenNode::from(std::borrow::Cow::Borrowed(n));
+                get_metrics_recursive(&green_node, &path[1..])
             }
-            rowan::NodeOrToken::Token(t) => t.text().to_string(),
+            NodeOrToken::Token(t) => TextMetrics {
+                newline_count: t.text().bytes().filter(|&b| b == b'\n').count(),
+            },
         }
     }
 
-    get_text_recursive(root, path)
+    get_metrics_recursive(root, path)
 }
 
 /// オフセットを行番号に変換（1始まり）
+///
+/// `offset` はバイトオフセットを想定する。
 fn offset_to_line(source: &str, offset: usize) -> usize {
-    let text_before = &source[..offset.min(source.len())];
-    text_before.chars().filter(|&c| c == '\n').count() + 1
+    let safe_offset = nearest_char_boundary_at_or_before(source, offset.min(source.len()));
+    source[..safe_offset]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count()
+        + 1
+}
+
+fn nearest_char_boundary_at_or_before(source: &str, mut offset: usize) -> usize {
+    while offset > 0 && !source.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 /// シンプルな行ベース差分（テスト用）
@@ -277,7 +284,7 @@ pub fn simple_line_diff(before: &str, after: &str) -> Vec<usize> {
         let a = after_lines.get(i);
 
         if b != a {
-            changed.push(i + 1); // 1始まり
+            changed.push(i + 1);
         }
     }
 
@@ -290,7 +297,7 @@ mod tests {
     use super::super::syntax::kind::SyntaxKind;
     use super::*;
 
-    fn create_simple_object(text: &str) -> rowan::GreenNode {
+    fn create_simple_object(text: &str) -> GreenNode {
         let mut builder = GreenTreeBuilder::new();
         builder.start_node(SyntaxKind::Object);
         for c in text.chars() {
@@ -311,9 +318,6 @@ mod tests {
         builder.finish()
     }
 
-    /// simple_line_diffが変更された行番号を正しく検出することを検証
-    ///
-    /// 3行テキストの2行目を変更し、[2] が返ることを確認する
     #[test]
     fn test_simple_line_diff() {
         let before = "line1\nline2\nline3";
@@ -323,21 +327,29 @@ mod tests {
         assert_eq!(changes, vec![2]);
     }
 
-    /// detect_changed_linesが2つのGreenNode間の差分行を検出することを検証
-    ///
-    /// valueを変更した2つのGreenNodeを比較し、2行目が変更として検出されることを確認する
     #[test]
     fn test_detect_changed_lines() {
         let source = "{\n  \"key\": \"value\"\n}";
         let before = create_simple_object(source);
 
-        // 変更後のノード（valueを変更）
         let after_source = "{\n  \"key\": \"new_value\"\n}";
         let after = create_simple_object(after_source);
 
         let changes = detect_changed_lines(&before, &after, source);
-
-        // 2行目が変更されたはず
         assert!(changes.contains(&2));
+    }
+
+    #[test]
+    fn test_offset_to_line_with_multibyte_chars() {
+        let source = "{\n  key: \"あいう\"\n}\n";
+        let offset = source.find("あ").unwrap();
+        assert_eq!(offset_to_line(source, offset), 2);
+    }
+
+    #[test]
+    fn test_nearest_char_boundary_at_or_before() {
+        let s = "é";
+        assert_eq!(nearest_char_boundary_at_or_before(s, 1), 0);
+        assert_eq!(nearest_char_boundary_at_or_before(s, 2), 2);
     }
 }
