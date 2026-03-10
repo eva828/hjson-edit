@@ -1,13 +1,12 @@
-use crate::edit::api::{create_node, create_token};
+use crate::edit::api::{create_node, create_token, RedNodeEdit};
 use crate::edit::high_level::{
-    clone_element, create_multiline_string_literal, extract_key_text, CommentPath, FormatError,
-    HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
+    clone_element, HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
 };
 use crate::format::FormatTarget;
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
 use crate::syntax::red::{RedNode, RedNodeExt};
-use rowan::{GreenNode, NodeOrToken};
+use rowan::{GreenNode, Language, NodeOrToken};
 
 pub(crate) fn value_needs_contextual_formatting(
     value: &HjsonValue,
@@ -468,6 +467,43 @@ pub(crate) fn create_pair_node(
     children.push(NodeOrToken::Node(val_node));
 
     Ok(create_node(SyntaxKind::Pair, children))
+}
+
+pub(crate) fn create_multiline_string_literal(value: &str, indent: &str, newline: &str) -> String {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    let escaped = normalized.replace("'''", "''\\'");
+    let mut rendered = String::from("'''");
+    rendered.push_str(newline);
+    for line in escaped.split('\n') {
+        rendered.push_str(indent);
+        rendered.push_str(line);
+        rendered.push_str(newline);
+    }
+    rendered.push_str(indent);
+    rendered.push_str("'''");
+    rendered
+}
+
+pub(crate) fn extract_key_text(key_node: &RedNode) -> Option<String> {
+    for elem in key_node.children_with_tokens() {
+        if let Some(token) = elem.as_token() {
+            let kind = token.kind();
+            match kind {
+                SyntaxKind::Ident | SyntaxKind::UnquotedString => {
+                    return Some(token.text().to_string());
+                }
+                SyntaxKind::String => {
+                    let text = token.text();
+                    if text.len() >= 2 {
+                        return Some(text[1..text.len() - 1].to_string());
+                    }
+                    return Some(text.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn replace_pair_value(
