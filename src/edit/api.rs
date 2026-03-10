@@ -18,32 +18,16 @@ pub enum EditOp {
 }
 
 /// 編集エラー
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum EditError {
-    InvalidIndex {
-        index: usize,
-        count: usize,
-    },
+    #[error("Invalid index: {index} (child count: {count})")]
+    InvalidIndex { index: usize, count: usize },
+    #[error("Expected {expected:?}, found {found:?}")]
     InvalidNodeKind {
         expected: SyntaxKind,
         found: SyntaxKind,
     },
 }
-
-impl std::fmt::Display for EditError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EditError::InvalidIndex { index, count } => {
-                write!(f, "Invalid index: {} (child count: {})", index, count)
-            }
-            EditError::InvalidNodeKind { expected, found } => {
-                write!(f, "Expected {:?}, found {:?}", expected, found)
-            }
-        }
-    }
-}
-
-impl std::error::Error for EditError {}
 
 /// GreenNodeに対する編集操作
 pub trait GreenNodeEdit {

@@ -17,68 +17,32 @@ use rowan::{GreenNode, NodeOrToken};
 // =============================================================================
 
 /// 高レベル編集エラー
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum HjsonEditError {
     /// パスが無効
+    #[error("Invalid path: {path}")]
     InvalidPath { path: String },
     /// インデックスが無効
+    #[error("Invalid index: {index} (child count: {count})")]
     InvalidIndex { index: usize, count: usize },
     /// ノードの種類が期待と異なる
+    #[error("Expected {expected:?}, found {found:?}")]
     InvalidNodeKind {
         expected: SyntaxKind,
         found: SyntaxKind,
     },
     /// 低レベルAPIのエラー
-    LowLevel(LowLevelEditError),
+    #[error("{0}")]
+    LowLevel(#[from] LowLevelEditError),
 }
 
-impl From<LowLevelEditError> for HjsonEditError {
-    fn from(e: LowLevelEditError) -> Self {
-        HjsonEditError::LowLevel(e)
-    }
-}
-
-impl std::fmt::Display for HjsonEditError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HjsonEditError::InvalidPath { path } => write!(f, "Invalid path: {}", path),
-            HjsonEditError::InvalidIndex { index, count } => {
-                write!(f, "Invalid index: {} (child count: {})", index, count)
-            }
-            HjsonEditError::InvalidNodeKind { expected, found } => {
-                write!(f, "Expected {:?}, found {:?}", expected, found)
-            }
-            HjsonEditError::LowLevel(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl std::error::Error for HjsonEditError {}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum FormatError {
+    #[error("Invalid format target: {target:?}")]
     InvalidTarget { target: FormatTarget },
-    Edit(HjsonEditError),
+    #[error("{0}")]
+    Edit(#[from] HjsonEditError),
 }
-
-impl From<HjsonEditError> for FormatError {
-    fn from(value: HjsonEditError) -> Self {
-        Self::Edit(value)
-    }
-}
-
-impl std::fmt::Display for FormatError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FormatError::InvalidTarget { target } => {
-                write!(f, "Invalid format target: {:?}", target)
-            }
-            FormatError::Edit(err) => write!(f, "{}", err),
-        }
-    }
-}
-
-impl std::error::Error for FormatError {}
 
 #[derive(Debug, Clone)]
 pub struct EditResult {
