@@ -64,7 +64,11 @@ fn format_node_target(
 }
 
 fn format_path_target(document: &HjsonDocument, path: &str) -> Result<HjsonDocument, FormatError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(path).map_err(|_| {
+        FormatError::InvalidTarget {
+            target: FormatTarget::path(path),
+        }
+    })?;
     if path_segments.is_empty() {
         return format_root_target(document);
     }
@@ -623,7 +627,7 @@ fn normalize_standalone_block(block: &mut StandaloneTriviaBlock, indent: &str, n
                                 newline,
                             )));
                         }
-                        for _ in 1..pending_blank {
+                        for _ in 0..pending_blank {
                             new_elements.push(NodeOrToken::Token(create_token(
                                 SyntaxKind::Newline,
                                 newline,
@@ -646,6 +650,13 @@ fn normalize_standalone_block(block: &mut StandaloneTriviaBlock, indent: &str, n
             }
             NodeOrToken::Node(_) => new_elements.push(elem.clone()),
         }
+    }
+
+    for _ in 0..pending_blank {
+        new_elements.push(NodeOrToken::Token(create_token(
+            SyntaxKind::Newline,
+            newline,
+        )));
     }
 
     block.elements = new_elements;
