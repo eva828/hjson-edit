@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 rowan = "0.15"
 clap = "4.5.60"
+thiserror = "1"
+anyhow = "1"
 
 [dev-dependencies]
 pretty_assertions = "1.4"

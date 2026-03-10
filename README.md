@@ -46,6 +46,8 @@ assert!(fully_formatted.to_string().contains("name: api"));
 
 ## 設計
 
+詳細な設計・アーキテクチャは `docs/ARCHITECTURE.md` を参照してください。
+
 - `parse`: lossless tree を作る
 - `edit_*`: 構造だけ変更し、整形対象を `EditResult` として返す
 - `format`: 全体整形または部分整形を独立実行できる
