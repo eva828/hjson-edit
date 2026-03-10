@@ -191,11 +191,13 @@ fn build_cli() -> Command {
                 .arg(
                     Arg::new("in-place")
                         .long("in-place")
+                        .conflicts_with("output")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("output")
                         .long("output")
+                        .conflicts_with("in-place")
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
         )
