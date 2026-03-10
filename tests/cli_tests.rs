@@ -344,10 +344,42 @@ fn test_edit_object_set_creates_nested_objects_recursively() {
         "Command failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.as_ref(),
+        "Common:\n{\n    Existing: one\n    AA: {\n        Test: a\n    }\n}\n"
+    );
     let doc = assert_stdout_parses(&output.stdout);
     assert_eq!(
         doc.get("Common.AA.Test"),
         Some(HjsonValue::String("a".to_string()))
+    );
+
+    fs::remove_file(temp_path).ok();
+}
+
+#[test]
+fn test_edit_object_set_recursive_creation_preserves_indentation_for_braced_child() {
+    let binary = get_binary_path();
+
+    let test_content = "Common:\n{\n    Existing: one\n}\n";
+    let temp_path = "/tmp/test_edit_recursive_object_set_braced_child.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "Common.e.TEST", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.as_ref(),
+        "Common:\n{\n    Existing: one\n    e: {\n        TEST: a\n    }\n}\n"
     );
 
     fs::remove_file(temp_path).ok();
@@ -1102,9 +1134,11 @@ fn test_edit_string_style_auto_block() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("'''\n    line1\n    line2\n    '''")
-            || stdout.contains("'''\nline1\nline2\n'''")
+    assert!(stdout.contains("'''\n"));
+    let parsed = HjsonDocument::parse(&stdout).unwrap();
+    assert_eq!(
+        parsed.get("text"),
+        Some(HjsonValue::String("line1\nline2".to_string()))
     );
 
     fs::remove_file(temp_path).ok();

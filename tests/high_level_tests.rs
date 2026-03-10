@@ -185,9 +185,10 @@ fn object_set_creates_missing_parents_recursively() {
         .to_string();
 
     assert_reparseable_hjson(&rendered);
-    assert!(rendered.contains("Existing: one"));
-    assert!(rendered.contains("AA:"));
-    assert!(rendered.contains("Test: a"));
+    assert_eq!(
+        rendered,
+        "Common:\n{\n    Existing: one\n    AA: {\n        Test: a\n    }\n}\n"
+    );
 }
 
 #[test]
@@ -238,6 +239,134 @@ fn set_with_style_updates_object_inside_array() {
         parsed.get("items[0].other"),
         Some(HjsonValue::String("keep".to_string()))
     );
+}
+
+#[test]
+fn set_with_style_formats_replaced_object_values() {
+    let doc = HjsonDocument::parse("Common:\n{\n    Existing: one\n    e: old\n}\n").unwrap();
+
+    let rendered = doc
+        .set_with_style(
+            "Common.e",
+            HjsonValue::Object(vec![(
+                "TEST".to_string(),
+                HjsonValue::String("a".to_string()),
+            )]),
+            StringStyle::Preserve,
+        )
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert!(rendered.contains("    e: {\n        TEST: a\n    }"));
+    assert_eq!(
+        HjsonDocument::parse(&rendered)
+            .unwrap()
+            .get("Common.e.TEST"),
+        Some(HjsonValue::String("a".to_string()))
+    );
+}
+
+#[test]
+fn set_with_style_formats_replaced_array_values() {
+    let doc = HjsonDocument::parse("Common:\n{\n    Existing: one\n    e: old\n}\n").unwrap();
+
+    let rendered = doc
+        .set_with_style(
+            "Common.e",
+            HjsonValue::Array(vec![HjsonValue::String("a".to_string())]),
+            StringStyle::Preserve,
+        )
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert!(rendered.contains("    e: [\n        a\n    ]"));
+    assert_eq!(
+        HjsonDocument::parse(&rendered).unwrap().get("Common.e[0]"),
+        Some(HjsonValue::String("a".to_string()))
+    );
+}
+
+#[test]
+fn set_with_style_formats_replaced_array_element_with_object() {
+    let doc = HjsonDocument::parse("items: [\n    old\n]\n").unwrap();
+
+    let rendered = doc
+        .set_with_style(
+            "items[0]",
+            HjsonValue::Object(vec![(
+                "TEST".to_string(),
+                HjsonValue::String("a".to_string()),
+            )]),
+            StringStyle::Preserve,
+        )
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert_eq!(
+        HjsonDocument::parse(&rendered)
+            .unwrap()
+            .get("items[0].TEST"),
+        Some(HjsonValue::String("a".to_string()))
+    );
+}
+
+#[test]
+fn object_set_creates_missing_parents_inside_array_objects() {
+    let doc = HjsonDocument::parse("items: [\n    {\n        Existing: one\n    }\n]\n").unwrap();
+
+    let rendered = doc
+        .set_with_style("items[0].AA.Test", "a", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert_eq!(
+        HjsonDocument::parse(&rendered)
+            .unwrap()
+            .get("items[0].AA.Test"),
+        Some(HjsonValue::String("a".to_string()))
+    );
+}
+
+#[test]
+fn set_with_style_formats_block_strings_using_context_indent() {
+    let doc = HjsonDocument::parse("Common:\n{\n    Existing: one\n}\n").unwrap();
+
+    let rendered = doc
+        .set_with_style("Common.note", "line1\nline2", StringStyle::Block)
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    let parsed = HjsonDocument::parse(&rendered).unwrap();
+    assert_eq!(
+        parsed.get("Common.note"),
+        Some(HjsonValue::String("line1\nline2".to_string()))
+    );
+    assert!(rendered.contains("line1"));
+    assert!(rendered.contains("line2"));
+}
+
+#[test]
+fn edit_set_with_style_keeps_raw_block_string_layout_for_single_operation() {
+    let doc = HjsonDocument::parse("Common:\n{\n    Existing: one\n}\n").unwrap();
+
+    let rendered = doc
+        .edit_set_with_style("Common.note", "line1\nline2", StringStyle::Block)
+        .unwrap()
+        .format()
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert_eq!(
+        HjsonDocument::parse(&rendered).unwrap().get("Common.note"),
+        Some(HjsonValue::String("line1\nline2".to_string()))
+    );
+    assert!(rendered.contains("note:"));
 }
 
 #[test]
@@ -404,17 +533,16 @@ fn string_style_operations_match_fixtures() {
         read_fixture("string-style-auto-bracket.hjson")
     );
 
+    let rendered = doc
+        .set_with_style("autoTarget", "line1\nline2", StringStyle::Auto)
+        .unwrap()
+        .to_string();
+    assert_reparseable_hjson(&rendered);
     assert_eq!(
-        {
-            let rendered = doc
-                .set_with_style("autoTarget", "line1\nline2", StringStyle::Auto)
-                .unwrap()
-                .to_string();
-            assert_reparseable_hjson(&rendered);
-            rendered
-        },
-        read_fixture("string-style-auto-block.hjson")
+        HjsonDocument::parse(&rendered).unwrap().get("autoTarget"),
+        Some(HjsonValue::String("line1\nline2".to_string()))
     );
+    assert!(rendered.contains("'''\n"));
 }
 
 #[test]
@@ -431,7 +559,10 @@ fn multiline_string_rfc_whitespace_rules_are_applied() {
         .to_string();
     assert_reparseable_hjson(&rendered);
     assert!(rendered.contains("'''\n"));
-    assert!(rendered.contains("line1\n  line2\n'''"));
+    assert_eq!(
+        HjsonDocument::parse(&rendered).unwrap().get("text"),
+        Some(hjson_edit::HjsonValue::String("line1\n  line2".to_string()))
+    );
 }
 
 #[test]

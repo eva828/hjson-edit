@@ -485,6 +485,21 @@ impl HjsonDocument {
                 let items = build_object_items(&children);
                 let mut found = false;
                 let mut new_items = Vec::new();
+                let has_braces = lbrace.is_some() && rbrace.is_some();
+                let document_text = self.to_string();
+                let base_indent = line_indent_for_offset_from_text(
+                    &document_text,
+                    obj_node.text_range().start().into(),
+                );
+                let indent_unit = detect_default_indent_unit_from_text(&document_text);
+                let entry_indent = detect_object_entry_indent(&items).unwrap_or_else(|| {
+                    if has_braces {
+                        format!("{}{}", base_indent, indent_unit)
+                    } else {
+                        String::new()
+                    }
+                });
+                let newline = preferred_newline_from_text(&document_text);
 
                 for item in items {
                     match item {
@@ -515,10 +530,13 @@ impl HjsonDocument {
                 if !found {
                     insert_object_entry_without_reformat(
                         &mut new_items,
-                        &obj_green,
                         key,
                         value,
                         string_style,
+                        has_braces,
+                        newline,
+                        &entry_indent,
+                        &base_indent,
                     )?;
                 }
 
@@ -527,7 +545,16 @@ impl HjsonDocument {
                     rebuild_object_children_for_format(lbrace, new_items, rbrace),
                 );
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
-                let dirty_targets = Vec::new();
+                let dirty_target = if value_needs_contextual_formatting(value, string_style, None) {
+                    format_target_for_value(
+                        &updated,
+                        path,
+                        matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)),
+                    )
+                } else {
+                    None
+                };
+                let dirty_targets = dirty_target.into_iter().collect();
                 Ok(EditResult::new(updated, dirty_targets))
             }
             PathSegment::Index(idx) => {
@@ -553,12 +580,14 @@ impl HjsonDocument {
                 let mut entry_index = 0usize;
                 let mut found = false;
                 let mut new_items = Vec::new();
+                let mut replaced_existing_style = None;
 
                 for item in items {
                     match item {
                         ArrayItem::Entry(mut entry) => {
                             if entry_index == *idx {
                                 let existing_style = string_style_for_value_node(&entry.value);
+                                replaced_existing_style = existing_style;
                                 entry.value = NodeOrToken::Node(create_value_node(
                                     value,
                                     string_style,
@@ -587,7 +616,21 @@ impl HjsonDocument {
                     rebuild_array_children_for_format(lbracket, new_items, rbracket),
                 );
                 let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
-                Ok(EditResult::new(updated, Vec::new()))
+                let dirty_target = if value_needs_contextual_formatting(
+                    value,
+                    string_style,
+                    replaced_existing_style,
+                ) {
+                    format_target_for_value(
+                        &updated,
+                        path,
+                        matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)),
+                    )
+                } else {
+                    None
+                };
+                let dirty_targets = dirty_target.into_iter().collect();
+                Ok(EditResult::new(updated, dirty_targets))
             }
         }
     }
@@ -1356,71 +1399,131 @@ fn preferred_newline_from_text(text: &str) -> &'static str {
     }
 }
 
-fn object_entry_indent_from_green(children: &[GreenElement], object_text: &str) -> String {
-    let items = build_object_items(children);
-    if let Some(indent) = detect_object_entry_indent(&items) {
-        return indent;
-    }
+fn detect_default_indent_unit_from_text(source: &str) -> String {
+    let mut space_indents = Vec::new();
+    let mut tab_count = 0usize;
 
-    if children
-        .iter()
-        .any(|c| is_token_of_kind(c, SyntaxKind::LBrace))
-    {
-        let newline = preferred_newline_from_text(object_text);
-        if let Some(pos) = object_text.find('{') {
-            let line_start = object_text[..pos]
-                .rfind('\n')
-                .map(|idx| idx + 1)
-                .unwrap_or(0);
-            let base_indent: String = object_text[line_start..pos]
-                .chars()
-                .take_while(|ch| *ch == ' ' || *ch == '\t')
-                .collect();
-            let indent_unit = if object_text.contains("\t") {
-                "\t"
-            } else {
-                "  "
-            };
-            let _ = newline;
-            return format!("{}{}", base_indent, indent_unit);
+    for line in source.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let indent: String = line
+            .chars()
+            .take_while(|ch| *ch == ' ' || *ch == '\t')
+            .collect();
+        if indent.is_empty() {
+            continue;
+        }
+        if indent.contains('\t') {
+            tab_count += 1;
+        } else {
+            space_indents.push(indent.len());
         }
     }
 
-    String::new()
+    if tab_count > 0 {
+        return "\t".to_string();
+    }
+
+    let width = space_indents
+        .into_iter()
+        .filter(|len| *len > 0)
+        .min()
+        .unwrap_or(2);
+    " ".repeat(width)
+}
+
+fn line_indent_for_offset_from_text(source: &str, offset: usize) -> String {
+    let start = source[..offset].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    source[start..offset]
+        .chars()
+        .take_while(|ch| *ch == ' ' || *ch == '\t')
+        .collect()
+}
+
+fn value_needs_contextual_formatting(
+    value: &HjsonValue,
+    string_style: StringStyle,
+    existing_style: Option<StringStyle>,
+) -> bool {
+    match value {
+        HjsonValue::Object(_) | HjsonValue::Array(_) => true,
+        HjsonValue::String(text) => {
+            resolve_string_style(text, string_style, existing_style) == StringStyle::Block
+        }
+        _ => false,
+    }
+}
+
+fn format_target_for_value(
+    document: &HjsonDocument,
+    path: &[PathSegment],
+    prefer_container: bool,
+) -> Option<FormatTarget> {
+    let target_node = document.navigate_to_node(path)?;
+    let target_node = if prefer_container {
+        resolve_object_child(&target_node)
+            .or_else(|| resolve_array_child(&target_node))
+            .unwrap_or(target_node)
+    } else {
+        target_node
+    };
+    Some(FormatTarget::node(target_node.path_from_root()))
 }
 
 fn insert_object_entry_without_reformat(
     items: &mut Vec<ObjectItem>,
-    obj_green: &GreenNode,
     key: &str,
     value: &HjsonValue,
     string_style: StringStyle,
+    has_braces: bool,
+    newline: &str,
+    entry_indent: &str,
+    closing_indent: &str,
 ) -> Result<(), HjsonEditError> {
-    let object_text = obj_green.to_string();
-    let newline = preferred_newline_from_text(&object_text);
-    let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
-    let indent = object_entry_indent_from_green(&children, &object_text);
     let pair = NodeOrToken::Node(create_pair_node(key, value, string_style, None)?);
 
-    let needs_trailing_newline_before_closing = items
+    let has_existing_entries = items
         .iter()
         .any(|item| matches!(item, ObjectItem::Entry(_)));
+    let last_entry_ends_with_newline = items.iter().rev().find_map(|item| match item {
+        ObjectItem::Entry(entry) => Some(matches!(entry.terminator, EntryTerminator::Newline(_))),
+        ObjectItem::Standalone(_) => None,
+    });
 
-    let leading_line_trivia = if items
-        .iter()
-        .any(|item| matches!(item, ObjectItem::Entry(_)))
-        || children
-            .iter()
-            .any(|c| is_token_of_kind(c, SyntaxKind::LBrace))
-    {
+    let leading_line_trivia = if has_existing_entries {
+        if last_entry_ends_with_newline.unwrap_or(false) {
+            if entry_indent.is_empty() {
+                Vec::new()
+            } else {
+                vec![NodeOrToken::Token(create_token(
+                    SyntaxKind::Whitespace,
+                    entry_indent,
+                ))]
+            }
+        } else {
+            let mut trivia = vec![NodeOrToken::Token(create_token(
+                SyntaxKind::Newline,
+                newline,
+            ))];
+            if !entry_indent.is_empty() {
+                trivia.push(NodeOrToken::Token(create_token(
+                    SyntaxKind::Whitespace,
+                    entry_indent,
+                )));
+            }
+            trivia
+        }
+    } else if has_braces {
         let mut trivia = vec![NodeOrToken::Token(create_token(
             SyntaxKind::Newline,
             newline,
         ))];
-        if !indent.is_empty() {
+        if !entry_indent.is_empty() {
             trivia.push(NodeOrToken::Token(create_token(
                 SyntaxKind::Whitespace,
-                &indent,
+                entry_indent,
             )));
         }
         trivia
@@ -1428,16 +1531,27 @@ fn insert_object_entry_without_reformat(
         Vec::new()
     };
 
+    let mut terminator_suffix = Vec::new();
+    if has_braces {
+        terminator_suffix.push(NodeOrToken::Token(create_token(
+            SyntaxKind::Newline,
+            newline,
+        )));
+        if !closing_indent.is_empty() {
+            terminator_suffix.push(NodeOrToken::Token(create_token(
+                SyntaxKind::Whitespace,
+                closing_indent,
+            )));
+        }
+    }
+
     let new_entry = ObjectItem::Entry(ObjectEntry {
         leading_line_trivia,
         leading_comments: Vec::new(),
         pair,
         trailing_inline_trivia: Vec::new(),
-        terminator: if needs_trailing_newline_before_closing {
-            EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-                SyntaxKind::Newline,
-                newline,
-            ))])
+        terminator: if has_braces {
+            EntryTerminator::Newline(terminator_suffix)
         } else {
             EntryTerminator::EndOfContainer
         },

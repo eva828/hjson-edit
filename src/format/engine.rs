@@ -152,6 +152,18 @@ fn child_indent(base_indent: &str, indent_unit: &str) -> String {
     format!("{}{}", base_indent, indent_unit)
 }
 
+fn entry_indent_matches_context(entry_indent: &str, base_indent: &str) -> bool {
+    if entry_indent.is_empty() {
+        return false;
+    }
+
+    if base_indent.is_empty() {
+        return true;
+    }
+
+    entry_indent.starts_with(base_indent) && entry_indent != base_indent
+}
+
 fn newline_indent_elements(newline: &str, indent: &str) -> Vec<GreenElement> {
     let mut elements = vec![NodeOrToken::Token(create_token(
         SyntaxKind::Newline,
@@ -316,8 +328,10 @@ fn format_object_node(
         .find(|c| is_token_of_kind(c, SyntaxKind::RBrace))
         .cloned();
     let items = build_object_items(&children);
-    let entry_indent =
-        detect_object_entry_indent(&items).unwrap_or_else(|| child_indent(indent, indent_unit));
+    let default_entry_indent = child_indent(indent, indent_unit);
+    let entry_indent = detect_object_entry_indent(&items)
+        .filter(|detected| entry_indent_matches_context(detected, indent))
+        .unwrap_or_else(|| default_entry_indent.clone());
     let is_braceless = lbrace.is_none() && rbrace.is_none();
 
     let mut formatted_items = Vec::new();
@@ -402,8 +416,10 @@ fn format_array_node(
         .find(|c| is_token_of_kind(c, SyntaxKind::RBracket))
         .cloned();
     let items = build_array_items(&children);
-    let entry_indent =
-        detect_array_entry_indent(&items).unwrap_or_else(|| child_indent(indent, indent_unit));
+    let default_entry_indent = child_indent(indent, indent_unit);
+    let entry_indent = detect_array_entry_indent(&items)
+        .filter(|detected| entry_indent_matches_context(detected, indent))
+        .unwrap_or_else(|| default_entry_indent.clone());
 
     let mut formatted_items = Vec::new();
     let mut entry_positions = Vec::new();
