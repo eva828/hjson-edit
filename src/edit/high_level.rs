@@ -600,12 +600,26 @@ impl HjsonDocument {
         let mut current = self.clone();
         for depth in 0..path.len() - 1 {
             let current_path = &path[..=depth];
+            let next_segment = &path[depth + 1];
+
             if let Some(node) = current.navigate_to_node(current_path) {
-                if resolve_object_child(&node).is_none() {
-                    return Err(HjsonEditError::InvalidNodeKind {
-                        expected: SyntaxKind::Object,
-                        found: node.kind(),
-                    });
+                match next_segment {
+                    PathSegment::Key(_) => {
+                        if resolve_object_child(&node).is_none() {
+                            return Err(HjsonEditError::InvalidNodeKind {
+                                expected: SyntaxKind::Object,
+                                found: node.kind(),
+                            });
+                        }
+                    }
+                    PathSegment::Index(_) => {
+                        if resolve_array_child(&node).is_none() {
+                            return Err(HjsonEditError::InvalidNodeKind {
+                                expected: SyntaxKind::Array,
+                                found: node.kind(),
+                            });
+                        }
+                    }
                 }
                 continue;
             }
@@ -619,6 +633,12 @@ impl HjsonDocument {
                     })
                 }
             };
+
+            if matches!(next_segment, PathSegment::Index(_)) {
+                return Err(HjsonEditError::InvalidPath {
+                    path: format!("{:?}", current_path),
+                });
+            }
 
             current = current
                 .edit_set_existing_path(

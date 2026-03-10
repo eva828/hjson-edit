@@ -205,6 +205,42 @@ fn object_set_preserves_closing_brace_newline_when_adding_last_key() {
 }
 
 #[test]
+fn set_with_style_updates_array_element() {
+    let doc = HjsonDocument::parse("items: [1, 2]\n").unwrap();
+
+    let rendered = doc
+        .set_with_style("items[0]", 10, StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    let parsed = HjsonDocument::parse(&rendered).unwrap();
+    assert_eq!(parsed.get("items[0]"), Some(HjsonValue::Integer(10)));
+    assert_eq!(parsed.get("items[1]"), Some(HjsonValue::Integer(2)));
+}
+
+#[test]
+fn set_with_style_updates_object_inside_array() {
+    let doc = HjsonDocument::parse("items: [{ name: old, other: keep }]\n").unwrap();
+
+    let rendered = doc
+        .set_with_style("items[0].name", "new", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    let parsed = HjsonDocument::parse(&rendered).unwrap();
+    assert_eq!(
+        parsed.get("items[0].name"),
+        Some(HjsonValue::String("new".to_string()))
+    );
+    assert_eq!(
+        parsed.get("items[0].other"),
+        Some(HjsonValue::String("keep".to_string()))
+    );
+}
+
+#[test]
 fn array_operations_match_fixtures() {
     let base = read_fixture("array-base.hjson");
     let doc = HjsonDocument::parse(&base).unwrap();
