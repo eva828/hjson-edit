@@ -2379,7 +2379,7 @@ fn insert_array_entry_structural(
 
     for item in items {
         match item {
-            ArrayItem::Entry(mut entry) => {
+            ArrayItem::Entry(entry) => {
                 if let Some(indent) = entry
                     .leading_line_trivia
                     .iter()
