@@ -94,8 +94,11 @@ pub(crate) fn comment_append(
         return comment_set(document, path, text, Some(CommentStyle::Block));
     }
 
-    let last_comment = current_comments.last().unwrap();
-    let existing = strip_comment_prefix(last_comment);
+    let existing = current_comments
+        .iter()
+        .map(|comment| strip_comment_prefix(comment))
+        .collect::<Vec<_>>()
+        .join("\n");
     let new_text = format!("{}\n{}", existing, text);
     comment_set(document, path, &new_text, Some(append_style))
 }
@@ -118,7 +121,7 @@ fn set_key_comment(
     text: &str,
     style: Option<CommentStyle>,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
     if path_segments.is_empty() {
         return Err(HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
@@ -158,7 +161,7 @@ fn set_inline_comment_for_path(
     text: &str,
     style: Option<CommentStyle>,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
     if path_segments.is_empty() {
         return Err(HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
@@ -184,42 +187,21 @@ fn set_header_comment(
     text: &str,
     style: Option<CommentStyle>,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let red = RedNode::new_root(document.green_node().clone());
-    let mut new_children: Vec<GreenElement> =
-        red.children_with_tokens().map(clone_red_or_token).collect();
     let style = style.unwrap_or(CommentStyle::Line);
-    let new_comment = create_comment_token(text, style);
+    let children: Vec<GreenElement> = RedNode::new_root(document.green_node().clone())
+        .children_with_tokens()
+        .map(clone_red_or_token)
+        .collect();
+    let split_idx = children
+        .iter()
+        .position(|child| !is_leading_comment_trivia(child))
+        .unwrap_or(children.len());
 
-    let mut replaced = false;
-    for (i, child) in new_children.clone().iter().enumerate() {
-        if let NodeOrToken::Token(t) = child {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-            if matches!(
-                kind,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-            ) {
-                new_children[i] = NodeOrToken::Token(new_comment.clone());
-                replaced = true;
-                break;
-            }
-        }
-        if !matches!(
-            child,
-            NodeOrToken::Token(t) if {
-                let k = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-                matches!(k, SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment)
-            }
-        ) {
-            break;
-        }
-    }
-
-    if !replaced {
-        new_children.insert(0, NodeOrToken::Token(new_comment));
-        new_children.insert(
-            1,
-            NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")),
-        );
+    let mut new_children: Vec<GreenElement> = Vec::new();
+    append_comment_tokens(&mut new_children, text, style);
+    if split_idx < children.len() {
+        new_children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
+        new_children.extend(children.into_iter().skip(split_idx));
     }
 
     Ok(HjsonDocument::from_green(create_node(
@@ -233,38 +215,47 @@ fn set_footer_comment(
     text: &str,
     style: Option<CommentStyle>,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let red = RedNode::new_root(document.green_node().clone());
-    let mut children: Vec<GreenElement> =
-        red.children_with_tokens().map(clone_red_or_token).collect();
     let style = style.unwrap_or(CommentStyle::Line);
-    let new_comment = create_comment_token(text, style);
+    let mut children: Vec<GreenElement> = RedNode::new_root(document.green_node().clone())
+        .children_with_tokens()
+        .map(clone_red_or_token)
+        .collect();
+    let mut footer_start = children.len();
 
-    let mut replaced = false;
-    let mut i = children.len();
-    while i > 0 {
-        i -= 1;
-        let child = &children[i];
-        if let NodeOrToken::Token(t) = child {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-            if matches!(
-                kind,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-            ) {
-                children[i] = NodeOrToken::Token(new_comment.clone());
-                replaced = true;
-                break;
-            } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
-                break;
+    while footer_start > 0 {
+        let elem = &children[footer_start - 1];
+        match elem {
+            NodeOrToken::Token(t) => {
+                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                if matches!(
+                    kind,
+                    SyntaxKind::Whitespace
+                        | SyntaxKind::Newline
+                        | SyntaxKind::LineComment
+                        | SyntaxKind::HashComment
+                        | SyntaxKind::BlockComment
+                ) {
+                    footer_start -= 1;
+                    continue;
+                }
             }
-        } else {
-            break;
+            NodeOrToken::Node(_) => {}
         }
+        break;
     }
 
-    if !replaced {
+    children.truncate(footer_start);
+
+    if !children.is_empty()
+        && !matches!(
+            children.last(),
+            Some(NodeOrToken::Token(t))
+                if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Newline
+        )
+    {
         children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
-        children.push(NodeOrToken::Token(new_comment));
     }
+    append_comment_tokens(&mut children, text, style);
 
     Ok(HjsonDocument::from_green(create_node(
         SyntaxKind::Root,
@@ -276,7 +267,7 @@ fn remove_key_comment(
     document: &HjsonDocument,
     dot_path: &str,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
     if path_segments.is_empty() {
         return Err(HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
@@ -310,7 +301,7 @@ fn remove_inline_comment_for_path(
     document: &HjsonDocument,
     dot_path: &str,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
     if path_segments.is_empty() {
         return Err(HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
@@ -404,7 +395,7 @@ fn get_comments_before_key(
     document: &HjsonDocument,
     dot_path: &str,
 ) -> Result<Vec<String>, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
     if path_segments.is_empty() {
         return Err(HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
@@ -443,7 +434,7 @@ fn get_inline_comment(
     document: &HjsonDocument,
     dot_path: &str,
 ) -> Result<Vec<String>, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path);
+    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
     if path_segments.is_empty() {
         return Err(HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
@@ -533,6 +524,38 @@ fn create_comment_token(text: &str, style: CommentStyle) -> rowan::GreenToken {
         CommentStyle::Block => (SyntaxKind::BlockComment, format!("/* {} */", text)),
     };
     create_token(kind, &content)
+}
+
+fn append_comment_tokens(children: &mut Vec<GreenElement>, text: &str, style: CommentStyle) {
+    match style {
+        CommentStyle::Block => {
+            children.push(NodeOrToken::Token(create_comment_token(text, style)));
+        }
+        CommentStyle::Line | CommentStyle::Hash => {
+            let mut lines = text.split('\n').peekable();
+            while let Some(line) = lines.next() {
+                children.push(NodeOrToken::Token(create_comment_token(line, style)));
+                if lines.peek().is_some() {
+                    children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
+                }
+            }
+        }
+    }
+}
+
+fn is_leading_comment_trivia(elem: &GreenElement) -> bool {
+    matches!(
+        elem,
+        NodeOrToken::Token(t)
+            if matches!(
+                crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()),
+                SyntaxKind::Whitespace
+                    | SyntaxKind::Newline
+                    | SyntaxKind::LineComment
+                    | SyntaxKind::HashComment
+                    | SyntaxKind::BlockComment
+            )
+    )
 }
 
 fn determine_comment_style(
@@ -673,11 +696,17 @@ fn set_inline_comment(
         }
     }
 
-    let insert_pos = comma_pos.or_else(|| pair_end_pos.map(|p| p + 1));
-    if let Some(pos) = insert_pos {
+    if let Some(pair_end) = pair_end_pos {
         let style = style.unwrap_or(CommentStyle::Line);
+        let style =
+            if comma_pos.is_some() && matches!(style, CommentStyle::Line | CommentStyle::Hash) {
+                CommentStyle::Block
+            } else {
+                style
+            };
         let comment = create_comment_token(text, style);
-        let mut end = pos;
+        let start = pair_end + 1;
+        let mut end = start;
         while end < children.len() {
             match &children[end] {
                 NodeOrToken::Token(t) => {
@@ -697,12 +726,19 @@ fn set_inline_comment(
             }
             break;
         }
-        children.drain(pos..end);
-        children.insert(
-            pos,
+        let mut replacement = vec![
             NodeOrToken::Token(create_token(SyntaxKind::Whitespace, "  ")),
-        );
-        children.insert(pos + 1, NodeOrToken::Token(comment));
+            NodeOrToken::Token(comment),
+        ];
+        if let Some(comma_pos) = comma_pos {
+            if comma_pos >= end {
+                replacement.push(NodeOrToken::Token(create_token(
+                    SyntaxKind::Whitespace,
+                    " ",
+                )));
+            }
+        }
+        children.splice(start..end, replacement);
     }
 
     Ok(create_node(SyntaxKind::Object, children))
