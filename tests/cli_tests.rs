@@ -20,10 +20,7 @@ fn test_cli_parse_command() {
     let binary = get_binary_path();
 
     // Create a temporary test file
-    let test_content = r#"{
-  name: "test",
-  value: 42
-}"#;
+    let test_content = "{\n  name: \"test\",\n\n  value: 42\n}";
     let temp_path = "/tmp/test_parse.hjson";
     fs::write(temp_path, test_content).unwrap();
 
@@ -47,7 +44,7 @@ fn test_cli_parse_command() {
     fs::remove_file(temp_path).ok();
 }
 
-/// formatコマンドでフォーマット保持出力（入力と同一の文字列）が得られることを検証
+/// formatコマンドで文書全体が整形されることを検証
 #[test]
 fn test_cli_format_command() {
     let binary = get_binary_path();
@@ -71,12 +68,9 @@ fn test_cli_format_command() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Format should preserve the input exactly
-    assert_eq!(
-        stdout.trim(),
-        test_content.trim(),
-        "Format should preserve input"
-    );
+    assert!(stdout.contains("name: \"test\""));
+    assert!(stdout.contains("value: 42"));
+    assert!(!stdout.contains("\n\n\n"));
 
     // Cleanup
     fs::remove_file(temp_path).ok();

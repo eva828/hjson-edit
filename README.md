@@ -1,6 +1,6 @@
 # hjson-edit
 
-位置情報とコメントを保持したままHJSONを編集するためのRust製パーサー・エディタ。
+位置情報とコメントを保持しつつ、構造編集と整形を分離して扱えるRust製HJSONエディタ。
 
 ## インストール
 
@@ -16,14 +16,17 @@ cargo install --git https://github.com/eva828/hjson-edit
 # パースして確認
 hjson-edit parse config.hjson
 
-# フォーマット保持して出力
+# ドキュメント全体を整形して出力
 hjson-edit format config.hjson
+
+# 編集後、変更したコンテナだけ整形して出力
+hjson-edit edit config.hjson --set server.host localhost --array-append items newValue
 ```
 
 ### ライブラリ
 
 ```rust
-use hjson_edit::{parse_to_red, red_to_string};
+use hjson_edit::{FormatTarget, HjsonDocument};
 
 let input = r#"{
     // Configuration
@@ -31,7 +34,19 @@ let input = r#"{
     port: 8080
 }"#;
 
-let red = parse_to_red(input)?;
-let output = red_to_string(&red);
-assert_eq!(output, input);  // コメントと空白が保持される
+let document = HjsonDocument::parse(input)?;
+
+let edited = document
+    .edit_set("name", "api")?
+    .format()?;
+
+let fully_formatted = edited.format(vec![FormatTarget::Document])?;
+assert!(fully_formatted.to_string().contains("name: api"));
 ```
+
+## 設計
+
+- `parse`: lossless tree を作る
+- `edit_*`: 構造だけ変更し、整形対象を `EditResult` として返す
+- `format`: 全体整形または部分整形を独立実行できる
+- `set` / `push` / `insert_at` などの convenience API は内部で `edit -> format` を実行する

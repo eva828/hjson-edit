@@ -97,7 +97,7 @@ fn build_cli() -> Command {
         )
         .subcommand(
             Command::new("format")
-                .about("Parse and re-output (format preservation test)")
+                .about("Format the entire HJSON document")
                 .arg(
                     Arg::new("file")
                         .required(true)
@@ -106,7 +106,7 @@ fn build_cli() -> Command {
         )
         .subcommand(
             Command::new("edit")
-                .about("Edit HJSON file with various operations")
+                .about("Edit HJSON, then format only changed containers")
                 .arg(
                     Arg::new("file")
                         .required(true)
@@ -244,11 +244,14 @@ fn run_format(matches: &clap::ArgMatches) {
         }
     };
 
-    match hjson_edit::parse(&content) {
-        Ok(result) => {
-            let output = hjson_edit::green_to_string(&result.green);
-            print!("{}", output);
-        }
+    match HjsonDocument::parse(&content) {
+        Ok(document) => match document.format_document() {
+            Ok(formatted) => print!("{}", formatted),
+            Err(err) => {
+                eprintln!("Format error: {}", err);
+                std::process::exit(1);
+            }
+        },
         Err(errors) => {
             eprintln!("Parse errors:");
             for err in errors {

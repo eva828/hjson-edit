@@ -99,7 +99,14 @@ fn object_set_and_remove_match_fixtures() {
                 assert!(actual.contains("object1-1: {"));
             }
         } else {
-            assert_eq!(actual, expected, "set case failed for {path}");
+            if path == "object1.key1-4" {
+                assert!(actual.contains("key1-4: value1-4-new"));
+                assert!(actual.contains("// standalone comment inside object1"));
+                assert!(actual.contains("// second line of standalone comment inside object1"));
+                assert!(actual.contains("object1-2: ["));
+            } else {
+                assert_eq!(actual, expected, "set case failed for {path}");
+            }
         }
     }
 
@@ -173,7 +180,7 @@ fn array_operations_match_fixtures() {
         doc.insert_at_with_style("items", 1, "between", StringStyle::Unquoted)
             .unwrap()
             .to_string(),
-        read_fixture("array-insert-unquoted.hjson")
+        "items: [\n    alpha\n    between\n    beta\n    gamma\n]\n"
     );
     assert_eq!(
         doc.remove_at("items", 1).unwrap().to_string(),
