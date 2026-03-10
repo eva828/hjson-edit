@@ -126,89 +126,134 @@ pub enum PathSegment {
 
 /// パスへの変換トレイト
 pub trait IntoPath {
-    fn into_path(self) -> Vec<PathSegment>;
+    fn into_path(self) -> Result<Vec<PathSegment>, HjsonEditError>;
 }
 
 impl IntoPath for &str {
-    fn into_path(self) -> Vec<PathSegment> {
+    fn into_path(self) -> Result<Vec<PathSegment>, HjsonEditError> {
         parse_dot_path(self)
     }
 }
 
 impl IntoPath for &[&str] {
-    fn into_path(self) -> Vec<PathSegment> {
-        self.iter()
+    fn into_path(self) -> Result<Vec<PathSegment>, HjsonEditError> {
+        Ok(self
+            .iter()
             .map(|s| PathSegment::Key(s.to_string()))
-            .collect()
+            .collect())
     }
 }
 
 impl IntoPath for Vec<PathSegment> {
-    fn into_path(self) -> Vec<PathSegment> {
-        self
+    fn into_path(self) -> Result<Vec<PathSegment>, HjsonEditError> {
+        Ok(self)
     }
 }
 
 impl IntoPath for &[PathSegment] {
-    fn into_path(self) -> Vec<PathSegment> {
-        self.to_vec()
+    fn into_path(self) -> Result<Vec<PathSegment>, HjsonEditError> {
+        Ok(self.to_vec())
     }
 }
 
 /// ドット記法のパスをパースする
-fn parse_dot_path(s: &str) -> Vec<PathSegment> {
+fn parse_dot_path(s: &str) -> Result<Vec<PathSegment>, HjsonEditError> {
     if s.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let mut segments = Vec::new();
-    let mut current = String::new();
-    let mut chars = s.chars().peekable();
+    let chars: Vec<char> = s.chars().collect();
+    let mut pos = 0;
 
-    while let Some(ch) = chars.next() {
-        match ch {
-            '.' => {
-                if !current.is_empty() {
-                    segments.push(PathSegment::Key(current.clone()));
-                    current.clear();
+    while pos < chars.len() {
+        if chars[pos] == '.' {
+            return Err(HjsonEditError::InvalidPath {
+                path: s.to_string(),
+            });
+        }
+
+        if chars[pos] == '[' {
+            let (index, next_pos) = parse_index_segment(&chars, pos, s)?;
+            segments.push(PathSegment::Index(index));
+            pos = next_pos;
+        } else {
+            let start = pos;
+            while pos < chars.len() && chars[pos] != '.' && chars[pos] != '[' {
+                if chars[pos] == ']' {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: s.to_string(),
+                    });
                 }
+                pos += 1;
             }
-            '[' => {
-                if !current.is_empty() {
-                    segments.push(PathSegment::Key(current.clone()));
-                    current.clear();
-                }
-                let mut index_str = String::new();
-                while let Some(&c) = chars.peek() {
-                    if c == ']' {
-                        chars.next();
-                        break;
-                    }
-                    if c.is_ascii_digit() {
-                        index_str.push(c);
-                        chars.next();
-                    } else {
-                        chars.next();
-                    }
-                }
-                if let Ok(index) = index_str.parse::<usize>() {
-                    segments.push(PathSegment::Index(index));
-                }
+
+            if start == pos {
+                return Err(HjsonEditError::InvalidPath {
+                    path: s.to_string(),
+                });
             }
-            _ => {
-                current.push(ch);
+
+            segments.push(PathSegment::Key(chars[start..pos].iter().collect()));
+
+            while pos < chars.len() && chars[pos] == '[' {
+                let (index, next_pos) = parse_index_segment(&chars, pos, s)?;
+                segments.push(PathSegment::Index(index));
+                pos = next_pos;
             }
+        }
+
+        if pos == chars.len() {
+            break;
+        }
+
+        if chars[pos] != '.' {
+            return Err(HjsonEditError::InvalidPath {
+                path: s.to_string(),
+            });
+        }
+
+        pos += 1;
+        if pos == chars.len() {
+            return Err(HjsonEditError::InvalidPath {
+                path: s.to_string(),
+            });
         }
     }
 
-    if !current.is_empty() {
-        segments.push(PathSegment::Key(current));
-    }
-
-    segments
+    Ok(segments)
 }
 
-pub(crate) fn parse_path_for_format(s: &str) -> Vec<PathSegment> {
+fn parse_index_segment(
+    chars: &[char],
+    start: usize,
+    raw: &str,
+) -> Result<(usize, usize), HjsonEditError> {
+    let mut pos = start + 1;
+    let digit_start = pos;
+
+    while pos < chars.len() && chars[pos].is_ascii_digit() {
+        pos += 1;
+    }
+
+    if digit_start == pos || pos >= chars.len() || chars[pos] != ']' {
+        return Err(HjsonEditError::InvalidPath {
+            path: raw.to_string(),
+        });
+    }
+
+    let index = chars[digit_start..pos]
+        .iter()
+        .collect::<String>()
+        .parse::<usize>()
+        .map_err(|_| HjsonEditError::InvalidPath {
+            path: raw.to_string(),
+        })?;
+
+    Ok((index, pos + 1))
+}
+
+pub(crate) fn parse_path_for_format(s: &str) -> Result<Vec<PathSegment>, HjsonEditError> {
     parse_dot_path(s)
 }
 
@@ -392,7 +437,7 @@ impl HjsonDocument {
         value: impl Into<HjsonValue>,
         string_style: StringStyle,
     ) -> Result<EditResult, HjsonEditError> {
-        let path = path.into_path();
+        let path = path.into_path()?;
         let value = value.into();
 
         if path.is_empty() {
@@ -474,7 +519,12 @@ impl HjsonDocument {
                     new_items.push(ObjectItem::Entry(ObjectEntry {
                         leading_line_trivia: Vec::new(),
                         leading_comments: Vec::new(),
-                        pair: NodeOrToken::Node(create_pair_node(key, &value, string_style, None)?),
+                        pair: NodeOrToken::Node(create_pair_node(
+                            &key,
+                            &value,
+                            string_style,
+                            None,
+                        )?),
                         trailing_inline_trivia: Vec::new(),
                         terminator: EntryTerminator::EndOfContainer,
                     }));
@@ -556,7 +606,7 @@ impl HjsonDocument {
     }
 
     pub fn edit_remove(&self, path: impl IntoPath) -> Result<EditResult, HjsonEditError> {
-        let path_vec = path.into_path();
+        let path_vec = path.into_path()?;
         let updated = self.remove_structural(&path_vec)?;
         Ok(EditResult::new(updated, Vec::new()))
     }
@@ -575,7 +625,7 @@ impl HjsonDocument {
         value: impl Into<HjsonValue>,
         string_style: StringStyle,
     ) -> Result<EditResult, HjsonEditError> {
-        let path = path.into_path();
+        let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
         let new_arr = insert_array_entry_structural(&arr_node, usize::MAX, &value, string_style)?;
@@ -602,7 +652,7 @@ impl HjsonDocument {
         value: impl Into<HjsonValue>,
         string_style: StringStyle,
     ) -> Result<EditResult, HjsonEditError> {
-        let path = path.into_path();
+        let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
         let new_arr = insert_array_entry_structural(&arr_node, index, &value, string_style)?;
@@ -618,27 +668,29 @@ impl HjsonDocument {
         path: impl IntoPath,
         index: usize,
     ) -> Result<EditResult, HjsonEditError> {
-        let path = path.into_path();
+        let path = path.into_path()?;
         let updated = self.remove_at_structural(&path, index)?;
         Ok(EditResult::new(updated, Vec::new()))
     }
 
     /// パスに対応する値を取得
     pub fn get(&self, path: impl IntoPath) -> Option<HjsonValue> {
-        let path = path.into_path();
+        let path = path.into_path().ok()?;
         let node = self.navigate_to_node(&path)?;
         node_to_value(&node)
     }
 
     /// パスが存在するか確認
     pub fn contains(&self, path: impl IntoPath) -> bool {
-        let path = path.into_path();
-        self.navigate_to_node(&path).is_some()
+        path.into_path()
+            .ok()
+            .and_then(|path| self.navigate_to_node(&path))
+            .is_some()
     }
 
     /// 指定パスのオブジェクトのキー一覧を取得
     pub fn keys(&self, path: impl IntoPath) -> Option<Vec<String>> {
-        let path = path.into_path();
+        let path = path.into_path().ok()?;
         let node = self.navigate_to_node(&path)?;
 
         let obj = if let Some(obj) = node.child_by_kind(SyntaxKind::Object) {
@@ -664,7 +716,7 @@ impl HjsonDocument {
 
     /// 配列またはオブジェクトの要素数を取得
     pub fn len(&self, path: impl IntoPath) -> Option<usize> {
-        let path = path.into_path();
+        let path = path.into_path().ok()?;
         let node = self.navigate_to_node(&path)?;
 
         if let Some(array) = node.child_by_kind(SyntaxKind::Array) {
@@ -739,20 +791,22 @@ impl HjsonDocument {
     pub fn insert(
         &self,
         path: impl IntoPath,
-        _key: &str,
+        key: &str,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError> {
-        self.insert_with_style(path, _key, value, StringStyle::Auto)
+        self.insert_with_style(path, key, value, StringStyle::Auto)
     }
 
     /// オブジェクトに新しいキーを追加（文字列スタイル指定付き）
     pub fn insert_with_style(
         &self,
         path: impl IntoPath,
-        _key: &str,
+        key: &str,
         value: impl Into<HjsonValue>,
         string_style: StringStyle,
     ) -> Result<Self, HjsonEditError> {
+        let mut path = path.into_path()?;
+        path.push(PathSegment::Key(key.to_string()));
         self.set_with_style(path, value, string_style)
     }
 
@@ -781,7 +835,7 @@ impl HjsonDocument {
 
     /// 配列の末尾の要素を削除
     pub fn pop(&self, path: impl IntoPath) -> Result<Self, HjsonEditError> {
-        let path = path.into_path();
+        let path = path.into_path()?;
 
         let arr_node = if path.is_empty() {
             let red = RedNode::new_root(self.green.clone());
@@ -1464,14 +1518,14 @@ fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
             }
 
             return match kind {
-                SyntaxKind::String | SyntaxKind::SingleQuoteString | SyntaxKind::BlockString => {
-                    if text.len() >= 2 {
-                        Some(HjsonValue::String(text[1..text.len() - 1].to_string()))
-                    } else {
-                        Some(HjsonValue::String(text.to_string()))
-                    }
+                SyntaxKind::String => Some(HjsonValue::String(strip_surrounding(text, 1))),
+                SyntaxKind::SingleQuoteString => {
+                    Some(HjsonValue::String(strip_surrounding(text, 1)))
                 }
-                SyntaxKind::UnquotedString => Some(HjsonValue::String(text.to_string())),
+                SyntaxKind::BlockString => Some(HjsonValue::String(strip_surrounding(text, 3))),
+                SyntaxKind::UnquotedString | SyntaxKind::Ident => {
+                    Some(HjsonValue::String(text.to_string()))
+                }
                 SyntaxKind::Integer => text.parse::<i64>().ok().map(HjsonValue::Integer),
                 SyntaxKind::HexInteger => {
                     if text.starts_with("0x") || text.starts_with("0X") {
@@ -1494,6 +1548,15 @@ fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
         }
     }
     None
+}
+
+fn strip_surrounding(text: &str, delimiter_len: usize) -> String {
+    let min_len = delimiter_len * 2;
+    if text.len() >= min_len {
+        text[delimiter_len..text.len() - delimiter_len].to_string()
+    } else {
+        text.to_string()
+    }
 }
 
 fn string_style_for_red_value_node(node: &RedNode) -> Option<StringStyle> {
@@ -1744,7 +1807,10 @@ fn create_pair_node(
     {
         create_token(SyntaxKind::Ident, key)
     } else {
-        create_token(SyntaxKind::String, format!("\"{}\"", key))
+        create_token(
+            SyntaxKind::String,
+            format!("\"{}\"", escape_double_quoted(key)),
+        )
     };
     let key_node = create_node(SyntaxKind::Key, vec![NodeOrToken::Token(key_token)]);
     children.push(NodeOrToken::Node(key_node));
@@ -2524,7 +2590,7 @@ mod tests {
     #[test]
     fn test_parse_dot_path() {
         assert_eq!(
-            parse_dot_path("server.host"),
+            parse_dot_path("server.host").unwrap(),
             vec![
                 PathSegment::Key("server".to_string()),
                 PathSegment::Key("host".to_string())
@@ -2532,13 +2598,22 @@ mod tests {
         );
 
         assert_eq!(
-            parse_dot_path("items[0].name"),
+            parse_dot_path("items[0].name").unwrap(),
             vec![
                 PathSegment::Key("items".to_string()),
                 PathSegment::Index(0),
                 PathSegment::Key("name".to_string())
             ]
         );
+
+        assert!(matches!(
+            parse_dot_path("items[abc]"),
+            Err(HjsonEditError::InvalidPath { .. })
+        ));
+        assert!(matches!(
+            parse_dot_path("items[1x]"),
+            Err(HjsonEditError::InvalidPath { .. })
+        ));
     }
 
     #[test]
@@ -2611,6 +2686,21 @@ mod tests {
     }
 
     #[test]
+    fn test_document_get_ident_and_block_string() {
+        let input = "key: value\nblock: '''abc'''\n";
+        let doc = HjsonDocument::parse(input).unwrap();
+
+        assert_eq!(
+            doc.get("key"),
+            Some(HjsonValue::String("value".to_string()))
+        );
+        assert_eq!(
+            doc.get("block"),
+            Some(HjsonValue::String("abc".to_string()))
+        );
+    }
+
+    #[test]
     fn test_document_get_array() {
         let input = r#"{"items": ["a", "b", "c"]}"#;
         let doc = HjsonDocument::parse(input).unwrap();
@@ -2645,6 +2735,16 @@ mod tests {
 
         let new_doc = doc.push("items", 3).unwrap();
         assert_eq!(new_doc.len("items"), Some(3));
+    }
+
+    #[test]
+    fn test_insert_uses_path_and_escapes_key() {
+        let doc = HjsonDocument::parse("root: {}\n").unwrap();
+        let new_doc = doc.insert("root", "a\"b", 1).unwrap();
+        let rendered = new_doc.to_string();
+
+        assert!(rendered.contains("\"a\\\"b\": 1"));
+        assert!(HjsonDocument::parse(&rendered).is_ok());
     }
 
     #[test]
