@@ -139,6 +139,20 @@ fn test_read_unquoted_strings() {
     assert_eq!(output, content, "Round-trip should preserve content");
 }
 
+#[test]
+fn test_read_rfc_quoteless_examples() {
+    let path = format!("{}/quoteless_rfc_examples.hjson", FIXTURES_DIR);
+    let content = fs::read_to_string(&path).expect("Failed to read file");
+
+    let red = parse_to_red(&content).expect("Failed to parse");
+    let output = red_to_string(&red);
+
+    assert_eq!(
+        output, content,
+        "Round-trip should preserve RFC quoteless examples"
+    );
+}
+
 /// カンマなし改行区切りオブジェクトのfixtureファイルを読み込みラウンドトリップを検証
 ///
 /// HJSON仕様では改行がカンマの代わりに区切りとして使える。
@@ -216,6 +230,7 @@ fn test_all_fixtures_exist() {
         "with_comments.hjson",
         "invalid_syntax.hjson",
         "unquoted_strings.hjson",
+        "quoteless_rfc_examples.hjson",
         "no_comma_object.hjson",
         "no_comma_array.hjson",
     ];

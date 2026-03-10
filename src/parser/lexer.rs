@@ -96,7 +96,8 @@ impl Lexer {
                 continue;
             }
 
-            if self.match_char('#') {
+            if self.peek() == Some('#') && self.is_hash_comment_start() {
+                self.advance();
                 self.read_hash_comment(start_line, start_col);
                 continue;
             }
@@ -199,6 +200,16 @@ impl Lexer {
                 line: start_line,
                 column: start_col,
             });
+        }
+    }
+
+    fn is_hash_comment_start(&self) -> bool {
+        if self.position == 0 {
+            return true;
+        }
+        match self.input[self.position - 1] {
+            '\n' | '\r' | ' ' | '\t' => true,
+            _ => false,
         }
     }
 
@@ -417,10 +428,6 @@ impl Lexer {
                 || c == ']'
                 || c == ':'
                 || c == ','
-                || c == '"'
-                || c == '#'
-                || c == '/'
-                || c == '\''
             {
                 break;
             }
@@ -472,7 +479,7 @@ fn is_non_punctuator_char(c: char) -> bool {
     !matches!(c, '{' | '}' | '[' | ']' | ',' | ':') && !c.is_whitespace()
 }
 
-fn is_valid_number(text: &str) -> bool {
+pub(crate) fn is_valid_number(text: &str) -> bool {
     if text.is_empty() {
         return false;
     }

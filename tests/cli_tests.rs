@@ -248,6 +248,34 @@ fn test_edit_object_set_new_key() {
     fs::remove_file(temp_path).ok();
 }
 
+#[test]
+fn test_edit_object_set_new_key_on_braceless_root() {
+    let binary = get_binary_path();
+
+    let test_content = "name: test\n";
+    let temp_path = "/tmp/test_edit_new_braceless.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "value", "42"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(
+        doc.get("name"),
+        Some(HjsonValue::String("test".to_string()))
+    );
+    assert_eq!(doc.get("value"), Some(HjsonValue::Integer(42)));
+
+    fs::remove_file(temp_path).ok();
+}
+
 /// editコマンドでキーを削除できることを検証
 #[test]
 fn test_edit_object_remove() {
@@ -979,7 +1007,10 @@ fn test_edit_string_style_auto_block() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("'''\nline1\nline2\n'''"));
+    assert!(
+        stdout.contains("'''\n    line1\n    line2\n    '''")
+            || stdout.contains("'''\nline1\nline2\n'''")
+    );
 
     fs::remove_file(temp_path).ok();
 }

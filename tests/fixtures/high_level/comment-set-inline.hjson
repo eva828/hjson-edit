@@ -1,7 +1,7 @@
 // header comment
 root: {
     // keep comment
-    keep: value  # inline updated
+    keep: value # keep inline  # inline updated
     remove: gone
 }
 

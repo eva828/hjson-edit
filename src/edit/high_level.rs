@@ -531,11 +531,7 @@ impl HjsonDocument {
                     rebuild_object_children_for_format(lbrace, new_items, rbrace),
                 );
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
-                let dirty_targets = if found {
-                    Vec::new()
-                } else {
-                    vec![FormatTarget::node(obj_node.path_from_root())]
-                };
+                let dirty_targets = vec![FormatTarget::node(obj_node.path_from_root())];
                 Ok(EditResult::new(updated, dirty_targets))
             }
             PathSegment::Index(idx) => {
@@ -1514,7 +1510,9 @@ fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
 
             return match kind {
                 SyntaxKind::String => Some(HjsonValue::String(strip_surrounding(text, 1))),
-                SyntaxKind::BlockString => Some(HjsonValue::String(parse_multiline_string(text))),
+                SyntaxKind::BlockString => {
+                    Some(HjsonValue::String(parse_multiline_string(text, 0)))
+                }
                 SyntaxKind::UnquotedString | SyntaxKind::Ident => {
                     Some(HjsonValue::String(text.to_string()))
                 }
@@ -1539,41 +1537,55 @@ fn strip_surrounding(text: &str, delimiter_len: usize) -> String {
     }
 }
 
-fn parse_multiline_string(text: &str) -> String {
-    let inner = strip_surrounding(text, 3).replace('\r', "");
-    let inner = inner.strip_prefix('\n').unwrap_or(&inner);
-    let mut lines: Vec<&str> = inner.split('\n').collect();
+pub(crate) fn parse_multiline_string(text: &str, head_column: usize) -> String {
+    let normalized = strip_surrounding(text, 3)
+        .replace("\r\n", "\n")
+        .replace('\r', "");
+    let body = normalized.strip_prefix('\n').unwrap_or(&normalized);
+    let mut lines: Vec<&str> = body.split('\n').collect();
     if lines.last() == Some(&"") {
         lines.pop();
     }
-    let indent = lines
-        .iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            line.chars()
-                .take_while(|ch| *ch == ' ' || *ch == '\t')
-                .count()
-        })
-        .min()
-        .unwrap_or(0);
 
-    lines
+    let inferred_column = if lines
+        .last()
+        .map(|line| line.trim().is_empty())
+        .unwrap_or(false)
+    {
+        let closing_indent = lines.pop().unwrap_or_default();
+        closing_indent.chars().count()
+    } else {
+        head_column
+    };
+
+    let stripped = lines
         .into_iter()
-        .map(|line| {
-            if line.len() >= indent {
-                line.chars().skip(indent).collect::<String>()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .map(|line| strip_indent_to_column(line, inferred_column))
+        .collect::<Vec<_>>();
+
+    stripped.join("\n")
 }
 
 fn render_multiline_string(value: &str) -> String {
-    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
-    let escaped = normalized.replace("'''", "''\\'");
-    format!("'''\n{}\n'''", escaped)
+    create_multiline_string_literal(value, "", "\n")
+}
+
+fn strip_indent_to_column(line: &str, target_column: usize) -> String {
+    let mut consumed = 0usize;
+    let mut byte_idx = 0usize;
+    for (idx, ch) in line.char_indices() {
+        if consumed >= target_column {
+            break;
+        }
+        match ch {
+            ' ' | '\t' => {
+                consumed += 1;
+                byte_idx = idx + ch.len_utf8();
+            }
+            _ => break,
+        }
+    }
+    line[byte_idx..].to_string()
 }
 
 fn is_hjson_number(value: &str) -> bool {
@@ -1870,6 +1882,21 @@ fn create_pair_node(
     children.push(NodeOrToken::Node(val_node));
 
     Ok(create_node(SyntaxKind::Pair, children))
+}
+
+pub(crate) fn create_multiline_string_literal(value: &str, indent: &str, newline: &str) -> String {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    let escaped = normalized.replace("'''", "''\\'");
+    let mut rendered = String::from("'''");
+    rendered.push_str(newline);
+    for line in escaped.split('\n') {
+        rendered.push_str(indent);
+        rendered.push_str(line);
+        rendered.push_str(newline);
+    }
+    rendered.push_str(indent);
+    rendered.push_str("'''");
+    rendered
 }
 
 fn replace_pair_value(
@@ -2798,7 +2825,7 @@ mod tests {
 
         assert_eq!(
             doc.get("text"),
-            Some(HjsonValue::String("line1\nline2".to_string()))
+            Some(HjsonValue::String("  line1\n  line2".to_string()))
         );
     }
 }

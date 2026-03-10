@@ -1,8 +1,8 @@
 use crate::edit::api::{create_node, create_token, RedNodeEdit};
 use crate::edit::high_level::{
-    build_array_items, build_object_items, clone_element, detect_array_entry_indent,
-    detect_object_entry_indent, is_token_of_kind, ArrayItem, CommentStyle, EntryTerminator,
-    FormatError, HjsonDocument, ObjectItem, StandaloneTriviaBlock,
+    build_array_items, build_object_items, clone_element, create_multiline_string_literal,
+    detect_array_entry_indent, detect_object_entry_indent, is_token_of_kind, ArrayItem,
+    CommentStyle, EntryTerminator, FormatError, HjsonDocument, ObjectItem, StandaloneTriviaBlock,
 };
 use crate::format::FormatTarget;
 use crate::syntax::green::GreenElement;
@@ -265,6 +265,7 @@ fn format_value_node(
     indent_unit: &str,
 ) -> Result<GreenNode, FormatError> {
     let mut children = Vec::new();
+    let multiline_indent = child_indent(indent, indent_unit);
     for child in value.children_with_tokens() {
         match child {
             NodeOrToken::Node(node) if node.kind() == SyntaxKind::Object => children.push(
@@ -279,7 +280,19 @@ fn format_value_node(
                 if matches!(kind, SyntaxKind::Whitespace | SyntaxKind::Newline) {
                     continue;
                 }
-                children.push(clone_red_element(NodeOrToken::Token(token)));
+                if kind == SyntaxKind::BlockString {
+                    let rendered = create_multiline_string_literal(
+                        &crate::edit::high_level::parse_multiline_string(token.text(), 0),
+                        &multiline_indent,
+                        newline,
+                    );
+                    children.push(NodeOrToken::Token(create_token(
+                        SyntaxKind::BlockString,
+                        rendered,
+                    )));
+                } else {
+                    children.push(clone_red_element(NodeOrToken::Token(token)));
+                }
             }
         }
     }
@@ -482,12 +495,12 @@ fn adjust_closing_indent(
     closing_kind: SyntaxKind,
 ) -> Result<GreenNode, FormatError> {
     let mut children: Vec<GreenElement> = node.children().map(clone_element).collect();
-    let closing_pos = children
+    let Some(closing_pos) = children
         .iter()
         .rposition(|elem| is_token_of_kind(elem, closing_kind))
-        .ok_or_else(|| FormatError::InvalidTarget {
-            target: FormatTarget::Document,
-        })?;
+    else {
+        return Ok(node.clone());
+    };
 
     let mut insert_pos = closing_pos;
     while insert_pos > 0 && is_token_of_kind(&children[insert_pos - 1], SyntaxKind::Whitespace) {

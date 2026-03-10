@@ -3,8 +3,8 @@
 //! These tests verify the complete workflow from parsing to editing.
 
 use hjson_edit::{
-    create_token, green_to_string, parse, parse_to_red, red_to_string, RedNodeEdit, RedNodeExt,
-    SyntaxKind,
+    create_token, green_to_string, parse, parse_to_red, red_to_string, HjsonDocument, HjsonValue,
+    RedNodeEdit, RedNodeExt, SyntaxKind,
 };
 
 /// HJSON設定ファイルのパース→GreenNode変換→文字列出力の一連のワークフローを検証
@@ -109,6 +109,17 @@ fn test_block_string() {
     let red = parse_to_red(input).unwrap();
     let output = red_to_string(&red);
     assert_eq!(output, input);
+}
+
+#[test]
+fn test_block_string_head_column_indentation() {
+    let input = "text: '''\n    one\n      two\n    '''\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    assert_eq!(
+        doc.get("text"),
+        Some(HjsonValue::String("one\n  two".to_string()))
+    );
 }
 
 /// 構文エラーのある入力がErrとして正しく報告されることを検証
@@ -372,6 +383,20 @@ fn test_unquoted_strings() {
     let red = parse_to_red(input).unwrap();
     let output = red_to_string(&red);
     assert_eq!(output, input);
+}
+
+#[test]
+fn test_rfc_quoteless_examples() {
+    let input = "duration: 7 # minutes\nwindowsPath: C:\\Users\\eva828\\Documents\\Develop\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    assert_eq!(doc.get("duration"), Some(HjsonValue::Integer(7)));
+    assert_eq!(
+        doc.get("windowsPath"),
+        Some(HjsonValue::String(
+            r#"C:\Users\eva828\Documents\Develop"#.to_string()
+        ))
+    );
 }
 
 /// HJSONオブジェクトのカンマなし改行区切りを検証

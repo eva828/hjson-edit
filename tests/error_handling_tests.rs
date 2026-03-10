@@ -227,6 +227,12 @@ fn test_quoteless_string_with_space_and_comma() {
     );
 }
 
+#[test]
+fn test_quoteless_rfc_examples_semantics() {
+    assert!(parse("duration: 7 # minutes\n").is_ok());
+    assert!(parse("windowsPath: C:\\Users\\eva828\\Documents\\Develop\n").is_ok());
+}
+
 /// コロンが連続する構文エラー（key:: value）が検出されることを検証
 #[test]
 fn test_error_double_colon() {

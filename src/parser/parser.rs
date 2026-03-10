@@ -539,9 +539,13 @@ impl Parser {
 
         while let Some(token) = self.tokens.get(pos) {
             match token.kind {
-                SyntaxKind::Newline | SyntaxKind::RBrace | SyntaxKind::RBracket => break,
+                SyntaxKind::Newline => break,
+                SyntaxKind::RBrace if self.is_closing_scalar_rbrace(pos, context) => break,
+                SyntaxKind::RBracket if self.is_closing_scalar_rbracket(pos, context) => break,
                 SyntaxKind::Comma if self.is_separator_comma(pos, context) => break,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
+                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                    if self.starts_inline_comment_after_scalar(&text, token.kind) =>
+                {
                     break
                 }
                 SyntaxKind::Whitespace
@@ -554,6 +558,9 @@ impl Parser {
                 | SyntaxKind::Null
                 | SyntaxKind::String
                 | SyntaxKind::BlockString
+                | SyntaxKind::LineComment
+                | SyntaxKind::HashComment
+                | SyntaxKind::BlockComment
                 | SyntaxKind::Comma
                 | SyntaxKind::Colon
                 | SyntaxKind::LBrace
@@ -571,6 +578,53 @@ impl Parser {
 
         text.truncate(last_non_ws_len);
         (text, last_non_ws_pos - self.position)
+    }
+
+    fn is_closing_scalar_rbrace(&self, pos: usize, context: ScalarContext) -> bool {
+        matches!(context, ScalarContext::ObjectValue) && self.followed_by_scalar_terminator(pos + 1)
+    }
+
+    fn is_closing_scalar_rbracket(&self, pos: usize, context: ScalarContext) -> bool {
+        matches!(context, ScalarContext::ArrayItem) && self.followed_by_scalar_terminator(pos + 1)
+    }
+
+    fn followed_by_scalar_terminator(&self, mut pos: usize) -> bool {
+        while let Some(token) = self.tokens.get(pos) {
+            match token.kind {
+                SyntaxKind::Whitespace => pos += 1,
+                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
+                    return true;
+                }
+                SyntaxKind::Newline
+                | SyntaxKind::Comma
+                | SyntaxKind::RBrace
+                | SyntaxKind::RBracket => return true,
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    fn starts_inline_comment_after_scalar(&self, current_text: &str, kind: SyntaxKind) -> bool {
+        if current_text.is_empty() {
+            return true;
+        }
+
+        let trimmed = current_text.trim_end_matches([' ', '\t']);
+        if trimmed.is_empty() {
+            return true;
+        }
+
+        match kind {
+            SyntaxKind::HashComment => {
+                super::lexer::is_valid_number(trimmed)
+                    || matches!(trimmed, "true" | "false" | "null")
+            }
+            SyntaxKind::LineComment | SyntaxKind::BlockComment => {
+                current_text.ends_with(' ') || current_text.ends_with('\t')
+            }
+            _ => false,
+        }
     }
 
     fn is_separator_comma(&self, comma_pos: usize, context: ScalarContext) -> bool {

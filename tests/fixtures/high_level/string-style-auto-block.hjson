@@ -1,6 +1,6 @@
 plain: baseValue
 quoted: "double value"
 autoTarget: '''
-line1
-line2
-'''
+    line1
+    line2
+    '''

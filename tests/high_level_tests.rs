@@ -353,6 +353,23 @@ fn string_style_operations_match_fixtures() {
 }
 
 #[test]
+fn multiline_string_rfc_whitespace_rules_are_applied() {
+    let doc = HjsonDocument::parse("text: '''\n    line1\n      line2\n    '''\n").unwrap();
+    assert_eq!(
+        doc.get("text"),
+        Some(hjson_edit::HjsonValue::String("line1\n  line2".to_string()))
+    );
+
+    let rendered = doc
+        .set_with_style("text", "line1\n  line2", StringStyle::Block)
+        .unwrap()
+        .to_string();
+    assert_reparseable_hjson(&rendered);
+    assert!(rendered.contains("'''\n"));
+    assert!(rendered.contains("    line1\n      line2\n    '''"));
+}
+
+#[test]
 fn comment_append_preserves_all_existing_lines() {
     let doc = HjsonDocument::parse("// one\n// two\nroot: 1\n").unwrap();
     let rendered = doc

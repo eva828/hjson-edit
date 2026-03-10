@@ -50,3 +50,32 @@ assert!(fully_formatted.to_string().contains("name: api"));
 - `edit_*`: 構造だけ変更し、整形対象を `EditResult` として返す
 - `format`: 全体整形または部分整形を独立実行できる
 - `set` / `push` / `insert_at` などの convenience API は内部で `edit -> format` を実行する
+
+## Hjsonメモ
+
+### Multiline string
+
+```hjson
+message:
+  '''
+  first line
+    indented line
+  '''
+```
+
+- 先頭行の空白は無視される
+- closing `'''` の列までのインデントが各行から取り除かれる
+- 末尾の改行は値に含まれない
+
+この例の値は `first line\n  indented line` として解釈される。
+
+### Quoteless string
+
+```hjson
+duration: 7 # minutes
+windowsPath: C:\Users\eva828\Documents\Develop
+```
+
+- `7 # minutes` は `7` + コメントとして解釈される
+- Windows path のようなバックスラッシュをエスケープなしで書ける
+- `#` を含む正規表現風文字列の完全対応は未完で、現状は inline hash comment との両立を優先している
