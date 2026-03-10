@@ -21,20 +21,13 @@ pub enum SyntaxKind {
     Null,  // null
 
     // 数値
-    Integer,    // 整数（123）
-    Float,      // 浮動小数点（1.23）
-    HexInteger, // 16進数（0xFF）
-
-    // 特殊浮動小数点
-    NaN,         // NaN
-    Infinity,    // Infinity
-    NegInfinity, // -Infinity
+    Integer, // 整数（123）
+    Float,   // 浮動小数点（1.23）
 
     // 文字列
-    String,            // "..."
-    SingleQuoteString, // '...'
-    BlockString,       // '''...'''
-    UnquotedString,    // 引用符なし文字列
+    String,         // "..."
+    BlockString,    // '''...'''
+    UnquotedString, // 引用符なし文字列
 
     // 識別子（キーとして使用可能）
     Ident, // 識別子
@@ -106,12 +99,7 @@ pub fn is_token(kind: SyntaxKind) -> bool {
             | Null
             | Integer
             | Float
-            | HexInteger
-            | NaN
-            | Infinity
-            | NegInfinity
             | String
-            | SingleQuoteString
             | BlockString
             | UnquotedString
             | Ident

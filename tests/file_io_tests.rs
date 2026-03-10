@@ -127,18 +127,6 @@ fn test_read_invalid_syntax() {
     assert!(result.is_err(), "Invalid syntax should fail to parse");
 }
 
-/// 16進数カラー値のfixtureファイルを読み込みラウンドトリップを検証
-#[test]
-fn test_read_hex_colors() {
-    let path = format!("{}/hex_colors.hjson", FIXTURES_DIR);
-    let content = fs::read_to_string(&path).expect("Failed to read file");
-
-    let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
-
-    assert_eq!(output, content, "Round-trip should preserve content");
-}
-
 /// 引用符なし文字列のfixtureファイルを読み込みラウンドトリップを検証
 #[test]
 fn test_read_unquoted_strings() {
@@ -227,7 +215,6 @@ fn test_all_fixtures_exist() {
         "complex_nested.hjson",
         "with_comments.hjson",
         "invalid_syntax.hjson",
-        "hex_colors.hjson",
         "unquoted_strings.hjson",
         "no_comma_object.hjson",
         "no_comma_array.hjson",

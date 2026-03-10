@@ -73,22 +73,16 @@ fn test_edit_and_detect_changes() {
     assert!(new_text.contains("new_value"));
 }
 
-/// HJSON特殊値（16進数、NaN、Infinity、-Infinity）のパースとラウンドトリップを検証
 #[test]
-fn test_special_values() {
-    let input = r#"{
-            hex: 0xFF,
-            nan_val: NaN,
-            inf_val: Infinity,
-            neg_inf: -Infinity
-        }"#;
-
-    let result = parse(input);
-    assert!(result.is_ok());
-
-    let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
-    assert_eq!(output, input);
+fn test_non_rfc_numeric_extensions_are_rejected() {
+    for input in [
+        "{ hex: 0xFF }",
+        "{ val: NaN }",
+        "{ val: Infinity }",
+        "{ val: -Infinity }",
+    ] {
+        assert!(parse(input).is_err(), "should reject {input}");
+    }
 }
 
 /// 3種類のコメント（//, #, /* */）がラウンドトリップで保持されることを検証
@@ -132,8 +126,8 @@ fn test_error_handling() {
 #[test]
 fn test_root_object_with_braces() {
     let input = r#"{
-  one: 0xFF00AA,
-  two: 0x00FF00
+  one: 100,
+  two: 200
 }"#;
 
     let red = parse_to_red(input).unwrap();
@@ -216,8 +210,8 @@ fn test_root_array() {
 /// ブレースレスの場合、AST構造は Root > Object > Pair[]（Valueノードなし）
 #[test]
 fn test_root_object_without_braces() {
-    let input = r#"one: 0xFF00AA
-two: 0x00FF00"#;
+    let input = r#"one: 100
+two: 200"#;
 
     let red = parse_to_red(input).unwrap();
     let output = red_to_string(&red);
@@ -253,20 +247,6 @@ fn test_complex_nested_structure() {
     { name: "item2", value: 200 },
     { name: "item3", value: 300 }
   ]
-}"#;
-
-    let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
-    assert_eq!(output, input);
-}
-
-/// 複数の16進数カラー値を持つオブジェクトのパースとラウンドトリップを検証
-#[test]
-fn test_hex_colors_in_object() {
-    let input = r#"{
-  primary: 0xFF5733,
-  secondary: 0x33FF57,
-  background: 0x3357FF
 }"#;
 
     let red = parse_to_red(input).unwrap();
@@ -384,8 +364,8 @@ fn test_multiple_edits_sequence() {
 #[test]
 fn test_unquoted_strings() {
     let input = r#"{
-  key1: unquoted_value,
-  key2: another_unquoted_value,
+  key1: unquoted value,
+  key2: another unquoted value,
   "quoted key": "quoted_value"
 }"#;
 

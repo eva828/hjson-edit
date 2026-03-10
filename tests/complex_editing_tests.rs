@@ -468,13 +468,11 @@ fn test_edit_in_array_of_objects() {
     assert_eq!(output, input);
 }
 
-/// 16進数値をトークン置換で変更できることを検証
-///
-/// HexInteger トークン 0xFF5733 を 0x00FF00 に置換する
+/// 数値をトークン置換で変更できることを検証
 #[test]
-fn test_edit_hex_value() {
+fn test_edit_numeric_value() {
     let input = r#"{
-  color: 0xFF5733
+  color: 255
 }"#;
 
     let red = parse_to_red(input).unwrap();
@@ -492,25 +490,25 @@ fn test_edit_hex_value() {
         .expect("Value not found");
 
     let value_green = value.to_green();
-    let new_token = create_token(SyntaxKind::HexInteger, "0x00FF00");
+    let new_token = create_token(SyntaxKind::Integer, "42");
 
-    // Find and replace the hex token
+    // Find and replace the numeric token
     let mut target_idx = None;
     for (i, child) in value_green.children().enumerate() {
         if let rowan::NodeOrToken::Token(t) = child {
-            if t.text() == "0xFF5733" {
+            if t.text() == "255" {
                 target_idx = Some(i);
                 break;
             }
         }
     }
 
-    let target_idx = target_idx.expect("Hex token not found");
+    let target_idx = target_idx.expect("Number token not found");
     let new_value_green = value_green
         .replace_child(target_idx, new_token.into())
         .unwrap();
 
     // Verify the change
     let new_text = green_to_string(&new_value_green);
-    assert!(new_text.contains("0x00FF00"));
+    assert!(new_text.contains("42"));
 }

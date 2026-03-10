@@ -65,21 +65,13 @@ fn test_error_missing_colon() {
     );
 }
 
-/// HJSONでは無効なエスケープシーケンス（\q）がパースレベルで受け入れられることを検証
-///
-/// JSON仕様と異なり、HJSONはエスケープの妥当性をLexer/Parserで検証しない
+/// HJSON/JSON文字列では無効なエスケープシーケンス（\q）が拒否されることを検証
 #[test]
 fn test_error_invalid_escape() {
-    // HJSONではエスケープシーケンスの妥当性はLexerレベルでは検証しない
-    // "\q" はそのまま文字列トークンとしてパースされる
     let input = r#""\q is not a valid escape""#;
 
     let result = parse(input);
-    assert!(
-        result.is_ok(),
-        "Invalid escape in HJSON is accepted at parse level: {:?}",
-        result.err()
-    );
+    assert!(result.is_err(), "Invalid escape should fail");
 }
 
 /// 構文的に不正な箇所が複数含まれる入力でエラーが報告されることを検証
@@ -109,13 +101,12 @@ fn test_error_multiple_errors() {
     }
 }
 
-/// 空文字列が有効なドキュメント（空のRoot）としてパースされることを検証
+/// 空文字列はRFC的には値を持たないため、少なくとも値取得はできないことを検証
 #[test]
 fn test_error_empty_input() {
     let input = "";
 
     let result = parse(input);
-    // 空入力は有効なドキュメント（空のRoot）としてパースされる
     assert!(
         result.is_ok(),
         "Empty input should be valid: {:?}",
@@ -202,19 +193,24 @@ fn test_error_recoverable() {
     );
 }
 
-/// 無効な16進数リテラル（0xZZ）がHJSONでは引用符なし文字列として扱われることを検証
+/// 無効な16進数リテラルはquoteless stringとして扱われることを検証
 #[test]
 fn test_error_invalid_hex() {
     let input = "{ value: 0xZZ }";
 
     let result = parse(input);
-    // 0xZZ はLexerではIdentとして分類されるため、パース自体は成功する
-    // HJSONでは引用符なし文字列として扱われる
     assert!(
         result.is_ok(),
         "Invalid hex is treated as unquoted string in HJSON: {:?}",
         result.err()
     );
+}
+
+#[test]
+fn test_error_non_rfc_numeric_extensions() {
+    for input in ["{ value: 0xFF }", "{ value: NaN }", "{ value: Infinity }"] {
+        assert!(parse(input).is_err(), "Should reject {input}");
+    }
 }
 
 /// コロンが連続する構文エラー（key:: value）が検出されることを検証

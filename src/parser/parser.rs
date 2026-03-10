@@ -172,6 +172,21 @@ impl Parser {
         }
     }
 
+    fn eat_trivia_and_report_newline(&mut self) -> bool {
+        let mut had_newline = false;
+        while let Some(token) = self.current() {
+            if super::super::syntax::kind::is_trivia(token.kind) {
+                if token.kind == SyntaxKind::Newline {
+                    had_newline = true;
+                }
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        had_newline
+    }
+
     /// 次の非トリビアトークンの種類を取得
     fn current_kind(&self) -> Option<SyntaxKind> {
         let mut pos = self.position;
@@ -214,25 +229,14 @@ impl Parser {
                     self.parse_array();
                 }
                 SyntaxKind::String
-                | SyntaxKind::SingleQuoteString
                 | SyntaxKind::BlockString
                 | SyntaxKind::UnquotedString
-                | SyntaxKind::Ident => {
-                    self.parse_string_or_key();
-                }
-                SyntaxKind::Integer
+                | SyntaxKind::Ident
+                | SyntaxKind::Integer
                 | SyntaxKind::Float
-                | SyntaxKind::HexInteger
-                | SyntaxKind::NaN
-                | SyntaxKind::Infinity
-                | SyntaxKind::NegInfinity => {
-                    self.eat_trivia();
-                    self.bump();
-                }
-                SyntaxKind::True | SyntaxKind::False | SyntaxKind::Null => {
-                    self.eat_trivia();
-                    self.bump();
-                }
+                | SyntaxKind::True
+                | SyntaxKind::False
+                | SyntaxKind::Null => self.parse_scalar_value(),
                 _ => {
                     // 予期しないトークン - エラーノードとして回収
                     let (line, col) = if let Some(t) = self.current() {
@@ -292,9 +296,7 @@ impl Parser {
             self.parse_pair();
 
             // Pairの後のトリビアを消費（コメントなど）
-            let pos_before_trivia = self.position;
-            self.eat_trivia();
-            let trivia_consumed = self.position > pos_before_trivia;
+            let had_newline = self.eat_trivia_and_report_newline();
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
@@ -309,7 +311,7 @@ impl Parser {
                 }
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
-                if trivia_consumed {
+                if had_newline {
                     // カンマなし・改行ありは有効な区切り → ループ継続
                     continue;
                 }
@@ -322,7 +324,6 @@ impl Parser {
                     SyntaxKind::Comma,
                     SyntaxKind::RBrace,
                     SyntaxKind::String,
-                    SyntaxKind::SingleQuoteString,
                     SyntaxKind::Ident,
                     SyntaxKind::UnquotedString,
                 ]);
@@ -375,9 +376,7 @@ impl Parser {
             self.parse_value();
 
             // 値の後のトリビア（改行・コメントなど）を消費
-            let pos_before_trivia = self.position;
-            self.eat_trivia();
-            let trivia_consumed = self.position > pos_before_trivia;
+            let had_newline = self.eat_trivia_and_report_newline();
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
@@ -392,7 +391,7 @@ impl Parser {
                 }
             } else if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
-                if trivia_consumed {
+                if had_newline {
                     // カンマなし・改行ありは有効な区切り → ループ継続
                     continue;
                 }
@@ -427,7 +426,6 @@ impl Parser {
         let token = self.current();
         match token.map(|t| t.kind) {
             Some(SyntaxKind::String)
-            | Some(SyntaxKind::SingleQuoteString)
             | Some(SyntaxKind::Ident)
             | Some(SyntaxKind::UnquotedString) => {
                 self.bump();
@@ -468,19 +466,14 @@ impl Parser {
                 SyntaxKind::LBrace,
                 SyntaxKind::LBracket,
                 SyntaxKind::String,
-                SyntaxKind::SingleQuoteString,
                 SyntaxKind::BlockString,
                 SyntaxKind::UnquotedString,
                 SyntaxKind::Ident,
                 SyntaxKind::Integer,
                 SyntaxKind::Float,
-                SyntaxKind::HexInteger,
                 SyntaxKind::True,
                 SyntaxKind::False,
                 SyntaxKind::Null,
-                SyntaxKind::NaN,
-                SyntaxKind::Infinity,
-                SyntaxKind::NegInfinity,
                 SyntaxKind::Comma,
                 SyntaxKind::RBrace,
             ]);
@@ -497,10 +490,113 @@ impl Parser {
         self.builder.finish_node();
     }
 
-    /// 文字列またはキーを解析
-    fn parse_string_or_key(&mut self) {
-        // 単純にトークンを消費
-        self.bump();
+    fn parse_scalar_value(&mut self) {
+        self.eat_trivia();
+        if let Some(token) = self.current() {
+            match token.kind {
+                SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
+                SyntaxKind::Ident | SyntaxKind::UnquotedString => {
+                    let (text, consumed) = self.collect_quoteless_scalar();
+                    if consumed == 1 {
+                        self.bump();
+                    } else {
+                        self.builder.token(SyntaxKind::UnquotedString, &text);
+                        self.position += consumed;
+                    }
+                }
+                SyntaxKind::Integer
+                | SyntaxKind::Float
+                | SyntaxKind::True
+                | SyntaxKind::False
+                | SyntaxKind::Null => {
+                    let (text, consumed) = self.collect_quoteless_scalar();
+                    if consumed == 1 {
+                        self.bump();
+                    } else {
+                        self.builder.token(SyntaxKind::UnquotedString, &text);
+                        self.position += consumed;
+                    }
+                }
+                _ => self.bump(),
+            }
+        }
+    }
+
+    fn collect_quoteless_scalar(&self) -> (String, usize) {
+        let mut pos = self.position;
+        let mut text = String::new();
+        let mut last_non_ws_len = 0usize;
+        let mut last_non_ws_pos = self.position;
+
+        while let Some(token) = self.tokens.get(pos) {
+            match token.kind {
+                SyntaxKind::Newline | SyntaxKind::RBrace | SyntaxKind::RBracket => break,
+                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                    if text.ends_with(' ') || text.ends_with('\t') =>
+                {
+                    break;
+                }
+                SyntaxKind::Whitespace
+                | SyntaxKind::LineComment
+                | SyntaxKind::HashComment
+                | SyntaxKind::BlockComment
+                | SyntaxKind::Ident
+                | SyntaxKind::UnquotedString
+                | SyntaxKind::Integer
+                | SyntaxKind::Float
+                | SyntaxKind::True
+                | SyntaxKind::False
+                | SyntaxKind::Null
+                | SyntaxKind::String
+                | SyntaxKind::BlockString
+                | SyntaxKind::Comma
+                | SyntaxKind::Colon
+                | SyntaxKind::LBrace
+                | SyntaxKind::LBracket => {
+                    text.push_str(&token.text);
+                    pos += 1;
+                    if token.kind != SyntaxKind::Whitespace {
+                        last_non_ws_len = text.len();
+                        last_non_ws_pos = pos;
+                    }
+                    if matches!(
+                        token.kind,
+                        SyntaxKind::LineComment | SyntaxKind::HashComment
+                    ) {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        text.truncate(last_non_ws_len);
+        (text, last_non_ws_pos - self.position)
+    }
+
+    fn has_colon_after_key(&self) -> bool {
+        let mut pos = self.position;
+        let mut consumed_key = false;
+
+        while let Some(token) = self.tokens.get(pos) {
+            if super::super::syntax::kind::is_trivia(token.kind) {
+                pos += 1;
+                continue;
+            }
+
+            if !consumed_key {
+                if matches!(token.kind, SyntaxKind::Ident | SyntaxKind::String) {
+                    consumed_key = true;
+                    pos += 1;
+                    continue;
+                }
+                return false;
+            }
+
+            return token.kind == SyntaxKind::Colon;
+        }
+
+        false
     }
 
     /// ブレースレスルートオブジェクトの開始かチェック
@@ -508,14 +604,13 @@ impl Parser {
     fn is_braceless_object_start(&self) -> bool {
         matches!(
             self.current_kind(),
-            Some(SyntaxKind::Ident) | Some(SyntaxKind::UnquotedString)
-        )
+            Some(SyntaxKind::Ident) | Some(SyntaxKind::String)
+        ) && self.has_colon_after_key()
     }
 
     /// ブレースレスルートオブジェクトを解析（中括弧なし）
     fn parse_braceless_object(&mut self) {
         self.builder.start_node(SyntaxKind::Object);
-
         loop {
             if self.is_at_end() {
                 break;
@@ -527,15 +622,19 @@ impl Parser {
                 break;
             }
 
-            // ブレースレスオブジェクトの終了判定
             if !self.is_braceless_object_start() {
                 break;
             }
 
             self.parse_pair();
 
-            // Pair後のトリビアを消費
-            self.eat_trivia();
+            let had_separator_newline = self.eat_trivia_and_report_newline();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.eat_trivia();
+            } else if !self.is_at_end() && !had_separator_newline {
+                break;
+            }
         }
 
         self.builder.finish_node();
@@ -627,10 +726,9 @@ mod tests {
         assert_eq!(text, input);
     }
 
-    /// 16進数値とNaN特殊値のパースとラウンドトリップを検証
     #[test]
-    fn test_parse_hex_and_special() {
-        let input = "{hex: 0xFF, special: NaN}";
+    fn test_parse_quoted_key_in_object() {
+        let input = r#"{"quoted key": 1, plain: two}"#;
         let result = parse(input).unwrap();
         let text = result.green.text();
         assert_eq!(text, input);

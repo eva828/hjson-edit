@@ -183,9 +183,7 @@ fn build_cli() -> Command {
                         .long("string-style")
                         .action(ArgAction::Append)
                         .value_name("STYLE")
-                        .value_parser([
-                            "preserve", "auto", "double", "single", "block", "unquoted",
-                        ]),
+                        .value_parser(["preserve", "auto", "double", "block", "unquoted"]),
                 )
                 // Output options
                 .arg(
@@ -651,7 +649,6 @@ fn collect_ops(matches: &clap::ArgMatches) -> Vec<EditOp> {
                 "preserve" => StringStyle::Preserve,
                 "auto" => StringStyle::Auto,
                 "double" => StringStyle::DoubleQuoted,
-                "single" => StringStyle::SingleQuoted,
                 "block" => StringStyle::Block,
                 "unquoted" => StringStyle::Unquoted,
                 other => {
@@ -693,15 +690,6 @@ fn parse_set_arg(path: &str, value_str: &str) -> Result<(String, HjsonValue), St
                 _ => return Err(format!("Invalid bool: {}", value_str)),
             },
             "str" => HjsonValue::String(value_str.to_string()),
-            "hex" => {
-                if value_str.starts_with("0x") || value_str.starts_with("0X") {
-                    i64::from_str_radix(&value_str[2..], 16)
-                        .map(HjsonValue::HexInteger)
-                        .map_err(|_| format!("Invalid hex: {}", value_str))?
-                } else {
-                    return Err(format!("Hex value must start with 0x: {}", value_str));
-                }
-            }
             "null" => HjsonValue::Null,
             _ => {
                 // Not a type hint, treat as part of path
@@ -715,48 +703,30 @@ fn parse_set_arg(path: &str, value_str: &str) -> Result<(String, HjsonValue), St
 }
 
 fn parse_value(s: &str) -> HjsonValue {
-    // Check for special values first
-    if s.eq_ignore_ascii_case("-Infinity") {
-        return HjsonValue::NegInfinity;
-    }
-    if s.eq_ignore_ascii_case("Infinity") {
-        return HjsonValue::Infinity;
-    }
-    if s.eq_ignore_ascii_case("NaN") {
-        return HjsonValue::NaN;
-    }
-    if s.eq_ignore_ascii_case("null") {
+    if s == "null" {
         return HjsonValue::Null;
     }
-    if s.eq_ignore_ascii_case("true") {
+    if s == "true" {
         return HjsonValue::Bool(true);
     }
-    if s.eq_ignore_ascii_case("false") {
+    if s == "false" {
         return HjsonValue::Bool(false);
     }
 
-    // Check for hex
-    if s.starts_with("0x") || s.starts_with("0X") {
-        if let Ok(v) = i64::from_str_radix(&s[2..], 16) {
-            return HjsonValue::HexInteger(v);
-        }
-    }
-
     // Check for integer
-    if let Ok(v) = s.parse::<i64>() {
+    if is_hjson_integer(s) {
+        let v = s.parse::<i64>().expect("validated integer");
         return HjsonValue::Integer(v);
     }
 
     // Check for float
-    if let Ok(v) = s.parse::<f64>() {
+    if is_hjson_float(s) {
+        let v = s.parse::<f64>().expect("validated float");
         return HjsonValue::Float(v);
     }
 
     // Quoted string
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-        return HjsonValue::String(s[1..s.len() - 1].to_string());
-    }
-    if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
         return HjsonValue::String(s[1..s.len() - 1].to_string());
     }
     if s.len() >= 6 && s.starts_with("'''") && s.ends_with("'''") {
@@ -774,10 +744,86 @@ fn detect_inline_string_style(s: &str) -> Option<StringStyle> {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Some(StringStyle::DoubleQuoted);
     }
-    if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
-        return Some(StringStyle::SingleQuoted);
-    }
     None
+}
+
+fn is_hjson_integer(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    let mut idx = 0usize;
+    if bytes[idx] == b'-' {
+        idx += 1;
+        if idx == bytes.len() {
+            return false;
+        }
+    }
+    if bytes[idx] == b'0' {
+        idx + 1 == bytes.len()
+    } else if bytes[idx].is_ascii_digit() {
+        idx += 1;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        idx == bytes.len()
+    } else {
+        false
+    }
+}
+
+fn is_hjson_float(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    let mut idx = 0usize;
+    if bytes[idx] == b'-' {
+        idx += 1;
+        if idx == bytes.len() {
+            return false;
+        }
+    }
+    if bytes[idx] == b'0' {
+        idx += 1;
+        if idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            return false;
+        }
+    } else if bytes[idx].is_ascii_digit() {
+        idx += 1;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+    } else {
+        return false;
+    }
+    let mut has_fraction_or_exp = false;
+    if idx < bytes.len() && bytes[idx] == b'.' {
+        has_fraction_or_exp = true;
+        idx += 1;
+        let frac_start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if frac_start == idx {
+            return false;
+        }
+    }
+    if idx < bytes.len() && matches!(bytes[idx], b'e' | b'E') {
+        has_fraction_or_exp = true;
+        idx += 1;
+        if idx < bytes.len() && matches!(bytes[idx], b'+' | b'-') {
+            idx += 1;
+        }
+        let exp_start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if exp_start == idx {
+            return false;
+        }
+    }
+    has_fraction_or_exp && idx == bytes.len()
 }
 
 fn parse_comment_path(s: &str) -> CommentPath {
