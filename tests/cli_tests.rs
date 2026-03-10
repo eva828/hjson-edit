@@ -276,6 +276,101 @@ fn test_edit_object_set_new_key_on_braceless_root() {
     fs::remove_file(temp_path).ok();
 }
 
+#[test]
+fn test_edit_object_set_new_key_does_not_reformat_whole_parent() {
+    let binary = get_binary_path();
+
+    let test_content = "Common:\n{\n    Existing: one\n    Another: two\n}\n";
+    let temp_path = "/tmp/test_edit_local_object_set.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "Common.Test", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("    Existing: one"));
+    assert!(stdout.contains("    Another: two"));
+    assert!(stdout.contains("    Test: a"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+#[test]
+fn test_edit_object_set_new_key_adds_newline_before_closing_brace() {
+    let binary = get_binary_path();
+
+    let test_content = "Common: {\n    Existing: one\n}\n";
+    let temp_path = "/tmp/test_edit_object_set_closing_newline.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "Common.TEST", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("    TEST: a\n}"));
+
+    fs::remove_file(temp_path).ok();
+}
+
+#[test]
+fn test_edit_object_set_creates_nested_objects_recursively() {
+    let binary = get_binary_path();
+
+    let test_content = "Common:\n{\n    Existing: one\n}\n";
+    let temp_path = "/tmp/test_edit_recursive_object_set.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "Common.AA.Test", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(
+        doc.get("Common.AA.Test"),
+        Some(HjsonValue::String("a".to_string()))
+    );
+
+    fs::remove_file(temp_path).ok();
+}
+
+#[test]
+fn test_edit_object_set_recursive_creation_fails_on_non_object() {
+    let binary = get_binary_path();
+
+    let test_content = "Common:\n{\n    AA: 1\n}\n";
+    let temp_path = "/tmp/test_edit_recursive_object_set_error.hjson";
+    fs::write(temp_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args(["edit", temp_path, "--object-set", "Common.AA.Test", "a"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success());
+
+    fs::remove_file(temp_path).ok();
+}
+
 /// editコマンドでキーを削除できることを検証
 #[test]
 fn test_edit_object_remove() {

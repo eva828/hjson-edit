@@ -435,6 +435,16 @@ impl HjsonDocument {
         let path = path.into_path()?;
         let value = value.into();
 
+        let ensured = self.ensure_object_path_for_set(&path)?;
+        ensured.edit_set_existing_path(&path, &value, string_style)
+    }
+
+    fn edit_set_existing_path(
+        &self,
+        path: &[PathSegment],
+        value: &HjsonValue,
+        string_style: StringStyle,
+    ) -> Result<EditResult, HjsonEditError> {
         if path.is_empty() {
             let new_green = value_to_green_node(&value, string_style, None)?;
             return Ok(EditResult::new(
@@ -486,7 +496,7 @@ impl HjsonDocument {
                                         if key_text == *key {
                                             entry.pair = NodeOrToken::Node(replace_pair_value(
                                                 pair_green,
-                                                &value,
+                                                value,
                                                 string_style,
                                             )?);
                                             found = true;
@@ -503,27 +513,13 @@ impl HjsonDocument {
                 }
 
                 if !found {
-                    let mut trailing_standalone = Vec::new();
-                    while matches!(new_items.last(), Some(ObjectItem::Standalone(_))) {
-                        if let Some(item) = new_items.pop() {
-                            trailing_standalone.push(item);
-                        }
-                    }
-                    trailing_standalone.reverse();
-
-                    new_items.push(ObjectItem::Entry(ObjectEntry {
-                        leading_line_trivia: Vec::new(),
-                        leading_comments: Vec::new(),
-                        pair: NodeOrToken::Node(create_pair_node(
-                            &key,
-                            &value,
-                            string_style,
-                            None,
-                        )?),
-                        trailing_inline_trivia: Vec::new(),
-                        terminator: EntryTerminator::EndOfContainer,
-                    }));
-                    new_items.extend(trailing_standalone);
+                    insert_object_entry_without_reformat(
+                        &mut new_items,
+                        &obj_green,
+                        key,
+                        value,
+                        string_style,
+                    )?;
                 }
 
                 let new_obj = create_node(
@@ -531,7 +527,7 @@ impl HjsonDocument {
                     rebuild_object_children_for_format(lbrace, new_items, rbrace),
                 );
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
-                let dirty_targets = vec![FormatTarget::node(obj_node.path_from_root())];
+                let dirty_targets = Vec::new();
                 Ok(EditResult::new(updated, dirty_targets))
             }
             PathSegment::Index(idx) => {
@@ -564,7 +560,7 @@ impl HjsonDocument {
                             if entry_index == *idx {
                                 let existing_style = string_style_for_value_node(&entry.value);
                                 entry.value = NodeOrToken::Node(create_value_node(
-                                    &value,
+                                    value,
                                     string_style,
                                     existing_style,
                                 )?);
@@ -594,6 +590,46 @@ impl HjsonDocument {
                 Ok(EditResult::new(updated, Vec::new()))
             }
         }
+    }
+
+    fn ensure_object_path_for_set(&self, path: &[PathSegment]) -> Result<Self, HjsonEditError> {
+        if path.len() <= 1 {
+            return Ok(self.clone());
+        }
+
+        let mut current = self.clone();
+        for depth in 0..path.len() - 1 {
+            let current_path = &path[..=depth];
+            if let Some(node) = current.navigate_to_node(current_path) {
+                if resolve_object_child(&node).is_none() {
+                    return Err(HjsonEditError::InvalidNodeKind {
+                        expected: SyntaxKind::Object,
+                        found: node.kind(),
+                    });
+                }
+                continue;
+            }
+
+            let parent_path = &path[..depth];
+            let key = match &path[depth] {
+                PathSegment::Key(key) => key.clone(),
+                PathSegment::Index(_) => {
+                    return Err(HjsonEditError::InvalidPath {
+                        path: format!("{:?}", current_path),
+                    })
+                }
+            };
+
+            current = current
+                .edit_set_existing_path(
+                    &[parent_path, &[PathSegment::Key(key)]].concat(),
+                    &HjsonValue::Object(Vec::new()),
+                    StringStyle::Preserve,
+                )?
+                .into_document();
+        }
+
+        Ok(current)
     }
 
     pub fn edit_remove(&self, path: impl IntoPath) -> Result<EditResult, HjsonEditError> {
@@ -1290,6 +1326,112 @@ fn remove_orphan_indent_before_entry(children: &mut Vec<GreenElement>) {
             break;
         }
     }
+}
+
+fn preferred_newline_from_text(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+fn object_entry_indent_from_green(children: &[GreenElement], object_text: &str) -> String {
+    let items = build_object_items(children);
+    if let Some(indent) = detect_object_entry_indent(&items) {
+        return indent;
+    }
+
+    if children
+        .iter()
+        .any(|c| is_token_of_kind(c, SyntaxKind::LBrace))
+    {
+        let newline = preferred_newline_from_text(object_text);
+        if let Some(pos) = object_text.find('{') {
+            let line_start = object_text[..pos]
+                .rfind('\n')
+                .map(|idx| idx + 1)
+                .unwrap_or(0);
+            let base_indent: String = object_text[line_start..pos]
+                .chars()
+                .take_while(|ch| *ch == ' ' || *ch == '\t')
+                .collect();
+            let indent_unit = if object_text.contains("\t") {
+                "\t"
+            } else {
+                "  "
+            };
+            let _ = newline;
+            return format!("{}{}", base_indent, indent_unit);
+        }
+    }
+
+    String::new()
+}
+
+fn insert_object_entry_without_reformat(
+    items: &mut Vec<ObjectItem>,
+    obj_green: &GreenNode,
+    key: &str,
+    value: &HjsonValue,
+    string_style: StringStyle,
+) -> Result<(), HjsonEditError> {
+    let object_text = obj_green.to_string();
+    let newline = preferred_newline_from_text(&object_text);
+    let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
+    let indent = object_entry_indent_from_green(&children, &object_text);
+    let pair = NodeOrToken::Node(create_pair_node(key, value, string_style, None)?);
+
+    let needs_trailing_newline_before_closing = items
+        .iter()
+        .any(|item| matches!(item, ObjectItem::Entry(_)));
+
+    let leading_line_trivia = if items
+        .iter()
+        .any(|item| matches!(item, ObjectItem::Entry(_)))
+        || children
+            .iter()
+            .any(|c| is_token_of_kind(c, SyntaxKind::LBrace))
+    {
+        let mut trivia = vec![NodeOrToken::Token(create_token(
+            SyntaxKind::Newline,
+            newline,
+        ))];
+        if !indent.is_empty() {
+            trivia.push(NodeOrToken::Token(create_token(
+                SyntaxKind::Whitespace,
+                &indent,
+            )));
+        }
+        trivia
+    } else {
+        Vec::new()
+    };
+
+    let new_entry = ObjectItem::Entry(ObjectEntry {
+        leading_line_trivia,
+        leading_comments: Vec::new(),
+        pair,
+        trailing_inline_trivia: Vec::new(),
+        terminator: if needs_trailing_newline_before_closing {
+            EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
+                SyntaxKind::Newline,
+                newline,
+            ))])
+        } else {
+            EntryTerminator::EndOfContainer
+        },
+    });
+
+    let mut trailing_standalone = Vec::new();
+    while matches!(items.last(), Some(ObjectItem::Standalone(_))) {
+        trailing_standalone.push(items.pop().unwrap());
+    }
+    trailing_standalone.reverse();
+
+    items.push(new_entry);
+    items.extend(trailing_standalone);
+    Ok(())
 }
 
 pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {

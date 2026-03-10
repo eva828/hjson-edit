@@ -176,6 +176,35 @@ fn object_insertions_preserve_layout_near_comments() {
 }
 
 #[test]
+fn object_set_creates_missing_parents_recursively() {
+    let doc = HjsonDocument::parse("Common:\n{\n    Existing: one\n}\n").unwrap();
+
+    let rendered = doc
+        .set_with_style("Common.AA.Test", "a", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert!(rendered.contains("Existing: one"));
+    assert!(rendered.contains("AA:"));
+    assert!(rendered.contains("Test: a"));
+}
+
+#[test]
+fn object_set_preserves_closing_brace_newline_when_adding_last_key() {
+    let base = read_fixture("object-brace-newline-base.hjson");
+    let doc = HjsonDocument::parse(&base).unwrap();
+
+    let rendered = doc
+        .set_with_style("Common.TEST", "a", StringStyle::Preserve)
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert!(rendered.contains("    TEST: a\n}"));
+}
+
+#[test]
 fn array_operations_match_fixtures() {
     let base = read_fixture("array-base.hjson");
     let doc = HjsonDocument::parse(&base).unwrap();
@@ -366,7 +395,7 @@ fn multiline_string_rfc_whitespace_rules_are_applied() {
         .to_string();
     assert_reparseable_hjson(&rendered);
     assert!(rendered.contains("'''\n"));
-    assert!(rendered.contains("    line1\n      line2\n    '''"));
+    assert!(rendered.contains("line1\n  line2\n'''"));
 }
 
 #[test]
