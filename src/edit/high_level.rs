@@ -2732,12 +2732,12 @@ mod tests {
 
     #[test]
     fn test_document_get_ident_and_block_string() {
-        let input = "key: value\nblock: '''abc'''\n";
+        let input = "key: look ma, no quotes!\nblock: '''abc'''\n";
         let doc = HjsonDocument::parse(input).unwrap();
 
         assert_eq!(
             doc.get("key"),
-            Some(HjsonValue::String("value".to_string()))
+            Some(HjsonValue::String("look ma, no quotes!".to_string()))
         );
         assert_eq!(
             doc.get("block"),

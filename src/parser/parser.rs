@@ -38,6 +38,13 @@ pub struct Parser {
     errors: Vec<ParseError>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScalarContext {
+    Root,
+    ObjectValue,
+    ArrayItem,
+}
+
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
@@ -59,9 +66,11 @@ impl Parser {
             if self.is_braceless_object_start() {
                 self.parse_braceless_object();
             } else {
-                self.parse_value();
+                self.parse_value(ScalarContext::Root);
             }
         }
+
+        self.eat_trivia();
 
         // 残りのトークンがあればエラー
         if !self.is_at_end() {
@@ -207,7 +216,7 @@ impl Parser {
     }
 
     /// 値を解析
-    fn parse_value(&mut self) {
+    fn parse_value(&mut self, context: ScalarContext) {
         self.builder.start_node(SyntaxKind::Value);
 
         // 先頭のトリビアを消費（インデントなど）
@@ -236,7 +245,7 @@ impl Parser {
                 | SyntaxKind::Float
                 | SyntaxKind::True
                 | SyntaxKind::False
-                | SyntaxKind::Null => self.parse_scalar_value(),
+                | SyntaxKind::Null => self.parse_scalar_value(context),
                 _ => {
                     // 予期しないトークン - エラーノードとして回収
                     let (line, col) = if let Some(t) = self.current() {
@@ -373,7 +382,7 @@ impl Parser {
                 break;
             }
 
-            self.parse_value();
+            self.parse_value(ScalarContext::ArrayItem);
 
             // 値の後のトリビア（改行・コメントなど）を消費
             let had_newline = self.eat_trivia_and_report_newline();
@@ -485,18 +494,18 @@ impl Parser {
         }
 
         // 値
-        self.parse_value();
+        self.parse_value(ScalarContext::ObjectValue);
 
         self.builder.finish_node();
     }
 
-    fn parse_scalar_value(&mut self) {
+    fn parse_scalar_value(&mut self, context: ScalarContext) {
         self.eat_trivia();
         if let Some(token) = self.current() {
             match token.kind {
                 SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
                 SyntaxKind::Ident | SyntaxKind::UnquotedString => {
-                    let (text, consumed) = self.collect_quoteless_scalar();
+                    let (text, consumed) = self.collect_quoteless_scalar(context);
                     if consumed == 1 {
                         self.bump();
                     } else {
@@ -509,7 +518,7 @@ impl Parser {
                 | SyntaxKind::True
                 | SyntaxKind::False
                 | SyntaxKind::Null => {
-                    let (text, consumed) = self.collect_quoteless_scalar();
+                    let (text, consumed) = self.collect_quoteless_scalar(context);
                     if consumed == 1 {
                         self.bump();
                     } else {
@@ -522,7 +531,7 @@ impl Parser {
         }
     }
 
-    fn collect_quoteless_scalar(&self) -> (String, usize) {
+    fn collect_quoteless_scalar(&self, context: ScalarContext) -> (String, usize) {
         let mut pos = self.position;
         let mut text = String::new();
         let mut last_non_ws_len = 0usize;
@@ -531,15 +540,11 @@ impl Parser {
         while let Some(token) = self.tokens.get(pos) {
             match token.kind {
                 SyntaxKind::Newline | SyntaxKind::RBrace | SyntaxKind::RBracket => break,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-                    if text.ends_with(' ') || text.ends_with('\t') =>
-                {
-                    break;
+                SyntaxKind::Comma if self.is_separator_comma(pos, context) => break,
+                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
+                    break
                 }
                 SyntaxKind::Whitespace
-                | SyntaxKind::LineComment
-                | SyntaxKind::HashComment
-                | SyntaxKind::BlockComment
                 | SyntaxKind::Ident
                 | SyntaxKind::UnquotedString
                 | SyntaxKind::Integer
@@ -559,12 +564,6 @@ impl Parser {
                         last_non_ws_len = text.len();
                         last_non_ws_pos = pos;
                     }
-                    if matches!(
-                        token.kind,
-                        SyntaxKind::LineComment | SyntaxKind::HashComment
-                    ) {
-                        break;
-                    }
                 }
                 _ => break,
             }
@@ -572,6 +571,64 @@ impl Parser {
 
         text.truncate(last_non_ws_len);
         (text, last_non_ws_pos - self.position)
+    }
+
+    fn is_separator_comma(&self, comma_pos: usize, context: ScalarContext) -> bool {
+        match context {
+            ScalarContext::Root => false,
+            ScalarContext::ArrayItem => self.array_has_next_item_after_comma(comma_pos + 1),
+            ScalarContext::ObjectValue => self.object_has_next_member_after_comma(comma_pos + 1),
+        }
+    }
+
+    fn array_has_next_item_after_comma(&self, mut pos: usize) -> bool {
+        while let Some(token) = self.tokens.get(pos) {
+            match token.kind {
+                SyntaxKind::Whitespace => pos += 1,
+                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
+                    return true;
+                }
+                SyntaxKind::Newline | SyntaxKind::RBracket => return true,
+                SyntaxKind::LBrace
+                | SyntaxKind::LBracket
+                | SyntaxKind::String
+                | SyntaxKind::BlockString
+                | SyntaxKind::Ident
+                | SyntaxKind::UnquotedString
+                | SyntaxKind::Integer
+                | SyntaxKind::Float
+                | SyntaxKind::True
+                | SyntaxKind::False
+                | SyntaxKind::Null => return true,
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    fn object_has_next_member_after_comma(&self, mut pos: usize) -> bool {
+        while let Some(token) = self.tokens.get(pos) {
+            match token.kind {
+                SyntaxKind::Whitespace => pos += 1,
+                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
+                    return true;
+                }
+                SyntaxKind::Newline | SyntaxKind::RBrace => return true,
+                SyntaxKind::Ident | SyntaxKind::String => {
+                    pos += 1;
+                    while let Some(next) = self.tokens.get(pos) {
+                        if super::super::syntax::kind::is_trivia(next.kind) {
+                            pos += 1;
+                        } else {
+                            return next.kind == SyntaxKind::Colon;
+                        }
+                    }
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+        true
     }
 
     fn has_colon_after_key(&self) -> bool {

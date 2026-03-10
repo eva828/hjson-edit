@@ -777,7 +777,7 @@ fn test_edit_type_inference_null() {
     fs::remove_file(temp_path).ok();
 }
 
-/// 16進数の型推論が正しく動作することを検証
+/// 16進数風の値は文字列として扱われることを検証
 #[test]
 fn test_edit_type_inference_hex() {
     let binary = get_binary_path();
@@ -792,11 +792,8 @@ fn test_edit_type_inference_hex() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("0xFF") || stdout.contains("255"),
-        "Hex value should be recognized"
-    );
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("x"), Some(HjsonValue::String("0xFF".to_string())));
 
     fs::remove_file(temp_path).ok();
 }
@@ -982,13 +979,13 @@ fn test_edit_string_style_auto_block() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("'''line1\nline2'''"));
+    assert!(stdout.contains("'''\nline1\nline2\n'''"));
 
     fs::remove_file(temp_path).ok();
 }
 
 #[test]
-fn test_edit_string_style_single_quoted_literal() {
+fn test_edit_single_quoted_literal_is_plain_string_content() {
     let binary = get_binary_path();
 
     let test_content = r#"{"name": "test"}"#;
@@ -1001,8 +998,11 @@ fn test_edit_string_style_single_quoted_literal() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"name\": 'single value'"));
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(
+        doc.get("name"),
+        Some(HjsonValue::String("'single value'".to_string()))
+    );
 
     fs::remove_file(temp_path).ok();
 }

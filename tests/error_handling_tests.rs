@@ -209,8 +209,22 @@ fn test_error_invalid_hex() {
 #[test]
 fn test_error_non_rfc_numeric_extensions() {
     for input in ["{ value: 0xFF }", "{ value: NaN }", "{ value: Infinity }"] {
-        assert!(parse(input).is_err(), "Should reject {input}");
+        assert!(
+            parse(input).is_ok(),
+            "Non-RFC numeric spellings should fall back to strings: {input}"
+        );
     }
+}
+
+#[test]
+fn test_quoteless_string_with_space_and_comma() {
+    let input = "{ value: look ma, no quotes! }";
+    let result = parse(input);
+    assert!(
+        result.is_ok(),
+        "Should parse quoteless string with spaces: {:?}",
+        result.err()
+    );
 }
 
 /// コロンが連続する構文エラー（key:: value）が検出されることを検証

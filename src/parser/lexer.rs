@@ -637,14 +637,12 @@ mod tests {
 
     #[test]
     fn test_quoteless_string_with_spaces() {
-        let input = "text: 5 times\n";
+        let input = "text: look ma, no quotes!\n";
         let result = lex(input);
 
         assert!(result.errors.is_empty());
-        assert!(result
-            .tokens
-            .iter()
-            .any(|t| t.kind == SyntaxKind::Integer && t.text == "5"));
+        assert!(result.tokens.iter().any(|t| t.text == "look"));
+        assert!(result.tokens.iter().any(|t| t.text == "ma"));
     }
 
     #[test]

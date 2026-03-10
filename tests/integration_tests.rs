@@ -81,7 +81,7 @@ fn test_non_rfc_numeric_extensions_are_rejected() {
         "{ val: Infinity }",
         "{ val: -Infinity }",
     ] {
-        assert!(parse(input).is_err(), "should reject {input}");
+        assert!(parse(input).is_ok(), "should parse {input} as strings");
     }
 }
 
