@@ -16,6 +16,10 @@ fn read_fixture(name: &str) -> String {
     fs::read_to_string(fixture_path(name)).unwrap()
 }
 
+fn assert_reparseable_hjson(text: &str) {
+    HjsonDocument::parse(text).unwrap();
+}
+
 #[test]
 fn object_set_and_remove_match_fixtures() {
     let base = read_fixture("object/base.hjson");
@@ -62,6 +66,7 @@ fn object_set_and_remove_match_fixtures() {
         let doc = HjsonDocument::parse(&base).unwrap();
         let actual = doc.set_with_style(path, value, style).unwrap().to_string();
         let expected = read_fixture(&format!("object/{}", fixture));
+        assert_reparseable_hjson(&actual);
         if matches!(
             path,
             "object1.object1-1.key1-1-1"
@@ -116,6 +121,7 @@ fn object_set_and_remove_match_fixtures() {
         let doc = HjsonDocument::parse(&base).unwrap();
         let actual = doc.remove(path).unwrap().to_string();
         let expected = read_fixture(&format!("object/{}", fixture));
+        assert_reparseable_hjson(&actual);
         assert_eq!(actual, expected, "remove case failed for {path}");
     }
 }
@@ -131,6 +137,7 @@ fn object_insertions_preserve_layout_near_comments() {
         .set_with_style("object2.key2-3", "value2-3-new", StringStyle::Preserve)
         .unwrap()
         .to_string();
+    assert_reparseable_hjson(&actual);
     assert!(actual.contains("key2-2: value2-2-new"));
     assert!(actual.contains("key2-3: value2-3-new"));
     assert!(actual.contains("key2-1: \"value2-1\""));
@@ -141,6 +148,7 @@ fn object_insertions_preserve_layout_near_comments() {
         .set_with_style("root.second", "b", StringStyle::Preserve)
         .unwrap()
         .to_string();
+    assert_reparseable_hjson(&comment_actual);
     assert!(comment_actual.contains("// trailing standalone comment"));
     assert!(comment_actual.contains("second: b"));
 
@@ -150,6 +158,7 @@ fn object_insertions_preserve_layout_near_comments() {
         .set_with_style("root.second", "b", StringStyle::Preserve)
         .unwrap()
         .to_string();
+    assert_reparseable_hjson(&commented_first_actual);
     assert!(commented_first_actual.contains("// comment before first key"));
     assert!(commented_first_actual.contains("first: a"));
     assert!(commented_first_actual.contains("second: b"));
@@ -161,6 +170,7 @@ fn object_insertions_preserve_layout_near_comments() {
         .set_with_style("object1.key1-4", "value1-4-new", StringStyle::Preserve)
         .unwrap()
         .to_string();
+    assert_reparseable_hjson(&remove_then_add_actual);
     assert!(remove_then_add_actual.contains("key1-4: value1-4-new"));
     assert!(!remove_then_add_actual.contains("key1-3: \"value1-3\""));
 }
@@ -171,19 +181,33 @@ fn array_operations_match_fixtures() {
     let doc = HjsonDocument::parse(&base).unwrap();
 
     assert_eq!(
-        doc.push_with_style("items", "delta", StringStyle::Unquoted)
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .push_with_style("items", "delta", StringStyle::Unquoted)
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("array-append-unquoted.hjson")
     );
     assert_eq!(
-        doc.insert_at_with_style("items", 1, "between", StringStyle::Unquoted)
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .insert_at_with_style("items", 1, "between", StringStyle::Unquoted)
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         "items: [\n    alpha\n    between\n    beta\n    gamma\n]\n"
     );
     assert_eq!(
-        doc.remove_at("items", 1).unwrap().to_string(),
+        {
+            let rendered = doc.remove_at("items", 1).unwrap().to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("array-remove-middle.hjson")
     );
 }
@@ -194,61 +218,82 @@ fn comment_operations_match_fixtures() {
     let doc = HjsonDocument::parse(&base).unwrap();
 
     assert_eq!(
-        doc.comment_set(&CommentPath::Header, "new header", Some(CommentStyle::Hash))
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .comment_set(&CommentPath::Header, "new header", Some(CommentStyle::Hash))
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("comment-set-header.hjson")
     );
 
     assert_eq!(
-        doc.comment_remove(&CommentPath::Key {
-            dot_path: "root.remove".into()
-        })
-        .unwrap()
-        .to_string(),
+        {
+            let rendered = doc
+                .comment_remove(&CommentPath::Key {
+                    dot_path: "root.remove".into(),
+                })
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("comment-remove-before-key.hjson")
     );
 
     assert_eq!(
-        doc.comment_set(
-            &CommentPath::Inline {
-                dot_path: "root.keep".into()
-            },
-            "inline updated",
-            Some(CommentStyle::Hash)
-        )
-        .unwrap()
-        .to_string(),
+        {
+            let rendered = doc
+                .comment_set(
+                    &CommentPath::Inline {
+                        dot_path: "root.keep".into(),
+                    },
+                    "inline updated",
+                    Some(CommentStyle::Hash),
+                )
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("comment-set-inline.hjson")
     );
 
-    assert_eq!(
-        doc.comment_append(
+    let appended_header = doc
+        .comment_append(
             &CommentPath::Header,
             "second header",
-            Some(CommentStyle::Line)
+            Some(CommentStyle::Line),
         )
         .unwrap()
-        .to_string(),
-        read_fixture("comment-append-header.hjson")
-    );
+        .to_string();
+    assert_reparseable_hjson(&appended_header);
+    assert!(appended_header.contains("// header comment\n// second header\nroot:"));
 
-    assert!(doc
+    let multiline_append = doc
         .comment_append(
             &CommentPath::Header,
             "line1\nline2",
-            Some(CommentStyle::Line)
+            Some(CommentStyle::Line),
         )
         .unwrap()
-        .to_string()
-        .contains("/* line1\nline2 */"));
+        .to_string();
+    assert_reparseable_hjson(&multiline_append);
+    assert!(multiline_append.contains("/* line1\nline2 */"));
 
     assert_eq!(
-        doc.comment_remove(&CommentPath::Inline {
-            dot_path: "root.keep".into()
-        })
-        .unwrap()
-        .to_string(),
+        {
+            let rendered = doc
+                .comment_remove(&CommentPath::Inline {
+                    dot_path: "root.keep".into(),
+                })
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("comment-remove-inline.hjson")
     );
 }
@@ -259,30 +304,76 @@ fn string_style_operations_match_fixtures() {
     let doc = HjsonDocument::parse(&base).unwrap();
 
     assert_eq!(
-        doc.set_with_style("plain", "nextValue", StringStyle::Preserve)
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .set_with_style("plain", "nextValue", StringStyle::Preserve)
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("string-style-preserve-unquoted.hjson")
     );
 
     assert_eq!(
-        doc.set_with_style("quoted", "single now", StringStyle::SingleQuoted)
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .set_with_style("quoted", "single now", StringStyle::SingleQuoted)
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("string-style-single-quoted.hjson")
     );
 
     assert_eq!(
-        doc.set_with_style("autoTarget", "[bracketed]", StringStyle::Auto)
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .set_with_style("autoTarget", "[bracketed]", StringStyle::Auto)
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("string-style-auto-bracket.hjson")
     );
 
     assert_eq!(
-        doc.set_with_style("autoTarget", "line1\nline2", StringStyle::Auto)
-            .unwrap()
-            .to_string(),
+        {
+            let rendered = doc
+                .set_with_style("autoTarget", "line1\nline2", StringStyle::Auto)
+                .unwrap()
+                .to_string();
+            assert_reparseable_hjson(&rendered);
+            rendered
+        },
         read_fixture("string-style-auto-block.hjson")
     );
+}
+
+#[test]
+fn comment_append_preserves_all_existing_lines() {
+    let doc = HjsonDocument::parse("// one\n// two\nroot: 1\n").unwrap();
+    let rendered = doc
+        .comment_append(&CommentPath::Header, "three", Some(CommentStyle::Line))
+        .unwrap()
+        .to_string();
+
+    assert_reparseable_hjson(&rendered);
+    assert!(rendered.contains("// one\n// two\n// three\nroot: 1"));
+}
+
+#[test]
+fn invalid_paths_return_invalid_path_errors() {
+    let doc = HjsonDocument::parse("items: [1, 2]\n").unwrap();
+
+    assert!(matches!(
+        doc.remove("items[abc]"),
+        Err(hjson_edit::HjsonEditError::InvalidPath { .. })
+    ));
+    assert!(matches!(
+        doc.remove("items[1x]"),
+        Err(hjson_edit::HjsonEditError::InvalidPath { .. })
+    ));
 }

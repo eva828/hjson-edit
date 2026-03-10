@@ -5,6 +5,8 @@
 use std::fs;
 use std::process::Command;
 
+use hjson_edit::{HjsonDocument, HjsonValue};
+
 fn get_binary_path() -> String {
     // Get the path to the compiled binary
     let mut path = std::env::current_exe().unwrap();
@@ -12,6 +14,11 @@ fn get_binary_path() -> String {
     path.pop(); // Remove 'deps'
     path.push("hjson-edit");
     path.to_str().unwrap().to_string()
+}
+
+fn assert_stdout_parses(output: &[u8]) -> HjsonDocument {
+    let stdout = String::from_utf8_lossy(output);
+    HjsonDocument::parse(&stdout).unwrap()
 }
 
 /// parseコマンドで有効なHJSONファイルを渡すと "Parsed successfully" が出力されることを検証
@@ -235,9 +242,8 @@ fn test_edit_object_set_new_key() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("value"), "New key should exist");
-    assert!(stdout.contains("42"), "New value should be 42");
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("value"), Some(HjsonValue::Integer(42)));
 
     fs::remove_file(temp_path).ok();
 }
@@ -257,9 +263,12 @@ fn test_edit_object_remove() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout.contains("value"), "Removed key should not exist");
-    assert!(stdout.contains("name"), "Other key should still exist");
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("value"), None);
+    assert_eq!(
+        doc.get("name"),
+        Some(HjsonValue::String("test".to_string()))
+    );
 
     fs::remove_file(temp_path).ok();
 }
@@ -598,8 +607,8 @@ fn test_edit_array_append() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("3"), "Appended value should exist");
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("items[2]"), Some(HjsonValue::Integer(3)));
 
     fs::remove_file(temp_path).ok();
 }
@@ -619,12 +628,10 @@ fn test_edit_array_insert() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Check that 2 is between 1 and 3 (order matters in HJSON arrays)
-    let pos1 = stdout.find('1').unwrap_or(0);
-    let pos2 = stdout.find('2').unwrap_or(0);
-    let pos3 = stdout.find('3').unwrap_or(0);
-    assert!(pos1 < pos2 && pos2 < pos3, "2 should be between 1 and 3");
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("items[0]"), Some(HjsonValue::Integer(1)));
+    assert_eq!(doc.get("items[1]"), Some(HjsonValue::Integer(2)));
+    assert_eq!(doc.get("items[2]"), Some(HjsonValue::Integer(3)));
 
     fs::remove_file(temp_path).ok();
 }
@@ -644,10 +651,10 @@ fn test_edit_array_remove() {
         .expect("Failed to execute command");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("1"), "First item should still exist");
-    assert!(!stdout.contains("2"), "Removed item should not exist");
-    assert!(stdout.contains("3"), "Third item should still exist");
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("items[0]"), Some(HjsonValue::Integer(1)));
+    assert_eq!(doc.get("items[1]"), Some(HjsonValue::Integer(3)));
+    assert_eq!(doc.get("items[2]"), None);
 
     fs::remove_file(temp_path).ok();
 }
@@ -1105,8 +1112,8 @@ fn test_edit_stdout_default() {
     assert!(output.status.success());
 
     // stdout should have the content
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("value"));
+    let doc = assert_stdout_parses(&output.stdout);
+    assert_eq!(doc.get("value"), Some(HjsonValue::Integer(42)));
 
     // Original file should be unchanged
     let original = fs::read_to_string(temp_path).unwrap();
@@ -1147,4 +1154,35 @@ fn test_edit_preserves_comments() {
     );
 
     fs::remove_file(temp_path).ok();
+}
+
+#[test]
+fn test_edit_in_place_conflicts_with_output() {
+    let binary = get_binary_path();
+
+    let test_content = r#"{"name": "test"}"#;
+    let input_path = "/tmp/test_edit_conflict_input.hjson";
+    let output_path = "/tmp/test_edit_conflict_output.hjson";
+    fs::write(input_path, test_content).unwrap();
+
+    let output = Command::new(&binary)
+        .args([
+            "edit",
+            input_path,
+            "--in-place",
+            "--output",
+            output_path,
+            "--set",
+            "value",
+            "42",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot be used with"));
+
+    fs::remove_file(input_path).ok();
+    fs::remove_file(output_path).ok();
 }
