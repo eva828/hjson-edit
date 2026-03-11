@@ -1,8 +1,14 @@
-use crate::edit::api::create_token;
-use crate::edit::high_level::{create_pair_node, EntryTerminator, HjsonEditError, HjsonValue, ObjectEntry, ObjectItem, StringStyle};
+use crate::edit::api::{create_node, create_token, RedNodeEdit};
+use crate::edit::high_level::{
+    build_object_items, clone_element, create_pair_node, extract_key_text, is_token_of_kind,
+    rebuild_object_children_for_format, EntryTerminator, HjsonEditError, HjsonValue,
+    ObjectEntry, ObjectItem, StringStyle,
+};
 use crate::edit::high_level::structure::{indentation_from_standalone_block, whitespace_after_last_newline};
+use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
-use rowan::NodeOrToken;
+use crate::syntax::red::{RedNode, RedNodeExt};
+use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) fn insert_object_entry_without_reformat(
     items: &mut Vec<ObjectItem>,
@@ -98,6 +104,81 @@ pub(crate) fn insert_object_entry_without_reformat(
     items.push(new_entry);
     items.extend(trailing_standalone);
     Ok(())
+}
+
+pub(crate) fn remove_object_entry(
+    obj_node: &RedNode,
+    key: &str,
+) -> Result<GreenNode, HjsonEditError> {
+    let obj_green: GreenNode = obj_node.to_green();
+    let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
+    let lbrace = children
+        .iter()
+        .find(|e| is_token_of_kind(e, SyntaxKind::LBrace))
+        .cloned();
+    let rbrace = children
+        .iter()
+        .find(|e| is_token_of_kind(e, SyntaxKind::RBrace))
+        .cloned();
+    let items = build_object_items(&children);
+
+    let mut found = false;
+    let mut new_items: Vec<ObjectItem> = Vec::new();
+    let mut pending_terminator: Option<EntryTerminator> = None;
+    let mut has_surviving_entry = false;
+
+    for item in items {
+        match &item {
+            ObjectItem::Entry(entry) => {
+                if let NodeOrToken::Node(pair_node) = &entry.pair {
+                    let pair_red = RedNode::new_root(pair_node.clone());
+                    if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
+                        if let Some(key_text) = extract_key_text(&key_node) {
+                            if key_text == key {
+                                found = true;
+                                if !has_surviving_entry {
+                                    pending_terminator = Some(entry.terminator.clone());
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                let mut modified_entry = entry.clone();
+                if let Some(ref term) = pending_terminator {
+                    if let EntryTerminator::Newline(suffix) = term {
+                        let mut new_leading = entry.leading_line_trivia.clone();
+                        if !new_leading
+                            .iter()
+                            .any(|elem| is_token_of_kind(elem, SyntaxKind::Newline))
+                        {
+                            let mut merged = suffix.clone();
+                            merged.extend(new_leading);
+                            new_leading = merged;
+                        }
+                        modified_entry.leading_line_trivia = new_leading;
+                    }
+                    pending_terminator = None;
+                }
+
+                new_items.push(ObjectItem::Entry(modified_entry));
+                has_surviving_entry = true;
+            }
+            ObjectItem::Standalone(_) => {
+                new_items.push(item);
+            }
+        }
+    }
+
+    if !found {
+        return Err(HjsonEditError::InvalidPath { path: key.to_string() });
+    }
+
+    Ok(create_node(
+        SyntaxKind::Object,
+        rebuild_object_children_for_format(lbrace, new_items, rbrace),
+    ))
 }
 
 pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {

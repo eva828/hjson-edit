@@ -1004,75 +1004,7 @@ impl HjsonDocument {
                     }
                 })?;
 
-                let obj_green: GreenNode = obj_node.to_green();
-                let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
-                let lbrace = children
-                    .iter()
-                    .find(|e| is_token_of_kind(e, SyntaxKind::LBrace))
-                    .cloned();
-                let rbrace = children
-                    .iter()
-                    .find(|e| is_token_of_kind(e, SyntaxKind::RBrace))
-                    .cloned();
-                let items = build_object_items(&children);
-
-                let mut found = false;
-                let mut new_items: Vec<ObjectItem> = Vec::new();
-                let mut pending_terminator: Option<EntryTerminator> = None;
-                let mut has_surviving_entry = false;
-
-                for item in items {
-                    match &item {
-                        ObjectItem::Entry(entry) => {
-                            if let NodeOrToken::Node(pair_node) = &entry.pair {
-                                let pair_red = RedNode::new_root(pair_node.clone());
-                                if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
-                                    if let Some(key_text) = extract_key_text(&key_node) {
-                                        if key_text == *key {
-                                            found = true;
-                                            if !has_surviving_entry {
-                                                pending_terminator = Some(entry.terminator.clone());
-                                            }
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-
-                            let mut modified_entry = entry.clone();
-                            if let Some(ref term) = pending_terminator {
-                                if let EntryTerminator::Newline(suffix) = term {
-                                    let mut new_leading = entry.leading_line_trivia.clone();
-                                    if !new_leading
-                                        .iter()
-                                        .any(|elem| is_token_of_kind(elem, SyntaxKind::Newline))
-                                    {
-                                        let mut merged = suffix.clone();
-                                        merged.extend(new_leading);
-                                        new_leading = merged;
-                                    }
-                                    modified_entry.leading_line_trivia = new_leading;
-                                }
-                                pending_terminator = None;
-                            }
-
-                            new_items.push(ObjectItem::Entry(modified_entry));
-                            has_surviving_entry = true;
-                        }
-                        ObjectItem::Standalone(_) => {
-                            new_items.push(item);
-                        }
-                    }
-                }
-
-                if !found {
-                    return Err(HjsonEditError::InvalidPath { path: key.clone() });
-                }
-
-                let new_obj = create_node(
-                    SyntaxKind::Object,
-                    rebuild_object_children_for_format(lbrace, new_items, rbrace),
-                );
+                let new_obj = object_ops::remove_object_entry(&obj_node, key)?;
                 self.replace_green_node(&obj_node.path_from_root(), new_obj)
             }
             PathSegment::Index(idx) => {
