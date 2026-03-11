@@ -1,7 +1,7 @@
 /// HJSON字句解析器
 ///
 /// エラー継続型：エラーがあっても解析を続行し、詳細なエラー情報を収集
-use super::super::syntax::kind::SyntaxKind;
+use crate::syntax::kind::SyntaxKind;
 
 /// 字句解析エラー
 #[derive(Debug, Clone, PartialEq)]

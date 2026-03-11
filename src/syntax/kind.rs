@@ -74,8 +74,21 @@ impl Language for HjsonLanguage {
     type Kind = SyntaxKind;
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
-        assert!(raw.0 < SyntaxKind::__Last as u16);
-        unsafe { std::mem::transmute::<u16, SyntaxKind>(raw.0) }
+        #[allow(clippy::enum_glob_use)]
+        use SyntaxKind::*;
+        const KINDS: &[SyntaxKind] = &[
+            LBrace, RBrace, LBracket, RBracket, Colon, Comma,
+            True, False, Null,
+            Integer, Float,
+            String, BlockString, UnquotedString,
+            Ident,
+            LineComment, HashComment, BlockComment,
+            Whitespace, Newline,
+            Root,
+            Object, Array, Pair, Key, Value,
+            Error,
+        ];
+        KINDS[raw.0 as usize]
     }
 
     fn kind_to_raw(kind: SyntaxKind) -> rowan::SyntaxKind {

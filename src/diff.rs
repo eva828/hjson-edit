@@ -293,8 +293,8 @@ pub fn simple_line_diff(before: &str, after: &str) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::syntax::green::GreenTreeBuilder;
-    use super::super::syntax::kind::SyntaxKind;
+    use crate::syntax::green::GreenTreeBuilder;
+    use crate::syntax::kind::SyntaxKind;
     use super::*;
 
     fn create_simple_object(text: &str) -> GreenNode {

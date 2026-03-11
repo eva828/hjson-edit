@@ -547,7 +547,7 @@ impl HjsonDocument {
         let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
-        let new_arr = insert_array_entry_structural(&arr_node, usize::MAX, &value, string_style)?;
+        let new_arr = array_ops::insert_array_entry_structural(&arr_node, usize::MAX, &value, string_style)?;
         let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
         Ok(EditResult::new(
             updated,
@@ -574,7 +574,7 @@ impl HjsonDocument {
         let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
-        let new_arr = insert_array_entry_structural(&arr_node, index, &value, string_style)?;
+        let new_arr = array_ops::insert_array_entry_structural(&arr_node, index, &value, string_style)?;
         let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
         Ok(EditResult::new(
             updated,
@@ -958,7 +958,7 @@ impl HjsonDocument {
                         found: parent.kind(),
                     }
                 })?;
-                let new_arr = remove_array_entry(&arr_node, *idx)?;
+                let new_arr = array_ops::remove_array_entry(&arr_node, *idx)?;
                 self.replace_green_node(&arr_node.path_from_root(), new_arr)
             }
         }
@@ -970,7 +970,7 @@ impl HjsonDocument {
         index: usize,
     ) -> Result<Self, HjsonEditError> {
         let arr_node = self.resolve_array_node(path)?;
-        let new_arr = remove_array_entry(&arr_node, index)?;
+        let new_arr = array_ops::remove_array_entry(&arr_node, index)?;
         self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
 
@@ -1202,7 +1202,8 @@ pub(crate) fn extract_key_text(key_node: &RedNode) -> Option<String> {
                 SyntaxKind::String => {
                     let text = token.text();
                     if text.len() >= 2 {
-                        return Some(text[1..text.len() - 1].to_string());
+                        let inner = &text[1..text.len() - 1];
+                        return Some(unescape_json_string(inner));
                     }
                     return Some(text.to_string());
                 }
@@ -1243,21 +1244,41 @@ pub(crate) fn is_token_of_kind(elem: &GreenElement, kind: SyntaxKind) -> bool {
 /// Object Entry Model
 // =============================================================================
 
-fn remove_array_entry(arr_node: &RedNode, index: usize) -> Result<GreenNode, HjsonEditError> {
-    array_ops::remove_array_entry(arr_node, index)
+/// JSON エスケープシーケンスを復元する
+fn unescape_json_string(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => result.push('"'),
+                Some('\\') => result.push('\\'),
+                Some('/') => result.push('/'),
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('b') => result.push('\u{08}'),
+                Some('f') => result.push('\u{0C}'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                        if let Some(ch) = char::from_u32(code) {
+                            result.push(ch);
+                        }
+                    }
+                }
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
-
-fn insert_array_entry_structural(
-    arr_node: &RedNode,
-    index: usize,
-    value: &HjsonValue,
-    string_style: StringStyle,
-) -> Result<GreenNode, HjsonEditError> {
-    return array_ops::insert_array_entry_structural(arr_node, index, value, string_style);
-}
-
-
-/// 保留中のトリビアに空行が含まれるか判定（\n\s*\n のパターンを検出）
 
 // =============================================================================
 // Tests
@@ -1313,38 +1334,7 @@ mod tests {
         let input = r#"{"name": "test", "count": 42}"#;
         let doc = HjsonDocument::parse(input).unwrap();
 
-        // Debug: print the structure
-        let red = RedNode::new_root(doc.green.clone());
-        println!("Root kind: {:?}", red.kind());
-        for child in red.children() {
-            println!("  Child kind: {:?}", child.kind());
-            if child.kind() == SyntaxKind::Value {
-                for grandchild in child.children() {
-                    println!("    Grandchild kind: {:?}", grandchild.kind());
-                    if grandchild.kind() == SyntaxKind::Object {
-                        for pair in grandchild.children() {
-                            println!("      Pair kind: {:?}", pair.kind());
-                            if pair.kind() == SyntaxKind::Pair {
-                                if let Some(key_node) = pair.child_by_kind(SyntaxKind::Key) {
-                                    println!("        Key node found");
-                                    if let Some(key_text) = extract_key_text(&key_node) {
-                                        println!("        Key text: {}", key_text);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
-        // Test the path navigation
-        let path = vec![PathSegment::Key("name".to_string())];
-        if let Some(node) = doc.navigate_to_node(&path) {
-            println!("Found node: {:?}", node.kind());
-        } else {
-            println!("Node not found for path: {:?}", path);
-        }
 
         assert_eq!(
             doc.get("name"),

@@ -59,7 +59,16 @@ impl RedNodeExt for RedNode {
     }
 
     fn line_range(&self, source: &str) -> (usize, usize) {
-        let offset = self.text_range().start().into();
+        let raw_offset: usize = self.text_range().start().into();
+        let offset = raw_offset.min(source.len());
+        // Ensure we land on a valid char boundary for multi-byte UTF-8
+        let offset = {
+            let mut o = offset;
+            while o > 0 && !source.is_char_boundary(o) {
+                o -= 1;
+            }
+            o
+        };
         let text_before = &source[..offset];
         let start_line = text_before.chars().filter(|&c| c == '\n').count() + 1;
 
@@ -136,7 +145,7 @@ pub fn red_to_green(node: &RedNode) -> rowan::GreenNode {
 
 #[cfg(test)]
 mod tests {
-    use super::super::green::GreenTreeBuilder;
+    use crate::syntax::green::GreenTreeBuilder;
     use super::*;
 
     fn create_test_node() -> RedNode {

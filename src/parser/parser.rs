@@ -1,5 +1,5 @@
-use super::super::syntax::green::GreenTreeBuilder;
-use super::super::syntax::kind::SyntaxKind;
+use crate::syntax::green::GreenTreeBuilder;
+use crate::syntax::kind::SyntaxKind;
 /// HJSON構文解析器
 ///
 /// Lexerのトークン列をGreen Treeに変換
@@ -173,7 +173,7 @@ impl Parser {
     /// トリビアをGreen Treeに追加しつつ、現在位置を進める
     fn eat_trivia(&mut self) {
         while let Some(token) = self.current() {
-            if super::super::syntax::kind::is_trivia(token.kind) {
+            if crate::syntax::kind::is_trivia(token.kind) {
                 self.bump();
             } else {
                 break;
@@ -184,7 +184,7 @@ impl Parser {
     fn eat_trivia_and_report_newline(&mut self) -> bool {
         let mut had_newline = false;
         while let Some(token) = self.current() {
-            if super::super::syntax::kind::is_trivia(token.kind) {
+            if crate::syntax::kind::is_trivia(token.kind) {
                 if token.kind == SyntaxKind::Newline {
                     had_newline = true;
                 }
@@ -200,7 +200,7 @@ impl Parser {
     fn current_kind(&self) -> Option<SyntaxKind> {
         let mut pos = self.position;
         while let Some(token) = self.tokens.get(pos) {
-            if super::super::syntax::kind::is_trivia(token.kind) {
+            if crate::syntax::kind::is_trivia(token.kind) {
                 pos += 1;
             } else {
                 return Some(token.kind);
@@ -671,7 +671,7 @@ impl Parser {
                 SyntaxKind::Ident | SyntaxKind::String => {
                     pos += 1;
                     while let Some(next) = self.tokens.get(pos) {
-                        if super::super::syntax::kind::is_trivia(next.kind) {
+                        if crate::syntax::kind::is_trivia(next.kind) {
                             pos += 1;
                         } else {
                             return next.kind == SyntaxKind::Colon;
@@ -690,7 +690,7 @@ impl Parser {
         let mut consumed_key = false;
 
         while let Some(token) = self.tokens.get(pos) {
-            if super::super::syntax::kind::is_trivia(token.kind) {
+            if crate::syntax::kind::is_trivia(token.kind) {
                 pos += 1;
                 continue;
             }
@@ -778,7 +778,7 @@ pub fn parse(input: &str) -> Result<ParseResult, Vec<ParseError>> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::syntax::green::GreenNodeExt;
+    use crate::syntax::green::GreenNodeExt;
     use super::*;
 
     /// 空オブジェクト "{}" のパースとラウンドトリップを検証

@@ -1,9 +1,9 @@
 /// 低レベル編集API
 ///
 /// Green/Red Treeを操作するための基本的な編集機能
-use super::super::syntax::green::GreenElement;
-use super::super::syntax::kind::SyntaxKind;
-use super::super::syntax::red::RedNode;
+use crate::syntax::green::GreenElement;
+use crate::syntax::kind::SyntaxKind;
+use crate::syntax::red::RedNode;
 use rowan::GreenNodeBuilder;
 
 /// 編集操作
@@ -194,7 +194,7 @@ pub trait RedNodeEdit {
 
 impl RedNodeEdit for RedNode {
     fn to_green(&self) -> rowan::GreenNode {
-        super::super::syntax::red::red_to_green(self)
+        crate::syntax::red::red_to_green(self)
     }
 
     fn path_from_root(&self) -> Vec<usize> {
@@ -267,8 +267,8 @@ pub fn create_node(kind: SyntaxKind, children: Vec<GreenElement>) -> rowan::Gree
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::syntax::green::GreenNodeExt;
-    use super::super::super::syntax::green::GreenTreeBuilder;
+    use crate::syntax::green::GreenNodeExt;
+    use crate::syntax::green::GreenTreeBuilder;
     use super::*;
 
     fn create_test_node() -> rowan::GreenNode {
