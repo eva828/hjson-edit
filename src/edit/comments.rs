@@ -130,31 +130,90 @@ fn set_key_comment(
     }
 
     let key = expect_terminal_key(&path_segments, dot_path)?;
-    let obj = resolve_object_for_comment_path(
-        document,
-        &path_segments[..path_segments.len() - 1],
-        dot_path,
-    )?;
-    let pair_idx =
-        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
+    let parent_path = &path_segments[..path_segments.len() - 1];
+    let obj = resolve_object_for_comment_path(document, parent_path, dot_path)?;
+    
     let pair_node = obj
-        .children_nodes()
-        .enumerate()
-        .filter(|(_, n)| n.kind() == SyntaxKind::Pair)
-        .nth(pair_idx)
-        .map(|(_, n)| n)
+        .find_pair_node(key)
         .ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
 
-    let pair_green = pair_node.to_green();
+    // Try to find indentation from the Object children if the Pair node doesn't have it
+    let mut indentation = Vec::new();
+    let obj_green = obj.to_green();
+    let mut pair_idx_in_obj = 0;
+    for (i, child) in obj_green.children().enumerate() {
+        if let NodeOrToken::Node(n) = child {
+            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
+                if *n == *pair_node.green() {
+                    pair_idx_in_obj = i;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Look backwards from pair_idx_in_obj for whitespace
+    if pair_idx_in_obj > 0 {
+        let mut idx = pair_idx_in_obj - 1;
+        let mut temp_indent = Vec::new();
+        loop {
+            if let Some(NodeOrToken::Token(t)) = obj_green.children().nth(idx) {
+                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                if kind == SyntaxKind::Whitespace {
+                    temp_indent.push(NodeOrToken::Token(create_token(kind, t.text())));
+                } else if kind == SyntaxKind::Newline {
+                    indentation = temp_indent.into_iter().rev().collect();
+                    break;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+            if idx == 0 { break; }
+            idx -= 1;
+        }
+    }
+
+    let mut pair_green = pair_node.to_green();
+    
+    // If we found indentation in the object and the pair doesn't start with whitespace, 
+    // prepend it to pair_green temporarily so insert_comment_before_pair can use it.
+    if !indentation.is_empty() {
+        let first_child = pair_green.children().next();
+        let already_has_whitespace = matches!(first_child, Some(NodeOrToken::Token(t)) if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Whitespace);
+        if !already_has_whitespace {
+            let mut new_pair_children = indentation.clone();
+            new_pair_children.extend(pair_green.children().map(clone_element));
+            pair_green = create_node(SyntaxKind::Pair, new_pair_children);
+        }
+    }
+
     let comment_style = determine_comment_style(&pair_green, style)?;
     let new_comment = create_comment_token(text, comment_style);
-    let new_pair = insert_comment_before_pair(&pair_green, new_comment)?;
-    document.replace_green_node_internal(&pair_node.path_from_root(), new_pair)
+    let mut updated_pair = insert_comment_before_pair(&pair_green, new_comment)?;
+    
+    // If we prepended indentation to pair_green, we should remove it from the start of updated_pair
+    // because it's still present in the Object's trivia.
+    if !indentation.is_empty() {
+        let mut final_children = Vec::new();
+        let mut skip_count = indentation.len();
+        for child in updated_pair.children() {
+            if skip_count > 0 {
+                skip_count -= 1;
+                continue;
+            }
+            final_children.push(clone_element(child));
+        }
+        updated_pair = create_node(SyntaxKind::Pair, final_children);
+    }
+
+    document.replace_green_node_internal(&pair_node.path_from_root(), updated_pair)
 }
+
+
 
 fn set_inline_comment_for_path(
     document: &HjsonDocument,
@@ -607,10 +666,23 @@ fn insert_comment_before_pair(
         break;
     }
 
-    children.extend(prefix_trivia);
+    // If no indentation was found in Pair, it might be in the ObjectEntry's leading_line_trivia.
+    // However, since we are inside Pair, we should at least ensure the comment itself is indented
+    // if the key was indented. The problem is that prefix_trivia might be empty if the 
+    // indentation is handled by the parent Object's formatting.
+    
+    children.extend(prefix_trivia.clone());
     children.push(NodeOrToken::Token(comment));
     children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
-    children.extend(line_indent);
+    // If prefix_trivia had no newline, it means it's just indentation. 
+    // We should use it for both the comment and the key.
+    if !prefix_trivia.is_empty() && prefix_trivia.iter().all(|t| matches!(t.as_token(), Some(tok) if crate::syntax::kind::HjsonLanguage::kind_from_raw(tok.kind()) == SyntaxKind::Whitespace)) {
+        // Current children: [indent, comment, newline]
+        // We want: [indent, comment, newline, indent, key...]
+        children.extend(prefix_trivia);
+    } else {
+        children.extend(line_indent);
+    }
 
     let mut found_non_trivia = false;
     for child in pair_green.children() {
@@ -638,6 +710,7 @@ fn insert_comment_before_pair(
 
     Ok(create_node(SyntaxKind::Pair, children))
 }
+
 
 fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonEditError> {
     let mut children: Vec<GreenElement> = Vec::new();
