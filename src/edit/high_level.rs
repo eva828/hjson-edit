@@ -331,7 +331,7 @@ impl HjsonDocument {
         string_style: StringStyle,
     ) -> Result<EditResult, HjsonEditError> {
         if path.is_empty() {
-            let new_green = value_to_green_node(&value, string_style, None)?;
+            let new_green = value_to_green_node(value, string_style, None)?;
             return Ok(EditResult::new(
                 Self { green: new_green },
                 vec![FormatTarget::Document],
@@ -1241,7 +1241,7 @@ pub(crate) fn is_token_of_kind(elem: &GreenElement, kind: SyntaxKind) -> bool {
 }
 
 // =============================================================================
-/// Object Entry Model
+// Object Entry Model
 // =============================================================================
 
 /// JSON エスケープシーケンスを復元する

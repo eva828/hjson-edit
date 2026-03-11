@@ -3,6 +3,7 @@ use rowan::Language;
 /// HJSON構文要素の種別
 ///
 /// 行コメント、ブロックコメント、空白も重要な構文要素として保持する
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
@@ -54,10 +55,6 @@ pub enum SyntaxKind {
 
     // エラー回復用
     Error,
-
-    // ===== Sentinel =====
-    #[doc(hidden)]
-    __Last,
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {

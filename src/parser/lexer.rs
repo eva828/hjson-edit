@@ -207,10 +207,7 @@ impl Lexer {
         if self.position == 0 {
             return true;
         }
-        match self.input[self.position - 1] {
-            '\n' | '\r' | ' ' | '\t' => true,
-            _ => false,
-        }
+        matches!(self.input[self.position - 1], '\n' | '\r' | ' ' | '\t')
     }
 
     fn emit(&mut self, kind: SyntaxKind, text: impl Into<String>, line: usize, column: usize) {

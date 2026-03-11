@@ -310,7 +310,7 @@ fn test_multiple_edits_sequence() {
     assert!(
         first_key.to_string().contains("name"),
         "First key should be 'name', got '{}'",
-        first_key.to_string()
+        first_key
     );
 
     // 1つ目の編集: nameの値を変更

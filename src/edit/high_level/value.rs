@@ -515,7 +515,7 @@ pub(crate) fn replace_pair_value(
     let existing_value_red = pair_red.child_by_kind(SyntaxKind::Value);
     let existing_style = existing_value_red
         .as_ref()
-        .and_then(|value_node| string_style_for_red_value_node(value_node));
+        .and_then(string_style_for_red_value_node);
     let mut replaced = false;
     let mut children = Vec::new();
 

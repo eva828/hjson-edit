@@ -467,8 +467,6 @@ fn has_blank_line(trivia: &[GreenElement]) -> bool {
                 }
                 had_newline = true;
             } else if kind == SyntaxKind::Whitespace {
-            } else if is_comment(kind) {
-                had_newline = false;
             } else {
                 had_newline = false;
             }
@@ -491,11 +489,7 @@ fn find_blank_line_split(trivia: &[GreenElement]) -> usize {
                 }
                 had_newline = true;
             } else if kind == SyntaxKind::Whitespace {
-            } else if is_comment(kind) {
-                had_newline = false;
-            } else {
-                had_newline = false;
-            }
+            } else { is_comment(kind); had_newline = false; }
         }
     }
 

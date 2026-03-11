@@ -60,7 +60,7 @@ fn test_error_missing_colon() {
 
     let result = parse(input);
     assert!(
-        result.is_err() || result.as_ref().unwrap().errors.len() > 0,
+        result.is_err() || !result.as_ref().unwrap().errors.is_empty(),
         "Missing colon should produce error"
     );
 }
@@ -96,7 +96,7 @@ fn test_error_multiple_errors() {
             );
         }
         Err(errors) => {
-            assert!(errors.len() >= 1, "Should have at least one error");
+            assert!(!errors.is_empty(), "Should have at least one error");
         }
     }
 }
@@ -187,7 +187,7 @@ fn test_error_recoverable() {
     let errors = result.unwrap_err();
     // 複数のエラーが報告されるべき
     assert!(
-        errors.len() >= 1,
+        !errors.is_empty(),
         "Should have at least one error, got {}",
         errors.len()
     );
@@ -240,7 +240,7 @@ fn test_error_double_colon() {
 
     let result = parse(input);
     assert!(
-        result.is_err() || result.as_ref().unwrap().errors.len() > 0,
+        result.is_err() || !result.as_ref().unwrap().errors.is_empty(),
         "Double colon should produce error"
     );
 }
@@ -252,7 +252,7 @@ fn test_error_missing_value() {
 
     let result = parse(input);
     assert!(
-        result.is_err() || result.as_ref().unwrap().errors.len() > 0,
+        result.is_err() || !result.as_ref().unwrap().errors.is_empty(),
         "Missing value should produce error"
     );
 }
@@ -294,7 +294,7 @@ fn test_error_deeply_nested() {
 
     let result = parse(input);
     assert!(
-        result.is_err() || result.as_ref().unwrap().errors.len() > 0,
+        result.is_err() || !result.as_ref().unwrap().errors.is_empty(),
         "Should have errors"
     );
 
@@ -332,7 +332,7 @@ fn test_parse_error_display() {
         column: 5,
     };
 
-    let error_string = format!("{}", error.message);
+    let error_string = error.message.to_string();
     assert_eq!(error_string, "Test error");
 
     let debug_string = format!("{:?}", error);

@@ -10,16 +10,21 @@ use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeExt};
 use rowan::{GreenNode, NodeOrToken};
 
+pub(crate) struct InsertFormat<'a> {
+    pub has_braces: bool,
+    pub newline: &'a str,
+    pub entry_indent: &'a str,
+    pub closing_indent: &'a str,
+}
+
 pub(crate) fn insert_object_entry_without_reformat(
     items: &mut Vec<ObjectItem>,
     key: &str,
     value: &HjsonValue,
     string_style: StringStyle,
-    has_braces: bool,
-    newline: &str,
-    entry_indent: &str,
-    closing_indent: &str,
+    format: &InsertFormat<'_>,
 ) -> Result<(), HjsonEditError> {
+    let InsertFormat { has_braces, newline, entry_indent, closing_indent } = *format;
     let pair = NodeOrToken::Node(create_pair_node(key, value, string_style, None)?);
 
     let has_existing_entries = items
@@ -243,10 +248,12 @@ pub(crate) fn set_object_entry(
             key,
             value,
             string_style,
-            has_braces,
-            newline,
-            &entry_indent,
-            base_indent,
+            &InsertFormat {
+                has_braces,
+                newline,
+                entry_indent: &entry_indent,
+                closing_indent: base_indent,
+            },
         )?;
     }
 
