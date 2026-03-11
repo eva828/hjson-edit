@@ -1,4 +1,5 @@
-use crate::edit::api::{create_node, create_token, RedNodeEdit};
+use crate::edit::api::{create_node, create_token};
+
 use crate::edit::high_level::{
     build_object_items, clone_element, create_pair_node, extract_key_text, is_token_of_kind,
     rebuild_object_children_for_format, replace_pair_value, EntryTerminator, HjsonEditError,
@@ -7,7 +8,7 @@ use crate::edit::high_level::{
 use crate::edit::high_level::structure::{indentation_from_standalone_block, whitespace_after_last_newline};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeExt};
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) struct InsertFormat<'a> {

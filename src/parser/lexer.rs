@@ -541,7 +541,7 @@ pub fn lex(input: &str) -> LexResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::kind::is_trivia;
+
 
     #[test]
     fn test_basic_tokens() {
@@ -554,7 +554,7 @@ mod tests {
         let non_trivia_kinds: Vec<_> = result
             .tokens
             .iter()
-            .filter(|t| !is_trivia(t.kind))
+            .filter(|t| !t.kind.is_trivia())
             .map(|t| t.kind)
             .collect();
         assert_eq!(

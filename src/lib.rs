@@ -16,7 +16,7 @@ pub mod syntax;
 
 // 公開APIを再エクスポート
 pub use diff::{detect_changed_lines, simple_line_diff, ChangeInfo, ChangeType};
-pub use edit::api::{create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeEdit};
+pub use edit::api::{create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeNavigateExt};
 pub use edit::high_level::{
     CommentPath, CommentStyle, EditResult, FormatError, HjsonDocument, HjsonEditError, HjsonValue,
     IntoPath, PathSegment, StringStyle,
@@ -26,7 +26,7 @@ pub use parser::lexer::{lex, LexError, LexResult, Token};
 pub use parser::parser::{parse, ParseError, ParseResult};
 pub use syntax::green::{GreenElement, GreenNodeExt, GreenTreeBuilder};
 pub use syntax::kind::{HjsonLanguage, SyntaxKind};
-pub use syntax::red::{RedElement, RedElementExt, RedNode, RedNodeExt, RedToken};
+pub use syntax::red::{RedElement, RedElementExt, RedNode, RedNodeCoreExt, RedToken};
 
 /// パースしてRedNodeを取得（エラー時はErr）
 pub fn parse_to_red(input: &str) -> Result<RedNode, Vec<ParseError>> {
@@ -34,16 +34,6 @@ pub fn parse_to_red(input: &str) -> Result<RedNode, Vec<ParseError>> {
     Ok(RedNode::new_root(result.green))
 }
 
-/// GreenNodeを文字列に変換（フォーマット保持）
-pub fn green_to_string(node: &rowan::GreenNode) -> String {
-    use syntax::green::GreenNodeExt;
-    node.text()
-}
-
-/// RedNodeを文字列に変換（フォーマット保持）
-pub fn red_to_string(node: &RedNode) -> String {
-    node.to_string()
-}
 
 /// 編集操作を適用して新しいGreenNodeを取得
 pub fn apply_edit(node: &rowan::GreenNode, edit: EditOp) -> Result<rowan::GreenNode, EditError> {

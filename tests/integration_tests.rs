@@ -3,9 +3,10 @@
 //! These tests verify the complete workflow from parsing to editing.
 
 use hjson_edit::{
-    create_token, green_to_string, parse, parse_to_red, red_to_string, HjsonDocument, HjsonValue,
-    RedNodeEdit, RedNodeExt, SyntaxKind,
+    create_token, parse, parse_to_red, HjsonDocument, HjsonValue,
+    RedNodeCoreExt, RedNodeNavigateExt, SyntaxKind,
 };
+use hjson_edit::syntax::green::GreenNodeExt;
 
 /// HJSON設定ファイルのパース→GreenNode変換→文字列出力の一連のワークフローを検証
 #[test]
@@ -24,7 +25,7 @@ fn test_full_workflow() {
     let green = red.to_green();
 
     // 文字列出力
-    let output = green_to_string(&green);
+    let output = green.text();
     assert_eq!(output, input);
 }
 
@@ -69,7 +70,7 @@ fn test_edit_and_detect_changes() {
     let new_value_green = value_green.replace_child(target_idx, new_token.into());
 
     // 編集が成功したことを確認
-    let new_text = green_to_string(&new_value_green);
+    let new_text = new_value_green.text();
     assert!(new_text.contains("new_value"));
 }
 
@@ -97,7 +98,7 @@ fn test_comments_preserved() {
         }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -107,7 +108,7 @@ fn test_block_string() {
     let input = "'''multi\nline\ntext'''";
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -142,7 +143,7 @@ fn test_root_object_with_braces() {
 }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 
     // Root > Value > Object の構造を確認
@@ -161,7 +162,7 @@ fn test_root_string() {
     let input = "\"Hello, World!\"";
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -171,7 +172,7 @@ fn test_root_number() {
     let input = "42";
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -181,7 +182,7 @@ fn test_root_boolean() {
     let input = "true";
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -191,7 +192,7 @@ fn test_root_null() {
     let input = "null";
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -203,7 +204,7 @@ fn test_root_array() {
     let input = r#"["first", "second", "third"]"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 
     // Root > Value > Array の構造を確認
@@ -225,7 +226,7 @@ fn test_root_object_without_braces() {
 two: 200"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 
     // AST構造: Root > Object > Pair[]（Valueノードを経由しない）
@@ -261,7 +262,7 @@ fn test_complex_nested_structure() {
 }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -274,7 +275,7 @@ fn test_trailing_comma() {
 }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -332,7 +333,7 @@ fn test_multiple_edits_sequence() {
 
     let target_idx = target_idx.expect("Target token not found");
     let new_value_green = value_green.replace_child(target_idx, new_token.into());
-    let new_text = green_to_string(&new_value_green);
+    let new_text = new_value_green.text();
     assert!(
         new_text.contains("modified"),
         "Edited value should contain 'modified'"
@@ -362,7 +363,7 @@ fn test_multiple_edits_sequence() {
 
     let count_idx = count_idx.expect("Count token not found");
     let new_count_green = second_green.replace_child(count_idx, new_count_token.into());
-    let count_text = green_to_string(&new_count_green);
+    let count_text = new_count_green.text();
     assert!(
         count_text.contains("42"),
         "Edited count should contain '42'"
@@ -381,7 +382,7 @@ fn test_unquoted_strings() {
 }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -412,7 +413,7 @@ fn test_object_no_comma_newline_separated() {
 }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -429,7 +430,7 @@ fn test_array_no_comma_newline_separated() {
 ]"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -447,7 +448,7 @@ fn test_object_mixed_comma_and_newline() {
 }"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -464,6 +465,6 @@ fn test_array_trailing_comma_multiline() {
 ]"#;
 
     let red = parse_to_red(input).unwrap();
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }

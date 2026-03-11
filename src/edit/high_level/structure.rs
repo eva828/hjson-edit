@@ -63,26 +63,6 @@ pub(crate) enum ArrayItem {
     Standalone(StandaloneTriviaBlock),
 }
 
-/// トリビアかどうかを判定
-fn is_trivia(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Whitespace
-            | SyntaxKind::Newline
-            | SyntaxKind::LineComment
-            | SyntaxKind::HashComment
-            | SyntaxKind::BlockComment
-    )
-}
-
-/// コメントかどうかを判定
-fn is_comment(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-    )
-}
-
 /// Object の children から ObjectItem のリストを構築
 /// 空行判定は \n\s*\n を検出
 pub(crate) fn build_object_items(children: &[GreenElement]) -> Vec<ObjectItem> {
@@ -105,7 +85,7 @@ pub(crate) fn build_object_items(children: &[GreenElement]) -> Vec<ObjectItem> {
                     match &children[i] {
                         NodeOrToken::Token(t) => {
                             let kind = HjsonLanguage::kind_from_raw(t.kind());
-                            if kind == SyntaxKind::Whitespace || is_comment(kind) {
+                            if kind == SyntaxKind::Whitespace || kind.is_comment() {
                                 trailing_inline_trivia.push(children[i].clone());
                                 i += 1;
                             } else {
@@ -179,7 +159,7 @@ pub(crate) fn build_object_items(children: &[GreenElement]) -> Vec<ObjectItem> {
 
                 if kind == SyntaxKind::RBrace {
                     break;
-                } else if is_trivia(kind) {
+                } else if kind.is_trivia() {
                     pending_trivia.push(elem.clone());
 
                     if has_blank_line(&pending_trivia) {
@@ -234,7 +214,7 @@ pub(crate) fn build_array_items(children: &[GreenElement]) -> Vec<ArrayItem> {
                     match &children[i] {
                         NodeOrToken::Token(t) => {
                             let kind = HjsonLanguage::kind_from_raw(t.kind());
-                            if kind == SyntaxKind::Whitespace || is_comment(kind) {
+                            if kind == SyntaxKind::Whitespace || kind.is_comment() {
                                 trailing_inline_trivia.push(children[i].clone());
                                 i += 1;
                             } else {
@@ -304,7 +284,7 @@ pub(crate) fn build_array_items(children: &[GreenElement]) -> Vec<ArrayItem> {
                 let kind = HjsonLanguage::kind_from_raw(t.kind());
                 if kind == SyntaxKind::RBracket {
                     break;
-                } else if is_trivia(kind) {
+                } else if kind.is_trivia() {
                     pending_trivia.push(elem.clone());
                     if has_blank_line(&pending_trivia) {
                         let split_idx = find_blank_line_split(&pending_trivia);
@@ -489,7 +469,7 @@ fn find_blank_line_split(trivia: &[GreenElement]) -> usize {
                 }
                 had_newline = true;
             } else if kind == SyntaxKind::Whitespace {
-            } else { is_comment(kind); had_newline = false; }
+            } else { kind.is_comment(); had_newline = false; }
         }
     }
 

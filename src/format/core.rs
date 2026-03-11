@@ -1,11 +1,12 @@
-use crate::edit::api::{create_node, create_token, RedNodeEdit};
+use crate::edit::api::{create_node, create_token};
+use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{clone_element, create_multiline_string_literal, is_token_of_kind, FormatError, HjsonDocument, StandaloneTriviaBlock};
 use crate::format::array::{format_array_node, format_array_node_partial};
 use crate::format::object::{format_object_node, format_object_node_partial};
 use crate::format::FormatTarget;
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
-use crate::syntax::red::{RedNode, RedNodeExt};
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
@@ -77,8 +78,9 @@ fn format_path_target(document: &HjsonDocument, path: &str) -> Result<HjsonDocum
             target: FormatTarget::path(path),
         })?;
 
-    let container = resolve_object_child(&target_node)
-        .or_else(|| resolve_array_child(&target_node))
+    let container = target_node
+        .resolve_object_child()
+        .or_else(|| target_node.resolve_array_child())
         .unwrap_or(target_node);
 
     format_node_target(document, &container.path_from_root())
@@ -506,20 +508,6 @@ fn clone_red_element(
         NodeOrToken::Node(node) => NodeOrToken::Node(node.to_green()),
         NodeOrToken::Token(token) => NodeOrToken::Token(create_token(token.kind(), token.text())),
     }
-}
-
-fn resolve_object_child(node: &RedNode) -> Option<RedNode> {
-    node.child_by_kind(SyntaxKind::Object).or_else(|| {
-        node.child_by_kind(SyntaxKind::Value)?
-            .child_by_kind(SyntaxKind::Object)
-    })
-}
-
-fn resolve_array_child(node: &RedNode) -> Option<RedNode> {
-    node.child_by_kind(SyntaxKind::Array).or_else(|| {
-        node.child_by_kind(SyntaxKind::Value)?
-            .child_by_kind(SyntaxKind::Array)
-    })
 }
 
 

@@ -1,11 +1,12 @@
-use crate::edit::api::{create_node, create_token, RedNodeEdit};
+use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::{
-    clone_element, find_pair_index_for_comments, find_pair_node_for_comments, resolve_object_child,
-    CommentPath, CommentStyle, HjsonDocument, HjsonEditError, PathSegment,
+    clone_element, CommentPath, CommentStyle, HjsonDocument,
+    HjsonEditError, PathSegment,
 };
+use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeExt};
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
@@ -135,7 +136,7 @@ fn set_key_comment(
         dot_path,
     )?;
     let pair_idx =
-        find_pair_index_for_comments(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let pair_node = obj
@@ -175,7 +176,7 @@ fn set_inline_comment_for_path(
         dot_path,
     )?;
     let pair_idx =
-        find_pair_index_for_comments(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let new_obj = set_inline_comment(&obj.to_green(), pair_idx, text, style)?;
@@ -281,7 +282,7 @@ fn remove_key_comment(
         dot_path,
     )?;
     let pair_idx =
-        find_pair_index_for_comments(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let pair_node = obj
@@ -315,7 +316,7 @@ fn remove_inline_comment_for_path(
         dot_path,
     )?;
     let pair_idx =
-        find_pair_index_for_comments(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let new_obj = remove_inline_comment(&obj.to_green(), pair_idx)?;
@@ -409,13 +410,13 @@ fn get_comments_before_key(
         dot_path,
     )?;
     let pair_node =
-        find_pair_node_for_comments(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+        obj.find_pair_node(key).ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
 
     let mut comments = Vec::new();
     for elem in pair_node.children_with_tokens() {
-        if let Some(token) = elem.as_token() {
+        if let rowan::NodeOrToken::Token(token) = elem {
             let kind = token.kind();
             if matches!(
                 kind,
@@ -448,7 +449,7 @@ fn get_inline_comment(
         dot_path,
     )?;
     let pair_idx =
-        find_pair_index_for_comments(&obj, key).ok_or_else(|| HjsonEditError::InvalidPath {
+        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     Ok(extract_inline_comments(&obj.to_green(), pair_idx))
@@ -461,14 +462,14 @@ fn resolve_object_for_comment_path(
 ) -> Result<RedNode, HjsonEditError> {
     if path.is_empty() {
         let red = RedNode::new_root(document.green_node().clone());
-        resolve_object_child(&red).ok_or(HjsonEditError::InvalidNodeKind {
+        red.resolve_object_child().ok_or(HjsonEditError::InvalidNodeKind {
             expected: SyntaxKind::Object,
             found: SyntaxKind::Root,
         })
     } else {
         document
             .navigate_to_node_internal(path)
-            .and_then(|parent| resolve_object_child(&parent))
+            .and_then(|parent| parent.resolve_object_child())
             .ok_or(HjsonEditError::InvalidPath {
                 path: raw.to_string(),
             })

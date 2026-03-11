@@ -1,11 +1,12 @@
-use crate::edit::api::{create_node, create_token, RedNodeEdit};
+use crate::edit::api::{create_node, create_token};
+use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
     clone_element, HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
 };
 use crate::format::FormatTarget;
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
-use crate::syntax::red::{RedNode, RedNodeExt};
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::{GreenNode, Language, NodeOrToken};
 
 pub(crate) fn value_needs_contextual_formatting(
@@ -29,8 +30,9 @@ pub(crate) fn format_target_for_value(
 ) -> Option<FormatTarget> {
     let target_node = document.navigate_to_node_internal(path)?;
     let target_node = if prefer_container {
-        super::navigation::resolve_object_child(&target_node)
-            .or_else(|| super::navigation::resolve_array_child(&target_node))
+        target_node
+            .resolve_object_child()
+            .or_else(|| target_node.resolve_array_child())
             .unwrap_or(target_node)
     } else {
         target_node

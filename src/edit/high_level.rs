@@ -8,20 +8,17 @@ pub(crate) mod navigation;
 pub(crate) mod structure;
 pub(crate) mod value;
 
-use crate::edit::api::{
-    create_node, EditError as LowLevelEditError, GreenNodeEdit, RedNodeEdit,
-};
+use crate::edit::api::{create_node, EditError as LowLevelEditError, GreenNodeEdit};
 use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeExt};
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
+
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
-pub(crate) use navigation::{
-    find_pair_index_for_comments, find_pair_node_for_comments, parse_path_for_format,
-    resolve_array_child, resolve_object_child,
-};
+pub(crate) use navigation::parse_path_for_format;
+pub(crate) use navigation::RedNodeNavigateExt;
 pub(crate) use structure::{
     build_array_items, build_object_items, rebuild_array_children_for_format,
     rebuild_object_children_for_format, ArrayEntry, ArrayItem, EntryTerminator, ObjectEntry,
@@ -349,7 +346,7 @@ impl HjsonDocument {
 
         match last {
             PathSegment::Key(key) => {
-                let obj_node = resolve_object_child(&parent).ok_or_else(|| {
+                let obj_node = parent.resolve_object_child().ok_or_else(|| {
                     HjsonEditError::InvalidNodeKind {
                         expected: SyntaxKind::Object,
                         found: parent.kind(),
@@ -387,7 +384,7 @@ impl HjsonDocument {
                 Ok(EditResult::new(updated, dirty_targets))
             }
             PathSegment::Index(idx) => {
-                let arr_node = resolve_array_child(&parent).ok_or_else(|| {
+                let arr_node = parent.resolve_array_child().ok_or_else(|| {
                     HjsonEditError::InvalidNodeKind {
                         expected: SyntaxKind::Array,
                         found: parent.kind(),
@@ -477,7 +474,7 @@ impl HjsonDocument {
             if let Some(node) = current.navigate_to_node(current_path) {
                 match next_segment {
                     PathSegment::Key(_) => {
-                        if resolve_object_child(&node).is_none() {
+                        if node.resolve_object_child().is_none() {
                             return Err(HjsonEditError::InvalidNodeKind {
                                 expected: SyntaxKind::Object,
                                 found: node.kind(),
@@ -485,7 +482,7 @@ impl HjsonDocument {
                         }
                     }
                     PathSegment::Index(_) => {
-                        if resolve_array_child(&node).is_none() {
+                        if node.resolve_array_child().is_none() {
                             return Err(HjsonEditError::InvalidNodeKind {
                                 expected: SyntaxKind::Array,
                                 found: node.kind(),
@@ -801,9 +798,9 @@ impl HjsonDocument {
         let value_indices: Vec<usize> = children
             .iter()
             .enumerate()
-            .filter_map(|(i, c)| {
+            .filter_map(|(i, c): (usize, &GreenElement)| {
                 if let NodeOrToken::Node(n) = c {
-                    if n.kind() == SyntaxKind::Value.into() {
+                    if n.kind() == rowan::SyntaxKind::from(SyntaxKind::Value) {
                         return Some(i);
                     }
                 }
@@ -916,7 +913,7 @@ impl HjsonDocument {
                 .ok_or_else(|| HjsonEditError::InvalidPath {
                     path: format!("{:?}", path),
                 })?;
-            resolve_array_child(&node).ok_or_else(|| HjsonEditError::InvalidNodeKind {
+            node.resolve_array_child().ok_or_else(|| HjsonEditError::InvalidNodeKind {
                 expected: SyntaxKind::Array,
                 found: node.kind(),
             })
@@ -941,7 +938,7 @@ impl HjsonDocument {
 
         match last {
             PathSegment::Key(key) => {
-                let obj_node = resolve_object_child(&parent).ok_or_else(|| {
+                let obj_node = parent.resolve_object_child().ok_or_else(|| {
                     HjsonEditError::InvalidNodeKind {
                         expected: SyntaxKind::Object,
                         found: parent.kind(),
@@ -952,7 +949,7 @@ impl HjsonDocument {
                 self.replace_green_node(&obj_node.path_from_root(), new_obj)
             }
             PathSegment::Index(idx) => {
-                let arr_node = resolve_array_child(&parent).ok_or_else(|| {
+                let arr_node = parent.resolve_array_child().ok_or_else(|| {
                     HjsonEditError::InvalidNodeKind {
                         expected: SyntaxKind::Array,
                         found: parent.kind(),

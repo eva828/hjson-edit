@@ -3,7 +3,7 @@
 /// Green/Red Treeを操作するための基本的な編集機能
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::RedNode;
+
 use rowan::GreenNodeBuilder;
 
 /// 編集操作
@@ -180,42 +180,9 @@ impl GreenNodeEdit for rowan::GreenNode {
     }
 }
 
-/// RedNodeに対する編集操作
-pub trait RedNodeEdit {
-    /// このノードを含む新しいGreenNodeを作成
-    fn to_green(&self) -> rowan::GreenNode;
+// `RedNodeNavigateExt` は navigation モジュールで定義 — 後方互換のため再エクスポート
+pub use crate::edit::high_level::navigation::RedNodeNavigateExt;
 
-    /// 親をたどってパスを取得
-    fn path_from_root(&self) -> Vec<usize>;
-
-    /// ルートから見た子インデックスを計算
-    fn child_index_in_parent(&self) -> Option<usize>;
-}
-
-impl RedNodeEdit for RedNode {
-    fn to_green(&self) -> rowan::GreenNode {
-        crate::syntax::red::red_to_green(self)
-    }
-
-    fn path_from_root(&self) -> Vec<usize> {
-        let mut path = Vec::new();
-        let mut current = self.clone();
-
-        while let Some(parent) = current.parent() {
-            if let Some(idx) = current.child_index_in_parent() {
-                path.push(idx);
-            }
-            current = parent;
-        }
-
-        path.reverse();
-        path
-    }
-
-    fn child_index_in_parent(&self) -> Option<usize> {
-        Some(self.index())
-    }
-}
 
 /// 子要素をGreenElementに変換
 fn child_to_green_element(

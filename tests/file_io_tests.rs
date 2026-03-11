@@ -2,7 +2,7 @@
 //!
 //! These tests verify reading and writing HJSON files.
 
-use hjson_edit::{parse, parse_to_red, red_to_string};
+use hjson_edit::{parse, parse_to_red};
 use std::fs;
 use std::path::Path;
 
@@ -15,7 +15,7 @@ fn test_read_root_with_braces() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -27,7 +27,7 @@ fn test_read_root_without_braces() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -39,7 +39,7 @@ fn test_read_root_string() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -51,7 +51,7 @@ fn test_read_root_number() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -63,7 +63,7 @@ fn test_read_root_boolean() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -75,7 +75,7 @@ fn test_read_root_null() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -87,7 +87,7 @@ fn test_read_root_array() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -99,7 +99,7 @@ fn test_read_complex_nested() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -111,7 +111,7 @@ fn test_read_with_comments() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -134,7 +134,7 @@ fn test_read_unquoted_strings() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -145,7 +145,7 @@ fn test_read_rfc_quoteless_examples() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(
         output, content,
@@ -163,7 +163,7 @@ fn test_read_no_comma_object() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -178,7 +178,7 @@ fn test_read_no_comma_array() {
     let content = fs::read_to_string(&path).expect("Failed to read file");
 
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 }
@@ -207,7 +207,7 @@ fn test_write_and_read_roundtrip() {
     // Read back
     let content = fs::read_to_string(temp_path).expect("Failed to read file");
     let red = parse_to_red(&content).expect("Failed to parse");
-    let output = red_to_string(&red);
+    let output = red.to_string();
 
     assert_eq!(output, content, "Round-trip should preserve content");
 

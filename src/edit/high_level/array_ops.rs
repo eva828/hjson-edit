@@ -1,4 +1,5 @@
-use crate::edit::api::{create_node, create_token, RedNodeEdit};
+use crate::edit::api::{create_node, create_token};
+use crate::syntax::red::RedNodeCoreExt;
 use crate::edit::high_level::{
     build_array_items, clone_element, create_value_node, is_token_of_kind, ArrayEntry, ArrayItem,
     EntryTerminator, HjsonEditError, HjsonValue, StringStyle,

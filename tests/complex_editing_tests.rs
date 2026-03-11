@@ -3,9 +3,9 @@
 //! These tests verify advanced editing operations.
 
 use hjson_edit::{
-    create_token, green_to_string, parse_to_red, red_to_string, GreenNodeEdit, RedNodeEdit,
-    RedNodeExt, SyntaxKind,
+    create_token, parse_to_red, GreenNodeEdit, RedNodeCoreExt, SyntaxKind,
 };
+use hjson_edit::syntax::green::GreenNodeExt;
 
 /// 深くネストされたオブジェクトの値を編集できることを検証
 ///
@@ -78,7 +78,7 @@ fn test_edit_nested_value() {
         .unwrap();
 
     // Verify the change
-    let new_text = green_to_string(&new_value_green);
+    let new_text = new_value_green.text();
     assert!(new_text.contains("modified"));
     assert!(!new_text.contains("original"));
 }
@@ -130,7 +130,7 @@ fn test_edit_array_element() {
         .unwrap();
 
     // Verify the change
-    let new_text = green_to_string(&new_element_green);
+    let new_text = new_element_green.text();
     assert!(new_text.contains("modified"));
 }
 
@@ -159,7 +159,7 @@ fn test_edit_add_new_key() {
 
     // ラウンドトリップが保持されることを確認
     let green = red.to_green();
-    let output = green_to_string(&green);
+    let output = green.text();
     assert_eq!(output, input, "Round-trip should preserve content");
 
     // 新しいキーを追加するためのPairノードを構築
@@ -206,7 +206,7 @@ fn test_edit_add_new_key() {
     let object_green = object_green.insert_child(5, newline.into()).unwrap();
     // 3. 改行の後に新しいPairを挿入（インデックス6）
     let new_object_green = object_green.insert_child(6, new_pair.into()).unwrap();
-    let new_object_text = green_to_string(&new_object_green);
+    let new_object_text = new_object_green.text();
 
     // 新しいキーが追加されたことを確認
     assert!(
@@ -275,7 +275,7 @@ fn test_edit_change_key_name() {
         .unwrap();
 
     // Verify the change
-    let new_text = green_to_string(&new_key_green);
+    let new_text = new_key_green.text();
     assert!(new_text.contains("new_key"));
     assert!(!new_text.contains("old_key"));
 }
@@ -320,7 +320,7 @@ fn test_edit_multiple_values() {
                         let new_value = value_green.replace_child(i, new_token.into()).unwrap();
 
                         // 各編集結果が正しいことを検証
-                        let result_text = green_to_string(&new_value);
+                        let result_text = new_value.text();
                         assert!(
                             result_text.contains("modified"),
                             "Pair {} should contain 'modified', got '{}'",
@@ -341,7 +341,7 @@ fn test_edit_multiple_values() {
     }
 
     // 元のRedNodeはimmutableなので、元の入力が保持されていることも確認
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input, "Original should be unchanged");
 }
 
@@ -362,7 +362,7 @@ fn test_edit_preserves_whitespace() {
     let green = red.to_green();
 
     // Simple round-trip should preserve everything including whitespace
-    let output = green_to_string(&green);
+    let output = green.text();
     assert_eq!(output, input, "Whitespace and comments should be preserved");
 }
 
@@ -380,7 +380,7 @@ fn test_edit_preserves_comments() {
     let green = red.to_green();
 
     // Round-trip should preserve all comments
-    let output = green_to_string(&green);
+    let output = green.text();
     assert!(
         output.contains("// Line comment"),
         "Line comment should be preserved"
@@ -451,7 +451,7 @@ fn test_edit_in_array_of_objects() {
         .unwrap();
 
     // 編集結果が正しいことを検証
-    let new_text = green_to_string(&new_value_green);
+    let new_text = new_value_green.text();
     assert!(
         new_text.contains("999"),
         "Edited value should contain '999', got '{}'",
@@ -464,7 +464,7 @@ fn test_edit_in_array_of_objects() {
     );
 
     // 元のRedNodeはimmutableなので入力が保持されていることも確認
-    let output = red_to_string(&red);
+    let output = red.to_string();
     assert_eq!(output, input);
 }
 
@@ -509,6 +509,6 @@ fn test_edit_numeric_value() {
         .unwrap();
 
     // Verify the change
-    let new_text = green_to_string(&new_value_green);
+    let new_text = new_value_green.text();
     assert!(new_text.contains("42"));
 }

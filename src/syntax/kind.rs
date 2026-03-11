@@ -93,47 +93,58 @@ impl Language for HjsonLanguage {
     }
 }
 
-/// トークンかどうか
-pub fn is_token(kind: SyntaxKind) -> bool {
-    use SyntaxKind::*;
-    matches!(
-        kind,
-        LBrace
-            | RBrace
-            | LBracket
-            | RBracket
-            | Colon
-            | Comma
-            | True
-            | False
-            | Null
-            | Integer
-            | Float
-            | String
-            | BlockString
-            | UnquotedString
-            | Ident
-            | LineComment
-            | HashComment
-            | BlockComment
-            | Whitespace
-            | Newline
-    )
-}
+impl SyntaxKind {
+    /// トークンかどうか
+    pub fn is_token(self) -> bool {
+        use SyntaxKind::*;
+        matches!(
+            self,
+            LBrace
+                | RBrace
+                | LBracket
+                | RBracket
+                | Colon
+                | Comma
+                | True
+                | False
+                | Null
+                | Integer
+                | Float
+                | String
+                | BlockString
+                | UnquotedString
+                | Ident
+                | LineComment
+                | HashComment
+                | BlockComment
+                | Whitespace
+                | Newline
+        )
+    }
 
-/// ノードかどうか
-pub fn is_node(kind: SyntaxKind) -> bool {
-    use SyntaxKind::*;
-    matches!(kind, Root | Object | Array | Pair | Key | Value | Error)
-}
+    /// ノードかどうか
+    pub fn is_node(self) -> bool {
+        use SyntaxKind::*;
+        matches!(self, Root | Object | Array | Pair | Key | Value | Error)
+    }
 
-/// トリビア（空白・コメント）かどうか
-pub fn is_trivia(kind: SyntaxKind) -> bool {
-    use SyntaxKind::*;
-    matches!(
-        kind,
-        Whitespace | Newline | LineComment | HashComment | BlockComment
-    )
+    /// トリビア（空白・コメント）かどうか
+    pub fn is_trivia(self) -> bool {
+        use SyntaxKind::*;
+        matches!(
+            self,
+            Whitespace | Newline | LineComment | HashComment | BlockComment
+        )
+    }
+
+    /// コメントかどうか
+    pub fn is_comment(self) -> bool {
+        use SyntaxKind::*;
+        matches!(
+            self,
+            LineComment | HashComment | BlockComment
+        )
+    }
 }
 
 #[cfg(test)]

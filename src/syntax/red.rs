@@ -8,8 +8,8 @@ pub type RedToken = SyntaxToken<HjsonLanguage>;
 /// RedElement型エイリアス
 pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;
 
-/// RedNodeユーティリティ拡張
-pub trait RedNodeExt {
+/// RedNodeの基本ユーティリティ拡張
+pub trait RedNodeCoreExt {
     /// 指定されたkindの子ノードを探す
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode>;
 
@@ -30,9 +30,12 @@ pub trait RedNodeExt {
 
     /// 子の数を取得
     fn child_count(&self) -> usize;
+
+    /// GreenNodeを再構築する
+    fn to_green(&self) -> rowan::GreenNode;
 }
 
-impl RedNodeExt for RedNode {
+impl RedNodeCoreExt for RedNode {
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode> {
         // children() returns Iterator<Item = SyntaxNode>, not NodeOrToken
         self.children().find(|child| child.kind() == kind)
@@ -87,6 +90,29 @@ impl RedNodeExt for RedNode {
     fn child_count(&self) -> usize {
         self.children_with_tokens().count()
     }
+
+    fn to_green(&self) -> rowan::GreenNode {
+        use rowan::GreenNodeBuilder;
+
+        fn build_recursive(builder: &mut GreenNodeBuilder<'static>, element: &RedElement) {
+            match element {
+                rowan::NodeOrToken::Node(node) => {
+                    builder.start_node(node.kind().into());
+                    for child in node.children_with_tokens() {
+                        build_recursive(builder, &child);
+                    }
+                    builder.finish_node();
+                }
+                rowan::NodeOrToken::Token(token) => {
+                    builder.token(token.kind().into(), token.text());
+                }
+            }
+        }
+
+        let mut builder = GreenNodeBuilder::new();
+        build_recursive(&mut builder, &rowan::NodeOrToken::Node(self.clone()));
+        builder.finish()
+    }
 }
 
 /// RedNodeを操作する際のヘルパー
@@ -119,29 +145,7 @@ impl RedElementExt for RedElement {
     }
 }
 
-/// RedNodeからGreenNodeを再構築するヘルパー
-pub fn red_to_green(node: &RedNode) -> rowan::GreenNode {
-    use rowan::GreenNodeBuilder;
 
-    fn build_recursive(builder: &mut GreenNodeBuilder<'static>, element: &RedElement) {
-        match element {
-            rowan::NodeOrToken::Node(node) => {
-                builder.start_node(node.kind().into());
-                for child in node.children_with_tokens() {
-                    build_recursive(builder, &child);
-                }
-                builder.finish_node();
-            }
-            rowan::NodeOrToken::Token(token) => {
-                builder.token(token.kind().into(), token.text());
-            }
-        }
-    }
-
-    let mut builder = GreenNodeBuilder::new();
-    build_recursive(&mut builder, &rowan::NodeOrToken::Node(node.clone()));
-    builder.finish()
-}
 
 #[cfg(test)]
 mod tests {

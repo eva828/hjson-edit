@@ -1,6 +1,91 @@
 use crate::edit::high_level::{extract_key_text, HjsonEditError, PathSegment};
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeExt};
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
+
+/// RedNodeのナビゲーション機能拡張
+pub trait RedNodeNavigateExt {
+    /// 直接またはValue経由でObject子ノードを取得
+    fn resolve_object_child(&self) -> Option<RedNode>;
+    /// 直接またはValue経由でArray子ノードを取得
+    fn resolve_array_child(&self) -> Option<RedNode>;
+    /// パスをたどってObject内の指定キーのペアインデックスを返す
+    fn find_pair_index(&self, key: &str) -> Option<usize>;
+    /// キーのペアノードを返す
+    fn find_pair_node(&self, key: &str) -> Option<RedNode>;
+    /// 指定パスをたどってノードを取得
+    fn navigate(&self, path: &[PathSegment]) -> Option<RedNode>;
+    /// 親をたどってルートからのインデックスパスを返す
+    fn path_from_root(&self) -> Vec<usize>;
+    /// 親ノード内の子インデックスを取得
+    fn child_index_in_parent(&self) -> Option<usize>;
+}
+
+impl RedNodeNavigateExt for RedNode {
+    fn resolve_object_child(&self) -> Option<RedNode> {
+        self.child_by_kind(SyntaxKind::Object).or_else(|| {
+            self.child_by_kind(SyntaxKind::Value)?
+                .child_by_kind(SyntaxKind::Object)
+        })
+    }
+
+    fn resolve_array_child(&self) -> Option<RedNode> {
+        self.child_by_kind(SyntaxKind::Array).or_else(|| {
+            self.child_by_kind(SyntaxKind::Value)?
+                .child_by_kind(SyntaxKind::Array)
+        })
+    }
+
+    fn find_pair_index(&self, key: &str) -> Option<usize> {
+        for (i, child) in self.children_nodes().enumerate() {
+            if child.kind() == SyntaxKind::Pair {
+                if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
+                    if let Some(key_text) = extract_key_text(&key_node) {
+                        if key_text == key {
+                            return Some(i);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_pair_node(&self, key: &str) -> Option<RedNode> {
+        for child in self.children_nodes() {
+            if child.kind() == SyntaxKind::Pair {
+                if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
+                    if let Some(key_text) = extract_key_text(&key_node) {
+                        if key_text == key {
+                            return Some(child);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn navigate(&self, path: &[PathSegment]) -> Option<RedNode> {
+        navigate_from_node(self, path)
+    }
+
+    fn path_from_root(&self) -> Vec<usize> {
+        let mut path = Vec::new();
+        let mut current = self.clone();
+        while let Some(parent) = current.parent() {
+            if let Some(idx) = current.child_index_in_parent() {
+                path.push(idx);
+            }
+            current = parent;
+        }
+        path.reverse();
+        path
+    }
+
+    fn child_index_in_parent(&self) -> Option<usize> {
+        Some(self.index())
+    }
+}
 
 pub(crate) fn parse_dot_path(s: &str) -> Result<Vec<PathSegment>, HjsonEditError> {
     if s.is_empty() {
@@ -154,49 +239,7 @@ pub(crate) fn navigate_from_node(start: &RedNode, path: &[PathSegment]) -> Optio
     Some(current)
 }
 
-pub(crate) fn resolve_object_child(node: &RedNode) -> Option<RedNode> {
-    node.child_by_kind(SyntaxKind::Object).or_else(|| {
-        node.child_by_kind(SyntaxKind::Value)?
-            .child_by_kind(SyntaxKind::Object)
-    })
-}
 
-pub(crate) fn resolve_array_child(node: &RedNode) -> Option<RedNode> {
-    node.child_by_kind(SyntaxKind::Array).or_else(|| {
-        node.child_by_kind(SyntaxKind::Value)?
-            .child_by_kind(SyntaxKind::Array)
-    })
-}
-
-pub(crate) fn find_pair_index_for_comments(obj: &RedNode, key: &str) -> Option<usize> {
-    for (i, child) in obj.children_nodes().enumerate() {
-        if child.kind() == SyntaxKind::Pair {
-            if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
-                if let Some(key_text) = extract_key_text(&key_node) {
-                    if key_text == key {
-                        return Some(i);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-pub(crate) fn find_pair_node_for_comments(obj: &RedNode, key: &str) -> Option<RedNode> {
-    for child in obj.children_nodes() {
-        if child.kind() == SyntaxKind::Pair {
-            if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
-                if let Some(key_text) = extract_key_text(&key_node) {
-                    if key_text == key {
-                        return Some(child);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
 
 #[cfg(test)]
 mod tests {

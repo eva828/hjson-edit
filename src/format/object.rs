@@ -1,4 +1,5 @@
-use crate::edit::api::{create_node, RedNodeEdit};
+use crate::edit::api::create_node;
+use crate::syntax::red::RedNodeCoreExt;
 use crate::edit::high_level::{
     build_object_items, clone_element, detect_object_entry_indent, is_token_of_kind,
     EntryTerminator, FormatError, ObjectItem,
