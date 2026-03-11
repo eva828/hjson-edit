@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 
+pub(crate) mod core;
+pub(crate) mod object;
+pub(crate) mod array;
 pub(crate) mod engine;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
