@@ -3,12 +3,13 @@
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
 pub(crate) mod array_ops;
+pub(crate) mod object_ops;
 pub(crate) mod navigation;
 pub(crate) mod structure;
 pub(crate) mod value;
 
 use crate::edit::api::{
-    create_node, create_token, EditError as LowLevelEditError, GreenNodeEdit, RedNodeEdit,
+    create_node, EditError as LowLevelEditError, GreenNodeEdit, RedNodeEdit,
 };
 use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
@@ -26,6 +27,7 @@ pub(crate) use structure::{
     rebuild_object_children_for_format, ArrayEntry, ArrayItem, EntryTerminator, ObjectEntry,
     ObjectItem, StandaloneTriviaBlock,
 };
+pub(crate) use object_ops::detect_object_entry_indent;
 pub(crate) use value::{
     create_multiline_string_literal, create_pair_node, create_value_node, format_target_for_value,
     node_to_value, parse_multiline_string, replace_pair_value, string_style_for_value_node,
@@ -375,7 +377,7 @@ impl HjsonDocument {
                     obj_node.text_range().start().into(),
                 );
                 let indent_unit = detect_default_indent_unit_from_text(&document_text);
-                let entry_indent = detect_object_entry_indent(&items).unwrap_or_else(|| {
+                let entry_indent = object_ops::detect_object_entry_indent(&items).unwrap_or_else(|| {
                     if has_braces {
                         format!("{}{}", base_indent, indent_unit)
                     } else {
@@ -411,7 +413,7 @@ impl HjsonDocument {
                 }
 
                 if !found {
-                    insert_object_entry_without_reformat(
+                    object_ops::insert_object_entry_without_reformat(
                         &mut new_items,
                         key,
                         value,
@@ -1292,123 +1294,6 @@ fn line_indent_for_offset_from_text(source: &str, offset: usize) -> String {
         .chars()
         .take_while(|ch| *ch == ' ' || *ch == '\t')
         .collect()
-}
-
-fn insert_object_entry_without_reformat(
-    items: &mut Vec<ObjectItem>,
-    key: &str,
-    value: &HjsonValue,
-    string_style: StringStyle,
-    has_braces: bool,
-    newline: &str,
-    entry_indent: &str,
-    closing_indent: &str,
-) -> Result<(), HjsonEditError> {
-    let pair = NodeOrToken::Node(create_pair_node(key, value, string_style, None)?);
-
-    let has_existing_entries = items
-        .iter()
-        .any(|item| matches!(item, ObjectItem::Entry(_)));
-    let last_entry_ends_with_newline = items.iter().rev().find_map(|item| match item {
-        ObjectItem::Entry(entry) => Some(matches!(entry.terminator, EntryTerminator::Newline(_))),
-        ObjectItem::Standalone(_) => None,
-    });
-
-    let leading_line_trivia = if has_existing_entries {
-        if last_entry_ends_with_newline.unwrap_or(false) {
-            if entry_indent.is_empty() {
-                Vec::new()
-            } else {
-                vec![NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    entry_indent,
-                ))]
-            }
-        } else {
-            let mut trivia = vec![NodeOrToken::Token(create_token(
-                SyntaxKind::Newline,
-                newline,
-            ))];
-            if !entry_indent.is_empty() {
-                trivia.push(NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    entry_indent,
-                )));
-            }
-            trivia
-        }
-    } else if has_braces {
-        let mut trivia = vec![NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        ))];
-        if !entry_indent.is_empty() {
-            trivia.push(NodeOrToken::Token(create_token(
-                SyntaxKind::Whitespace,
-                entry_indent,
-            )));
-        }
-        trivia
-    } else {
-        Vec::new()
-    };
-
-    let mut terminator_suffix = Vec::new();
-    if has_braces {
-        terminator_suffix.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        )));
-        if !closing_indent.is_empty() {
-            terminator_suffix.push(NodeOrToken::Token(create_token(
-                SyntaxKind::Whitespace,
-                closing_indent,
-            )));
-        }
-    }
-
-    let new_entry = ObjectItem::Entry(ObjectEntry {
-        leading_line_trivia,
-        leading_comments: Vec::new(),
-        pair,
-        trailing_inline_trivia: Vec::new(),
-        terminator: if has_braces {
-            EntryTerminator::Newline(terminator_suffix)
-        } else {
-            EntryTerminator::EndOfContainer
-        },
-    });
-
-    let mut trailing_standalone = Vec::new();
-    while matches!(items.last(), Some(ObjectItem::Standalone(_))) {
-        trailing_standalone.push(items.pop().unwrap());
-    }
-    trailing_standalone.reverse();
-
-    items.push(new_entry);
-    items.extend(trailing_standalone);
-    Ok(())
-}
-
-pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {
-    items.iter().find_map(|item| match item {
-        ObjectItem::Entry(entry) => {
-            let indent = whitespace_after_last_newline(&entry.leading_line_trivia);
-            if indent.is_empty() {
-                None
-            } else {
-                Some(indent)
-            }
-        }
-        ObjectItem::Standalone(block) => {
-            let indent = indentation_from_standalone_block(block);
-            if indent.is_empty() {
-                None
-            } else {
-                Some(indent)
-            }
-        }
-    })
 }
 
 pub(crate) fn detect_array_entry_indent(items: &[ArrayItem]) -> Option<String> {
