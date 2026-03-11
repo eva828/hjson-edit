@@ -356,79 +356,23 @@ impl HjsonDocument {
                     }
                 })?;
 
-                let obj_green: GreenNode = obj_node.to_green();
-                let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
-
-                let lbrace = children
-                    .iter()
-                    .find(|c| is_token_of_kind(c, SyntaxKind::LBrace))
-                    .cloned();
-                let rbrace = children
-                    .iter()
-                    .find(|c| is_token_of_kind(c, SyntaxKind::RBrace))
-                    .cloned();
-                let items = build_object_items(&children);
-                let mut found = false;
-                let mut new_items = Vec::new();
-                let has_braces = lbrace.is_some() && rbrace.is_some();
                 let document_text = self.to_string();
                 let base_indent = line_indent_for_offset_from_text(
                     &document_text,
                     obj_node.text_range().start().into(),
                 );
                 let indent_unit = detect_default_indent_unit_from_text(&document_text);
-                let entry_indent = object_ops::detect_object_entry_indent(&items).unwrap_or_else(|| {
-                    if has_braces {
-                        format!("{}{}", base_indent, indent_unit)
-                    } else {
-                        String::new()
-                    }
-                });
                 let newline = preferred_newline_from_text(&document_text);
 
-                for item in items {
-                    match item {
-                        ObjectItem::Entry(mut entry) => {
-                            if let NodeOrToken::Node(pair_green) = &entry.pair {
-                                let pair_red = RedNode::new_root(pair_green.clone());
-                                if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
-                                    if let Some(key_text) = extract_key_text(&key_node) {
-                                        if key_text == *key {
-                                            entry.pair = NodeOrToken::Node(replace_pair_value(
-                                                pair_green,
-                                                value,
-                                                string_style,
-                                            )?);
-                                            found = true;
-                                        }
-                                    }
-                                }
-                            }
-                            new_items.push(ObjectItem::Entry(entry));
-                        }
-                        ObjectItem::Standalone(block) => {
-                            new_items.push(ObjectItem::Standalone(block));
-                        }
-                    }
-                }
-
-                if !found {
-                    object_ops::insert_object_entry_without_reformat(
-                        &mut new_items,
-                        key,
-                        value,
-                        string_style,
-                        has_braces,
-                        newline,
-                        &entry_indent,
-                        &base_indent,
-                    )?;
-                }
-
-                let new_obj = create_node(
-                    SyntaxKind::Object,
-                    rebuild_object_children_for_format(lbrace, new_items, rbrace),
-                );
+                let new_obj = object_ops::set_object_entry(
+                    &obj_node,
+                    key,
+                    value,
+                    string_style,
+                    &base_indent,
+                    &indent_unit,
+                    newline,
+                )?;
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
                 let dirty_target = if value_needs_contextual_formatting(value, string_style, None) {
                     format_target_for_value(
@@ -1154,29 +1098,6 @@ fn indentation_from_standalone_block(block: &StandaloneTriviaBlock) -> String {
     }
 }
 
-fn remove_orphan_indent_before_entry(children: &mut Vec<GreenElement>) {
-    let mut idx = children.len();
-    while idx > 0 {
-        let elem = &children[idx - 1];
-        if is_token_of_kind(elem, SyntaxKind::Whitespace) {
-            idx -= 1;
-            continue;
-        }
-        if is_token_of_kind(elem, SyntaxKind::Newline) {
-            return;
-        }
-        break;
-    }
-
-    while let Some(last) = children.last() {
-        if is_token_of_kind(last, SyntaxKind::Whitespace) {
-            children.pop();
-        } else {
-            break;
-        }
-    }
-}
-
 fn preferred_newline_from_text(text: &str) -> &'static str {
     if text.contains("\r\n") {
         "\r\n"
@@ -1516,3 +1437,9 @@ mod tests {
         );
     }
 }
+
+
+
+
+
+

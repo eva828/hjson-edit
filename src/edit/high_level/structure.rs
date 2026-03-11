@@ -455,72 +455,6 @@ pub(crate) fn indentation_from_standalone_block(block: &StandaloneTriviaBlock) -
     }
 }
 
-pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {
-    items.iter().find_map(|item| match item {
-        ObjectItem::Entry(entry) => {
-            let indent = whitespace_after_last_newline(&entry.leading_line_trivia);
-            if indent.is_empty() {
-                None
-            } else {
-                Some(indent)
-            }
-        }
-        ObjectItem::Standalone(block) => {
-            let indent = indentation_from_standalone_block(block);
-            if indent.is_empty() {
-                None
-            } else {
-                Some(indent)
-            }
-        }
-    })
-}
-
-pub(crate) fn detect_array_entry_indent(items: &[ArrayItem]) -> Option<String> {
-    items.iter().find_map(|item| match item {
-        ArrayItem::Entry(entry) => {
-            let indent = whitespace_after_last_newline(&entry.leading_line_trivia);
-            if indent.is_empty() {
-                None
-            } else {
-                Some(indent)
-            }
-        }
-        ArrayItem::Standalone(block) => {
-            let indent = indentation_from_standalone_block(block);
-            if indent.is_empty() {
-                None
-            } else {
-                Some(indent)
-            }
-        }
-    })
-}
-
-fn remove_orphan_indent_before_entry(children: &mut Vec<GreenElement>) {
-    let mut idx = children.len();
-    while idx > 0 {
-        let elem = &children[idx - 1];
-        if is_token_of_kind(elem, SyntaxKind::Whitespace) {
-            idx -= 1;
-            continue;
-        }
-        if is_token_of_kind(elem, SyntaxKind::Newline) {
-            return;
-        }
-        break;
-    }
-
-    while let Some(last) = children.last() {
-        if is_token_of_kind(last, SyntaxKind::Whitespace) {
-            children.pop();
-        } else {
-            break;
-        }
-    }
-}
-
-/// 保留中のトリビアに空行が含まれるか判定（\n\s*\n のパターンを検出）
 fn has_blank_line(trivia: &[GreenElement]) -> bool {
     let mut had_newline = false;
 
@@ -566,4 +500,28 @@ fn find_blank_line_split(trivia: &[GreenElement]) -> usize {
     }
 
     trivia.len()
+}
+
+
+fn remove_orphan_indent_before_entry(children: &mut Vec<GreenElement>) {
+    let mut idx = children.len();
+    while idx > 0 {
+        let elem = &children[idx - 1];
+        if is_token_of_kind(elem, SyntaxKind::Whitespace) {
+            idx -= 1;
+            continue;
+        }
+        if is_token_of_kind(elem, SyntaxKind::Newline) {
+            return;
+        }
+        break;
+    }
+
+    while let Some(last) = children.last() {
+        if is_token_of_kind(last, SyntaxKind::Whitespace) {
+            children.pop();
+        } else {
+            break;
+        }
+    }
 }

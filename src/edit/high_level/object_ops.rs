@@ -1,8 +1,8 @@
 use crate::edit::api::{create_node, create_token, RedNodeEdit};
 use crate::edit::high_level::{
     build_object_items, clone_element, create_pair_node, extract_key_text, is_token_of_kind,
-    rebuild_object_children_for_format, EntryTerminator, HjsonEditError, HjsonValue,
-    ObjectEntry, ObjectItem, StringStyle,
+    rebuild_object_children_for_format, replace_pair_value, EntryTerminator, HjsonEditError,
+    HjsonValue, ObjectEntry, ObjectItem, StringStyle,
 };
 use crate::edit::high_level::structure::{indentation_from_standalone_block, whitespace_after_last_newline};
 use crate::syntax::green::GreenElement;
@@ -181,6 +181,80 @@ pub(crate) fn remove_object_entry(
     ))
 }
 
+pub(crate) fn set_object_entry(
+    obj_node: &RedNode,
+    key: &str,
+    value: &HjsonValue,
+    string_style: StringStyle,
+    base_indent: &str,
+    indent_unit: &str,
+    newline: &str,
+) -> Result<GreenNode, HjsonEditError> {
+    let obj_green: GreenNode = obj_node.to_green();
+    let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
+
+    let lbrace = children
+        .iter()
+        .find(|c| is_token_of_kind(c, SyntaxKind::LBrace))
+        .cloned();
+    let rbrace = children
+        .iter()
+        .find(|c| is_token_of_kind(c, SyntaxKind::RBrace))
+        .cloned();
+    let items = build_object_items(&children);
+    let mut found = false;
+    let mut new_items = Vec::new();
+    let has_braces = lbrace.is_some() && rbrace.is_some();
+    let entry_indent = detect_object_entry_indent(&items).unwrap_or_else(|| {
+        if has_braces {
+            format!("{}{}", base_indent, indent_unit)
+        } else {
+            String::new()
+        }
+    });
+
+    for item in items {
+        match item {
+            ObjectItem::Entry(mut entry) => {
+                if let NodeOrToken::Node(pair_green) = &entry.pair {
+                    let pair_red = RedNode::new_root(pair_green.clone());
+                    if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
+                        if let Some(key_text) = extract_key_text(&key_node) {
+                            if key_text == key {
+                                entry.pair = NodeOrToken::Node(replace_pair_value(
+                                    pair_green,
+                                    value,
+                                    string_style,
+                                )?);
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                new_items.push(ObjectItem::Entry(entry));
+            }
+            ObjectItem::Standalone(block) => new_items.push(ObjectItem::Standalone(block)),
+        }
+    }
+
+    if !found {
+        insert_object_entry_without_reformat(
+            &mut new_items,
+            key,
+            value,
+            string_style,
+            has_braces,
+            newline,
+            &entry_indent,
+            base_indent,
+        )?;
+    }
+
+    Ok(create_node(
+        SyntaxKind::Object,
+        rebuild_object_children_for_format(lbrace, new_items, rbrace),
+    ))
+}
 pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {
     items.iter().find_map(|item| match item {
         ObjectItem::Entry(entry) => {
@@ -201,3 +275,4 @@ pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String>
         }
     })
 }
+
