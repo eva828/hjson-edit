@@ -590,3 +590,20 @@ fn invalid_paths_return_invalid_path_errors() {
         Err(hjson_edit::HjsonEditError::InvalidPath { .. })
     ));
 }
+
+#[test]
+fn test_array_push_single_element_no_empty_line() {
+    let input = "features: [\n  default\n]";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let doc2 = doc.edit_push("features", "extra").unwrap();
+    
+    let doc3 = doc2.format().unwrap();
+    let res = doc3.to_string();
+    assert!(!res.contains("\n\n"), "Should not contain empty lines:\n{}", res);
+}
+
+
+
+
+
+

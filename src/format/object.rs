@@ -1,4 +1,4 @@
-use crate::edit::api::create_node;
+use crate::edit::api::{create_node, create_token};
 use crate::syntax::red::RedNodeCoreExt;
 use crate::edit::high_level::{
     build_object_items, clone_element, detect_object_entry_indent, is_token_of_kind,
@@ -52,7 +52,14 @@ pub(crate) fn format_object_node(
                     )?);
                 }
                 if !is_braceless && entry.leading_line_trivia.is_empty() {
-                    entry.leading_line_trivia = newline_indent_elements(newline, &entry_indent);
+                    if entry_positions.is_empty() {
+                        entry.leading_line_trivia = newline_indent_elements(newline, &entry_indent);
+                    } else if !entry_indent.is_empty() {
+                        entry.leading_line_trivia = vec![NodeOrToken::Token(create_token(
+                            SyntaxKind::Whitespace,
+                            &entry_indent,
+                        ))];
+                    }
                 }
                 entry_positions.push(formatted_items.len());
                 formatted_items.push(ObjectItem::Entry(entry));
@@ -64,8 +71,10 @@ pub(crate) fn format_object_node(
     for window in entry_positions.windows(2) {
         if let ObjectItem::Entry(entry) = &mut formatted_items[window[0]] {
             if matches!(entry.terminator, EntryTerminator::EndOfContainer) {
-                entry.terminator =
-                    EntryTerminator::Newline(newline_indent_elements(newline, &entry_indent));
+                entry.terminator = EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
+                    SyntaxKind::Newline,
+                    newline,
+                ))]);
             }
         }
     }
