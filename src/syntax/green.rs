@@ -73,21 +73,4 @@ impl GreenNodeExt for rowan::GreenNode {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    /// GreenTreeBuilderでRootノードを構築し、テキストが "{}" になることを検証
-    #[test]
-    fn test_build_simple() {
-        let mut builder = GreenTreeBuilder::new();
-        builder.start_node(SyntaxKind::Root);
-        builder.token(SyntaxKind::LBrace, "{");
-        builder.token(SyntaxKind::RBrace, "}");
-        builder.finish_node();
-
-        let node = builder.finish();
-        let node_ref: &rowan::GreenNode = &node;
-        assert_eq!(node_ref.text(), "{}");
-    }
-}

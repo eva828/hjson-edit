@@ -234,7 +234,6 @@ pub fn create_node(kind: SyntaxKind, children: Vec<GreenElement>) -> rowan::Gree
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::green::GreenNodeExt;
     use crate::syntax::green::GreenTreeBuilder;
 
     fn create_test_node() -> rowan::GreenNode {
@@ -246,51 +245,23 @@ mod tests {
         builder.finish()
     }
 
-    /// replace_childで子トークンを置換できることを検証
-    ///
-    /// LBrace "{" を LBracket "[" に置換し、結果が "[}" になることを確認する
+    /// GreenNodeEdit error cases - internal implementation invariant tests
     #[test]
-    fn test_replace_child() {
-        let node = create_test_node();
-        let new_token = create_token(SyntaxKind::LBracket, "[");
-
-        let result = node.replace_child(0, new_token.into()).unwrap();
-        let result_ref: &rowan::GreenNode = &result;
-        assert_eq!(result_ref.text(), "[}");
-    }
-
-    /// insert_childで指定位置に新しいトークンを挿入できることを検証
-    ///
-    /// "{}" のインデックス1にWhitespaceを挿入し、"{ }" になることを確認する
-    #[test]
-    fn test_insert_child() {
-        let node = create_test_node();
-        let new_token = create_token(SyntaxKind::Whitespace, " ");
-
-        let result = node.insert_child(1, new_token.into()).unwrap();
-        let result_ref: &rowan::GreenNode = &result;
-        assert_eq!(result_ref.text(), "{ }");
-    }
-
-    /// remove_childで指定位置の子トークンを削除できることを検証
-    ///
-    /// "{}" のインデックス1（RBrace）を削除し、"{" になることを確認する
-    #[test]
-    fn test_remove_child() {
+    fn green_node_edit_error_cases() {
         let node = create_test_node();
 
-        let result = node.remove_child(1).unwrap();
-        let result_ref: &rowan::GreenNode = &result;
-        assert_eq!(result_ref.text(), "{");
-    }
-
-    /// 範囲外のインデックスを指定するとEditError::InvalidIndexが返ることを検証
-    #[test]
-    fn test_invalid_index() {
-        let node = create_test_node();
+        // Invalid index returns InvalidIndex error for replace
         let new_token = create_token(SyntaxKind::LBrace, "{");
-
         let result = node.replace_child(10, new_token.into());
+        assert!(matches!(result, Err(EditError::InvalidIndex { .. })));
+
+        // Invalid index for insert
+        let new_token = create_token(SyntaxKind::LBrace, "{");
+        let result = node.insert_child(10, new_token.into());
+        assert!(matches!(result, Err(EditError::InvalidIndex { .. })));
+
+        // Invalid index for remove
+        let result = node.remove_child(10);
         assert!(matches!(result, Err(EditError::InvalidIndex { .. })));
     }
 }

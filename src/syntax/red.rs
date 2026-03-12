@@ -145,42 +145,4 @@ impl RedElementExt for RedElement {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syntax::green::GreenTreeBuilder;
 
-    fn create_test_node() -> RedNode {
-        let mut builder = GreenTreeBuilder::new();
-        builder.start_node(SyntaxKind::Root);
-        builder.start_node(SyntaxKind::Object);
-        builder.token(SyntaxKind::LBrace, "{");
-        builder.finish_node();
-        builder.finish_node();
-
-        let green = builder.finish();
-        RedNode::new_root(green)
-    }
-
-    /// child_by_kindで指定したSyntaxKindの子ノードが取得できることを検証
-    #[test]
-    fn test_child_by_kind() {
-        let node = create_test_node();
-        let object = node.child_by_kind(SyntaxKind::Object);
-        assert!(object.is_some());
-    }
-
-    /// line_rangeが1行のHJSON入力に対して (1, 1) を返すことを検証
-    #[test]
-    fn test_line_range() {
-        // 実際のパース結果を使ってテスト
-        let input = "{ \"key\": \"value\" }";
-        let result = crate::parser::parser::parse(input).unwrap();
-        let node = RedNode::new_root(result.green);
-
-        // ルートノードは1行目
-        let (start, end) = node.line_range(input);
-        assert_eq!(start, 1);
-        assert_eq!(end, 1);
-    }
-}

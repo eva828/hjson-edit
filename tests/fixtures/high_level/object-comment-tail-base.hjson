@@ -1,6 +1,0 @@
-root: {
-    first: a
-
-    // trailing standalone comment
-    // trailing standalone comment 2
-}

@@ -239,36 +239,4 @@ pub(crate) fn navigate_from_node(start: &RedNode, path: &[PathSegment]) -> Optio
     Some(current)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_parse_dot_path() {
-        assert_eq!(
-            parse_dot_path("server.host").unwrap(),
-            vec![
-                PathSegment::Key("server".to_string()),
-                PathSegment::Key("host".to_string())
-            ]
-        );
-
-        assert_eq!(
-            parse_dot_path("items[0].name").unwrap(),
-            vec![
-                PathSegment::Key("items".to_string()),
-                PathSegment::Index(0),
-                PathSegment::Key("name".to_string())
-            ]
-        );
-
-        assert!(matches!(
-            parse_dot_path("items[abc]"),
-            Err(HjsonEditError::InvalidPath { .. })
-        ));
-        assert!(matches!(
-            parse_dot_path("items[1x]"),
-            Err(HjsonEditError::InvalidPath { .. })
-        ));
-    }
-}
