@@ -1,6 +1,7 @@
 /// HJSON字句解析器
 ///
 /// エラー継続型：エラーがあっても解析を続行し、詳細なエラー情報を収集
+use crate::number::{HjsonNumber, NumberKind};
 use crate::syntax::kind::SyntaxKind;
 
 /// 字句解析エラー
@@ -465,15 +466,12 @@ impl Lexer {
             "true" => SyntaxKind::True,
             "false" => SyntaxKind::False,
             "null" => SyntaxKind::Null,
-            _ if is_valid_number(text) => {
-                if text.contains('.') || text.contains('e') || text.contains('E') {
-                    SyntaxKind::Float
-                } else {
-                    SyntaxKind::Integer
-                }
-            }
-            _ if is_ident(text) => SyntaxKind::Ident,
-            _ => SyntaxKind::UnquotedString,
+            _ => match HjsonNumber::classify(text) {
+                Some(NumberKind::Integer) => SyntaxKind::Integer,
+                Some(NumberKind::Float) => SyntaxKind::Float,
+                None if is_ident(text) => SyntaxKind::Ident,
+                None => SyntaxKind::UnquotedString,
+            },
         }
     }
 }
@@ -491,65 +489,10 @@ fn is_non_punctuator_char(c: char) -> bool {
 }
 
 pub(crate) fn is_valid_number(text: &str) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-
-    let bytes = text.as_bytes();
-    let mut idx = 0usize;
-
-    if bytes[idx] == b'-' {
-        idx += 1;
-        if idx == bytes.len() {
-            return false;
-        }
-    }
-
-    if bytes[idx] == b'0' {
-        idx += 1;
-        if idx < bytes.len() && bytes[idx].is_ascii_digit() {
-            return false;
-        }
-    } else if bytes[idx].is_ascii_digit() {
-        idx += 1;
-        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-            idx += 1;
-        }
-    } else {
-        return false;
-    }
-
-    if idx < bytes.len() && bytes[idx] == b'.' {
-        idx += 1;
-        let frac_start = idx;
-        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-            idx += 1;
-        }
-        if frac_start == idx {
-            return false;
-        }
-    }
-
-    if idx < bytes.len() && (bytes[idx] == b'e' || bytes[idx] == b'E') {
-        idx += 1;
-        if idx < bytes.len() && (bytes[idx] == b'+' || bytes[idx] == b'-') {
-            idx += 1;
-        }
-        let exp_start = idx;
-        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-            idx += 1;
-        }
-        if exp_start == idx {
-            return false;
-        }
-    }
-
-    idx == bytes.len()
+    HjsonNumber::is_valid(text)
 }
 
 /// 公開API
 pub fn lex(input: &str) -> LexResult {
     Lexer::new(input).lex()
 }
-
-

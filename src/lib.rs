@@ -9,13 +9,16 @@
 //! - 変更行の検出（1始まり）
 
 pub mod diff;
+pub(crate) mod document_style;
 pub mod edit;
 pub mod format;
+pub(crate) mod number;
 pub mod parser;
 pub mod syntax;
 
 // 公開APIを再エクスポート
 pub use diff::{detect_changed_lines, simple_line_diff, ChangeInfo, ChangeType};
+pub use document_style::{DocumentStyle, NewlineKind, TextNormalizer};
 pub use edit::api::{
     create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeNavigateExt,
 };
@@ -24,6 +27,7 @@ pub use edit::high_level::{
     IntoPath, PathSegment, StringStyle,
 };
 pub use format::FormatTarget;
+pub use number::{HjsonNumber, NumberKind};
 pub use parser::lexer::{lex, LexError, LexResult, Token};
 pub use parser::parser::{parse, ParseError, ParseResult};
 pub use syntax::green::{GreenElement, GreenNodeExt, GreenTreeBuilder};

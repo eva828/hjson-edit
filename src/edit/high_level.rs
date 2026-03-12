@@ -8,6 +8,7 @@ pub(crate) mod object_ops;
 pub(crate) mod structure;
 pub(crate) mod value;
 
+use crate::document_style::DocumentStyle;
 use crate::edit::api::{create_node, EditError as LowLevelEditError, GreenNodeEdit};
 use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
@@ -21,14 +22,15 @@ pub(crate) use navigation::parse_path_for_format;
 pub(crate) use navigation::RedNodeNavigateExt;
 pub(crate) use object_ops::detect_object_entry_indent;
 pub(crate) use structure::{
-    build_array_items, build_object_items, rebuild_array_children_for_format,
-    rebuild_object_children_for_format, ArrayEntry, ArrayItem, EntryTerminator, ObjectEntry,
-    ObjectItem, StandaloneTriviaBlock,
+    build_array_items, build_object_items, indentation_from_standalone_block,
+    rebuild_array_children_for_format, rebuild_object_children_for_format,
+    whitespace_after_last_newline, ArrayEntry, ArrayItem, EntryTerminator, ObjectEntry, ObjectItem,
+    StandaloneTriviaBlock,
 };
 pub(crate) use value::{
-    create_multiline_string_literal, create_pair_node, create_value_node, format_target_for_value,
-    node_to_value, parse_multiline_string, replace_pair_value, string_style_for_value_node,
-    value_needs_contextual_formatting, value_to_green_node,
+    create_multiline_string_literal, create_pair_node, create_value_node, extract_key_text,
+    format_target_for_value, node_to_value, parse_multiline_string, replace_pair_value,
+    string_style_for_value_node, value_needs_contextual_formatting, value_to_green_node,
 };
 
 // =============================================================================
@@ -61,6 +63,17 @@ pub enum FormatError {
     InvalidTarget { target: FormatTarget },
     #[error("{0}")]
     Edit(#[from] HjsonEditError),
+}
+
+impl From<FormatError> for HjsonEditError {
+    fn from(error: FormatError) -> Self {
+        match error {
+            FormatError::Edit(edit) => edit,
+            FormatError::InvalidTarget { target } => Self::InvalidPath {
+                path: format!("format target {:?}", target),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -231,12 +244,6 @@ pub enum StringStyle {
     Unquoted,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum NewlineStyle {
-    Lf,
-    CrLf,
-}
-
 // =============================================================================
 // Comment Path Types
 // =============================================================================
@@ -252,6 +259,50 @@ pub enum CommentPath {
     Header,
     /// ドキュメント末尾コメント
     Footer,
+}
+
+struct DocumentEditContext {
+    source: String,
+    indent_unit: String,
+    newline: &'static str,
+}
+
+impl DocumentEditContext {
+    fn from_document(document: &HjsonDocument) -> Self {
+        let source = document.to_string();
+        let style = DocumentStyle::new(&source);
+        let indent_unit = style.indent_unit();
+        let newline = style.newline();
+        Self {
+            source,
+            indent_unit,
+            newline,
+        }
+    }
+
+    fn line_indent_for_offset(&self, offset: usize) -> String {
+        DocumentStyle::new(&self.source).line_indent_for_offset(offset)
+    }
+}
+
+struct ArrayValueLocator;
+
+impl ArrayValueLocator {
+    fn last_value_index(children: &[GreenElement]) -> Option<usize> {
+        children
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, child)| match child {
+                NodeOrToken::Node(node)
+                    if crate::syntax::kind::HjsonLanguage::kind_from_raw(node.kind())
+                        == SyntaxKind::Value =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+    }
 }
 
 // =============================================================================
@@ -353,13 +404,9 @@ impl HjsonDocument {
                     }
                 })?;
 
-                let document_text = self.to_string();
-                let base_indent = line_indent_for_offset_from_text(
-                    &document_text,
-                    obj_node.text_range().start().into(),
-                );
-                let indent_unit = detect_default_indent_unit_from_text(&document_text);
-                let newline = preferred_newline_from_text(&document_text);
+                let context = DocumentEditContext::from_document(self);
+                let base_indent =
+                    context.line_indent_for_offset(obj_node.text_range().start().into());
 
                 let new_obj = object_ops::set_object_entry(
                     &obj_node,
@@ -367,8 +414,8 @@ impl HjsonDocument {
                     value,
                     string_style,
                     &base_indent,
-                    &indent_unit,
-                    newline,
+                    &context.indent_unit,
+                    context.newline,
                 )?;
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
                 let dirty_target = if value_needs_contextual_formatting(value, string_style, None) {
@@ -683,7 +730,7 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         self.edit_set(path, value)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// パスに対応する値を設定（文字列スタイル指定付き）
@@ -695,14 +742,14 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         self.edit_set_with_style(path, value, string_style)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// キー/値を削除
     pub fn remove(&self, path: impl IntoPath) -> Result<Self, HjsonEditError> {
         self.edit_remove(path)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// オブジェクトに新しいキーを追加
@@ -736,7 +783,7 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         self.edit_push(path, value)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// 配列の末尾に要素を追加（文字列スタイル指定付き）
@@ -748,7 +795,7 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         self.edit_push_with_style(path, value, string_style)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// 配列の末尾の要素を削除
@@ -797,24 +844,10 @@ impl HjsonDocument {
         let arr_green: GreenNode = arr_node.to_green();
         let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
 
-        let value_indices: Vec<usize> = children
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c): (usize, &GreenElement)| {
-                if let NodeOrToken::Node(n) = c {
-                    if n.kind() == rowan::SyntaxKind::from(SyntaxKind::Value) {
-                        return Some(i);
-                    }
-                }
-                None
-            })
-            .collect();
-
-        if value_indices.is_empty() {
+        let Some(remove_idx) = ArrayValueLocator::last_value_index(&children) else {
             return Err(HjsonEditError::InvalidIndex { index: 0, count: 0 });
-        }
+        };
 
-        let remove_idx = *value_indices.last().unwrap();
         let new_arr = arr_green.remove_child(remove_idx)?;
         self.replace_green_node(&arr_node.path_from_root(), new_arr)
     }
@@ -828,7 +861,7 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         self.edit_insert_at(path, index, value)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// 配列の指定位置に要素を挿入（文字列スタイル指定付き）
@@ -841,14 +874,14 @@ impl HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         self.edit_insert_at_with_style(path, index, value, string_style)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// 配列の指定位置の要素を削除
     pub fn remove_at(&self, path: impl IntoPath, index: usize) -> Result<Self, HjsonEditError> {
         self.edit_remove_at(path, index)?
             .format()
-            .map_err(edit_from_format_error)
+            .map_err(HjsonEditError::from)
     }
 
     /// ドキュメント先頭のコメントを取得
@@ -1030,123 +1063,9 @@ impl std::fmt::Display for HjsonDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use crate::syntax::green::GreenNodeExt;
         let text = self.green.text();
-        let preferred = if text.contains("\r\n") {
-            NewlineStyle::CrLf
-        } else {
-            NewlineStyle::Lf
-        };
-        f.write_str(&normalize_newlines(&text, &preferred))
+        let style = DocumentStyle::new(&text);
+        f.write_str(&style.normalize_text(&text))
     }
-}
-
-// =============================================================================
-// Comment Helper Functions
-// =============================================================================
-
-fn whitespace_after_last_newline(trivia: &[GreenElement]) -> String {
-    let mut text = String::new();
-    let mut after_newline = false;
-
-    for elem in trivia {
-        if let NodeOrToken::Token(t) = elem {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-            if kind == SyntaxKind::Newline {
-                text.clear();
-                after_newline = true;
-            } else if after_newline && kind == SyntaxKind::Whitespace {
-                text.push_str(t.text());
-            }
-        }
-    }
-
-    text
-}
-
-fn indentation_from_standalone_block(block: &StandaloneTriviaBlock) -> String {
-    let mut after_newline = false;
-    let mut current_indent = String::new();
-    let mut last_comment_indent = String::new();
-
-    for elem in &block.elements {
-        if let NodeOrToken::Token(t) = elem {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
-            match kind {
-                SyntaxKind::Newline => {
-                    after_newline = true;
-                    current_indent.clear();
-                }
-                SyntaxKind::Whitespace if after_newline => {
-                    current_indent.push_str(t.text());
-                }
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-                    if after_newline =>
-                {
-                    last_comment_indent = current_indent.clone();
-                    after_newline = false;
-                }
-                _ => after_newline = false,
-            }
-        } else {
-            after_newline = false;
-        }
-    }
-
-    if last_comment_indent.is_empty() {
-        whitespace_after_last_newline(&block.elements)
-    } else {
-        last_comment_indent
-    }
-}
-
-fn preferred_newline_from_text(text: &str) -> &'static str {
-    if text.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    }
-}
-
-fn detect_default_indent_unit_from_text(source: &str) -> String {
-    let mut space_indents = Vec::new();
-    let mut tab_count = 0usize;
-
-    for line in source.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let indent: String = line
-            .chars()
-            .take_while(|ch| *ch == ' ' || *ch == '\t')
-            .collect();
-        if indent.is_empty() {
-            continue;
-        }
-        if indent.contains('\t') {
-            tab_count += 1;
-        } else {
-            space_indents.push(indent.len());
-        }
-    }
-
-    if tab_count > 0 {
-        return "\t".to_string();
-    }
-
-    let width = space_indents
-        .into_iter()
-        .filter(|len| *len > 0)
-        .min()
-        .unwrap_or(2);
-    " ".repeat(width)
-}
-
-fn line_indent_for_offset_from_text(source: &str, offset: usize) -> String {
-    let start = source[..offset].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    source[start..offset]
-        .chars()
-        .take_while(|ch| *ch == ' ' || *ch == '\t')
-        .collect()
 }
 
 pub(crate) fn detect_array_entry_indent(items: &[ArrayItem]) -> Option<String> {
@@ -1170,49 +1089,9 @@ pub(crate) fn detect_array_entry_indent(items: &[ArrayItem]) -> Option<String> {
     })
 }
 
-fn normalize_newlines(text: &str, style: &NewlineStyle) -> String {
-    let normalized = text.replace("\r\n", "\n");
-    match style {
-        NewlineStyle::Lf => normalized,
-        NewlineStyle::CrLf => normalized.replace('\n', "\r\n"),
-    }
-}
-
 // =============================================================================
 // Internal Helper Functions
 // =============================================================================
-
-fn edit_from_format_error(error: FormatError) -> HjsonEditError {
-    match error {
-        FormatError::Edit(edit) => edit,
-        FormatError::InvalidTarget { target } => HjsonEditError::InvalidPath {
-            path: format!("format target {:?}", target),
-        },
-    }
-}
-
-pub(crate) fn extract_key_text(key_node: &RedNode) -> Option<String> {
-    for elem in key_node.children_with_tokens() {
-        if let Some(token) = elem.as_token() {
-            let kind = token.kind();
-            match kind {
-                SyntaxKind::Ident | SyntaxKind::UnquotedString => {
-                    return Some(token.text().to_string());
-                }
-                SyntaxKind::String => {
-                    let text = token.text();
-                    if text.len() >= 2 {
-                        let inner = &text[1..text.len() - 1];
-                        return Some(unescape_json_string(inner));
-                    }
-                    return Some(text.to_string());
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
 
 pub(crate) fn clone_element(
     elem: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
@@ -1241,47 +1120,5 @@ pub(crate) fn is_token_of_kind(elem: &GreenElement, kind: SyntaxKind) -> bool {
 }
 
 // =============================================================================
-// Object Entry Model
-// =============================================================================
-
-/// JSON エスケープシーケンスを復元する
-fn unescape_json_string(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('"') => result.push('"'),
-                Some('\\') => result.push('\\'),
-                Some('/') => result.push('/'),
-                Some('n') => result.push('\n'),
-                Some('r') => result.push('\r'),
-                Some('t') => result.push('\t'),
-                Some('b') => result.push('\u{08}'),
-                Some('f') => result.push('\u{0C}'),
-                Some('u') => {
-                    let hex: String = chars.by_ref().take(4).collect();
-                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                        if let Some(ch) = char::from_u32(code) {
-                            result.push(ch);
-                        }
-                    }
-                }
-                Some(other) => {
-                    result.push('\\');
-                    result.push(other);
-                }
-                None => result.push('\\'),
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-// =============================================================================
 // Tests
 // =============================================================================
-
-

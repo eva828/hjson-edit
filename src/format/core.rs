@@ -1,3 +1,4 @@
+use crate::document_style::DocumentStyle;
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
@@ -13,6 +14,82 @@ use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
+struct FormatContext<'a> {
+    document: &'a HjsonDocument,
+    source: String,
+    newline: &'static str,
+    indent_unit: String,
+}
+
+impl<'a> FormatContext<'a> {
+    fn new(document: &'a HjsonDocument) -> Self {
+        let source = document.to_string();
+        let style = DocumentStyle::new(&source);
+        Self {
+            document,
+            newline: style.newline(),
+            indent_unit: style.indent_unit(),
+            source,
+        }
+    }
+
+    fn line_indent_for_offset(&self, offset: usize) -> String {
+        DocumentStyle::new(&self.source).line_indent_for_offset(offset)
+    }
+
+    fn format_root_target(&self) -> Result<HjsonDocument, FormatError> {
+        let root = RedNode::new_root(self.document.green_node().clone());
+        let new_root = format_root_node(&root, self.newline, &self.indent_unit)?;
+        Ok(HjsonDocument::from_green(new_root))
+    }
+
+    fn format_node_target(&self, path_from_root: &[usize]) -> Result<HjsonDocument, FormatError> {
+        let node = red_node_at_path(self.document, path_from_root).ok_or_else(|| {
+            FormatError::InvalidTarget {
+                target: FormatTarget::node(path_from_root.to_vec()),
+            }
+        })?;
+        let line_indent = self.line_indent_for_offset(node.text_range().start().into());
+        let new_node = match node.kind() {
+            SyntaxKind::Object => {
+                format_object_node_partial(&node, &line_indent, self.newline, &self.indent_unit)?
+            }
+            SyntaxKind::Array => {
+                format_array_node_partial(&node, &line_indent, self.newline, &self.indent_unit)?
+            }
+            _ => format_red_node(&node, &line_indent, self.newline, &self.indent_unit)?,
+        };
+        self.document
+            .replace_green_node_internal(path_from_root, new_node)
+            .map_err(FormatError::from)
+    }
+
+    fn format_path_target(&self, path: &str) -> Result<HjsonDocument, FormatError> {
+        let path_segments = crate::edit::high_level::parse_path_for_format(path).map_err(|_| {
+            FormatError::InvalidTarget {
+                target: FormatTarget::path(path),
+            }
+        })?;
+        if path_segments.is_empty() {
+            return self.format_root_target();
+        }
+
+        let target_node = self
+            .document
+            .navigate_to_node_internal(&path_segments)
+            .ok_or_else(|| FormatError::InvalidTarget {
+                target: FormatTarget::path(path),
+            })?;
+
+        let container = target_node
+            .resolve_object_child()
+            .or_else(|| target_node.resolve_array_child())
+            .unwrap_or(target_node);
+
+        self.format_node_target(&container.path_from_root())
+    }
+}
+
 pub(crate) fn format_document(
     document: &HjsonDocument,
     targets: &[FormatTarget],
@@ -23,70 +100,15 @@ pub(crate) fn format_document(
 
     let mut current = document.clone();
     for target in targets {
+        let target_context = FormatContext::new(&current);
         current = match target {
-            FormatTarget::Document => format_root_target(&current)?,
-            FormatTarget::Node(path) => format_node_target(&current, path)?,
-            FormatTarget::Path(path) => format_path_target(&current, path)?,
+            FormatTarget::Document => target_context.format_root_target()?,
+            FormatTarget::Node(path) => target_context.format_node_target(path)?,
+            FormatTarget::Path(path) => target_context.format_path_target(path)?,
         };
     }
 
     Ok(current)
-}
-
-fn format_root_target(document: &HjsonDocument) -> Result<HjsonDocument, FormatError> {
-    let source = document.to_string();
-    let newline = preferred_newline(&source);
-    let indent_unit = detect_default_indent_unit(&source);
-    let root = RedNode::new_root(document.green_node().clone());
-    let new_root = format_root_node(&root, newline, &indent_unit)?;
-    Ok(HjsonDocument::from_green(new_root))
-}
-
-fn format_node_target(
-    document: &HjsonDocument,
-    path_from_root: &[usize],
-) -> Result<HjsonDocument, FormatError> {
-    let source = document.to_string();
-    let newline = preferred_newline(&source);
-    let indent_unit = detect_default_indent_unit(&source);
-    let node =
-        red_node_at_path(document, path_from_root).ok_or_else(|| FormatError::InvalidTarget {
-            target: FormatTarget::node(path_from_root.to_vec()),
-        })?;
-    let line_indent = line_indent_for_offset(&source, node.text_range().start().into());
-    let new_node = match node.kind() {
-        SyntaxKind::Object => {
-            format_object_node_partial(&node, &line_indent, newline, &indent_unit)?
-        }
-        SyntaxKind::Array => format_array_node_partial(&node, &line_indent, newline, &indent_unit)?,
-        _ => format_red_node(&node, &line_indent, newline, &indent_unit)?,
-    };
-    let updated = document.replace_green_node_internal(path_from_root, new_node)?;
-    Ok(updated)
-}
-
-fn format_path_target(document: &HjsonDocument, path: &str) -> Result<HjsonDocument, FormatError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(path).map_err(|_| {
-        FormatError::InvalidTarget {
-            target: FormatTarget::path(path),
-        }
-    })?;
-    if path_segments.is_empty() {
-        return format_root_target(document);
-    }
-
-    let target_node = document
-        .navigate_to_node_internal(&path_segments)
-        .ok_or_else(|| FormatError::InvalidTarget {
-            target: FormatTarget::path(path),
-        })?;
-
-    let container = target_node
-        .resolve_object_child()
-        .or_else(|| target_node.resolve_array_child())
-        .unwrap_or(target_node);
-
-    format_node_target(document, &container.path_from_root())
 }
 
 fn red_node_at_path(document: &HjsonDocument, path_from_root: &[usize]) -> Option<RedNode> {
@@ -98,57 +120,6 @@ fn red_node_at_path(document: &HjsonDocument, path_from_root: &[usize]) -> Optio
         }
     }
     Some(current)
-}
-
-pub(crate) fn preferred_newline(source: &str) -> &'static str {
-    if source.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    }
-}
-
-fn detect_default_indent_unit(source: &str) -> String {
-    let mut space_indents = Vec::new();
-    let mut tab_count = 0usize;
-
-    for line in source.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let indent: String = line
-            .chars()
-            .take_while(|ch| *ch == ' ' || *ch == '\t')
-            .collect();
-        if indent.is_empty() {
-            continue;
-        }
-        if indent.contains('\t') {
-            tab_count += 1;
-        } else {
-            space_indents.push(indent.len());
-        }
-    }
-
-    if tab_count > 0 {
-        return "\t".to_string();
-    }
-
-    let width = space_indents
-        .into_iter()
-        .filter(|len| *len > 0)
-        .min()
-        .unwrap_or(2);
-    " ".repeat(width)
-}
-
-fn line_indent_for_offset(source: &str, offset: usize) -> String {
-    let start = source[..offset].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    source[start..offset]
-        .chars()
-        .take_while(|ch| *ch == ' ' || *ch == '\t')
-        .collect()
 }
 
 pub(crate) fn child_indent(base_indent: &str, indent_unit: &str) -> String {
