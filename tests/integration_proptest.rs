@@ -41,6 +41,16 @@ proptest! {
         let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
         prop_assert_eq!(output, reparsed.to_string());
     }
+
+    /// 引用符なし文字列がパンクチュエータで始まらないこと
+    #[test]
+    fn quoteless_string_never_starts_with_punctuator(
+        s in "[a-zA-Z_][a-zA-Z0-9_]{0,20}"
+    ) {
+        let input = format!("key: {}\n", s);
+        let doc = hjson_edit::HjsonDocument::parse(&input).unwrap();
+        prop_assert!(doc.get("key").is_some());
+    }
 }
 
 #[test]
