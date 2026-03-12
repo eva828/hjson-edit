@@ -16,7 +16,9 @@ pub mod syntax;
 
 // 公開APIを再エクスポート
 pub use diff::{detect_changed_lines, simple_line_diff, ChangeInfo, ChangeType};
-pub use edit::api::{create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeNavigateExt};
+pub use edit::api::{
+    create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeNavigateExt,
+};
 pub use edit::high_level::{
     CommentPath, CommentStyle, EditResult, FormatError, HjsonDocument, HjsonEditError, HjsonValue,
     IntoPath, PathSegment, StringStyle,
@@ -33,7 +35,6 @@ pub fn parse_to_red(input: &str) -> Result<RedNode, Vec<ParseError>> {
     let result = parse(input)?;
     Ok(RedNode::new_root(result.green))
 }
-
 
 /// 編集操作を適用して新しいGreenNodeを取得
 pub fn apply_edit(node: &rowan::GreenNode, edit: EditOp) -> Result<rowan::GreenNode, EditError> {

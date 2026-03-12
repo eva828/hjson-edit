@@ -596,32 +596,35 @@ fn test_array_push_single_element_no_empty_line() {
     let input = "features: [\n  default\n]";
     let doc = HjsonDocument::parse(input).unwrap();
     let doc2 = doc.edit_push("features", "extra").unwrap();
-    
+
     let doc3 = doc2.format().unwrap();
     let res = doc3.to_string();
-    assert!(!res.contains("\n\n"), "Should not contain empty lines:\n{}", res);
+    assert!(
+        !res.contains("\n\n"),
+        "Should not contain empty lines:\n{}",
+        res
+    );
 }
 
 #[test]
 fn test_comment_set_before_key_preserves_indentation() {
     let input = "{\n  name: my-app\n  version: 1.0.0\n}";
     let doc = HjsonDocument::parse(input).unwrap();
-    
-    let doc2 = doc.comment_set(
-        &CommentPath::Key { dot_path: "version".to_string() },
-        " Use Semantic Versioning",
-        Some(CommentStyle::Block),
-    ).unwrap();
+
+    let doc2 = doc
+        .comment_set(
+            &CommentPath::Key {
+                dot_path: "version".to_string(),
+            },
+            " Use Semantic Versioning",
+            Some(CommentStyle::Block),
+        )
+        .unwrap();
     let res = doc2.to_string();
     // Check if 'version' key still has 2 spaces indentation
-    assert!(res.contains("\n  /*  Use Semantic Versioning */\n  version: 1.0.0"), "Indentation lost:\n{}", res);
+    assert!(
+        res.contains("\n  /*  Use Semantic Versioning */\n  version: 1.0.0"),
+        "Indentation lost:\n{}",
+        res
+    );
 }
-
-
-
-
-
-
-
-
-

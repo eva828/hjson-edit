@@ -1,5 +1,4 @@
 use crate::edit::api::{create_node, create_token};
-use crate::syntax::red::RedNodeCoreExt;
 use crate::edit::high_level::{
     build_array_items, clone_element, detect_array_entry_indent, is_token_of_kind, ArrayItem,
     EntryTerminator, FormatError,
@@ -11,6 +10,7 @@ use crate::format::core::{
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::RedNode;
+use crate::syntax::red::RedNodeCoreExt;
 use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) fn format_array_node(
@@ -70,10 +70,9 @@ pub(crate) fn format_array_node(
     for window in entry_positions.windows(2) {
         if let ArrayItem::Entry(entry) = &mut formatted_items[window[0]] {
             if matches!(entry.terminator, EntryTerminator::EndOfContainer) {
-                entry.terminator = EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-                    SyntaxKind::Newline,
-                    newline,
-                ))]);
+                entry.terminator = EntryTerminator::Newline(vec![NodeOrToken::Token(
+                    create_token(SyntaxKind::Newline, newline),
+                )]);
             }
         }
     }

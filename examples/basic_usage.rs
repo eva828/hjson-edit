@@ -13,8 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   ]
 }"#;
 
-    let doc = HjsonDocument::parse(input)
-        .map_err(|e| format!("Parse errors: {:?}", e))?;
+    let doc = HjsonDocument::parse(input).map_err(|e| format!("Parse errors: {:?}", e))?;
 
     // Read values using dot notation or array indexing
     if let Some(val) = doc.get("dependencies.clap") {

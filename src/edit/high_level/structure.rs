@@ -469,13 +469,15 @@ fn find_blank_line_split(trivia: &[GreenElement]) -> usize {
                 }
                 had_newline = true;
             } else if kind == SyntaxKind::Whitespace {
-            } else { kind.is_comment(); had_newline = false; }
+            } else {
+                kind.is_comment();
+                had_newline = false;
+            }
         }
     }
 
     trivia.len()
 }
-
 
 fn remove_orphan_indent_before_entry(children: &mut Vec<GreenElement>) {
     let mut idx = children.len();

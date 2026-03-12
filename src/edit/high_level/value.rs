@@ -537,14 +537,26 @@ pub(crate) fn replace_pair_value(
                 if HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Colon =>
             {
                 children.push(cloned.clone());
-                let has_space = pair_green.children().any(|child| {
-                    if let NodeOrToken::Token(token) = child {
-                        HjsonLanguage::kind_from_raw(token.kind()) == SyntaxKind::Whitespace
-                    } else {
-                        false
+                // We need to check if there is a space *after* the colon.
+                let mut found_space_after_colon = false;
+                let mut after_colon = false;
+                for c in pair_green.children() {
+                    if let NodeOrToken::Token(tok) = c {
+                        let k = HjsonLanguage::kind_from_raw(tok.kind());
+                        if k == SyntaxKind::Colon {
+                            after_colon = true;
+                        } else if after_colon && k == SyntaxKind::Whitespace {
+                            found_space_after_colon = true;
+                            break;
+                        } else if after_colon && k == SyntaxKind::Value {
+                            break; // Stop looking when we reach the value
+                        }
+                    } else if after_colon {
+                        // Found a node after colon (presumably Value)
+                        break;
                     }
-                });
-                if !has_space {
+                }
+                if !found_space_after_colon {
                     children.push(NodeOrToken::Token(create_token(
                         SyntaxKind::Whitespace,
                         " ",

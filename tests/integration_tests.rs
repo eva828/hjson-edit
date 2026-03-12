@@ -2,11 +2,11 @@
 //!
 //! These tests verify the complete workflow from parsing to editing.
 
-use hjson_edit::{
-    create_token, parse, parse_to_red, HjsonDocument, HjsonValue,
-    RedNodeCoreExt, RedNodeNavigateExt, SyntaxKind,
-};
 use hjson_edit::syntax::green::GreenNodeExt;
+use hjson_edit::{
+    create_token, parse, parse_to_red, HjsonDocument, HjsonValue, RedNodeCoreExt,
+    RedNodeNavigateExt, SyntaxKind,
+};
 
 /// HJSON設定ファイルのパース→GreenNode変換→文字列出力の一連のワークフローを検証
 #[test]

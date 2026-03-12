@@ -3,8 +3,8 @@
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
 pub(crate) mod array_ops;
-pub(crate) mod object_ops;
 pub(crate) mod navigation;
+pub(crate) mod object_ops;
 pub(crate) mod structure;
 pub(crate) mod value;
 
@@ -19,12 +19,12 @@ use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) use navigation::parse_path_for_format;
 pub(crate) use navigation::RedNodeNavigateExt;
+pub(crate) use object_ops::detect_object_entry_indent;
 pub(crate) use structure::{
     build_array_items, build_object_items, rebuild_array_children_for_format,
     rebuild_object_children_for_format, ArrayEntry, ArrayItem, EntryTerminator, ObjectEntry,
     ObjectItem, StandaloneTriviaBlock,
 };
-pub(crate) use object_ops::detect_object_entry_indent;
 pub(crate) use value::{
     create_multiline_string_literal, create_pair_node, create_value_node, format_target_for_value,
     node_to_value, parse_multiline_string, replace_pair_value, string_style_for_value_node,
@@ -544,7 +544,8 @@ impl HjsonDocument {
         let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
-        let new_arr = array_ops::insert_array_entry_structural(&arr_node, usize::MAX, &value, string_style)?;
+        let new_arr =
+            array_ops::insert_array_entry_structural(&arr_node, usize::MAX, &value, string_style)?;
         let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
         Ok(EditResult::new(
             updated,
@@ -571,7 +572,8 @@ impl HjsonDocument {
         let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
-        let new_arr = array_ops::insert_array_entry_structural(&arr_node, index, &value, string_style)?;
+        let new_arr =
+            array_ops::insert_array_entry_structural(&arr_node, index, &value, string_style)?;
         let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
         Ok(EditResult::new(
             updated,
@@ -913,10 +915,11 @@ impl HjsonDocument {
                 .ok_or_else(|| HjsonEditError::InvalidPath {
                     path: format!("{:?}", path),
                 })?;
-            node.resolve_array_child().ok_or_else(|| HjsonEditError::InvalidNodeKind {
-                expected: SyntaxKind::Array,
-                found: node.kind(),
-            })
+            node.resolve_array_child()
+                .ok_or_else(|| HjsonEditError::InvalidNodeKind {
+                    expected: SyntaxKind::Array,
+                    found: node.kind(),
+                })
         }
     }
 
@@ -1331,8 +1334,6 @@ mod tests {
         let input = r#"{"name": "test", "count": 42}"#;
         let doc = HjsonDocument::parse(input).unwrap();
 
-
-
         assert_eq!(
             doc.get("name"),
             Some(HjsonValue::String("test".to_string()))
@@ -1424,9 +1425,3 @@ mod tests {
         );
     }
 }
-
-
-
-
-
-

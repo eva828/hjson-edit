@@ -145,12 +145,10 @@ impl RedElementExt for RedElement {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
-    use crate::syntax::green::GreenTreeBuilder;
     use super::*;
+    use crate::syntax::green::GreenTreeBuilder;
 
     fn create_test_node() -> RedNode {
         let mut builder = GreenTreeBuilder::new();

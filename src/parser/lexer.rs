@@ -542,7 +542,6 @@ pub fn lex(input: &str) -> LexResult {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_basic_tokens() {
         let input = "{ } [ ] : ,";

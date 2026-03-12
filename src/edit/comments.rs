@@ -1,9 +1,8 @@
 use crate::edit::api::{create_node, create_token};
-use crate::edit::high_level::{
-    clone_element, CommentPath, CommentStyle, HjsonDocument,
-    HjsonEditError, PathSegment,
-};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
+use crate::edit::high_level::{
+    clone_element, CommentPath, CommentStyle, HjsonDocument, HjsonEditError, PathSegment,
+};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeCoreExt};
@@ -132,7 +131,7 @@ fn set_key_comment(
     let key = expect_terminal_key(&path_segments, dot_path)?;
     let parent_path = &path_segments[..path_segments.len() - 1];
     let obj = resolve_object_for_comment_path(document, parent_path, dot_path)?;
-    
+
     let pair_node = obj
         .find_pair_node(key)
         .ok_or_else(|| HjsonEditError::InvalidPath {
@@ -153,7 +152,7 @@ fn set_key_comment(
             }
         }
     }
-    
+
     // Look backwards from pair_idx_in_obj for whitespace
     if pair_idx_in_obj > 0 {
         let mut idx = pair_idx_in_obj - 1;
@@ -172,14 +171,16 @@ fn set_key_comment(
             } else {
                 break;
             }
-            if idx == 0 { break; }
+            if idx == 0 {
+                break;
+            }
             idx -= 1;
         }
     }
 
     let mut pair_green = pair_node.to_green();
-    
-    // If we found indentation in the object and the pair doesn't start with whitespace, 
+
+    // If we found indentation in the object and the pair doesn't start with whitespace,
     // prepend it to pair_green temporarily so insert_comment_before_pair can use it.
     if !indentation.is_empty() {
         let first_child = pair_green.children().next();
@@ -194,7 +195,7 @@ fn set_key_comment(
     let comment_style = determine_comment_style(&pair_green, style)?;
     let new_comment = create_comment_token(text, comment_style);
     let mut updated_pair = insert_comment_before_pair(&pair_green, new_comment)?;
-    
+
     // If we prepended indentation to pair_green, we should remove it from the start of updated_pair
     // because it's still present in the Object's trivia.
     if !indentation.is_empty() {
@@ -212,8 +213,6 @@ fn set_key_comment(
 
     document.replace_green_node_internal(&pair_node.path_from_root(), updated_pair)
 }
-
-
 
 fn set_inline_comment_for_path(
     document: &HjsonDocument,
@@ -234,8 +233,9 @@ fn set_inline_comment_for_path(
         &path_segments[..path_segments.len() - 1],
         dot_path,
     )?;
-    let pair_idx =
-        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
+    let pair_idx = obj
+        .find_pair_index(key)
+        .ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let new_obj = set_inline_comment(&obj.to_green(), pair_idx, text, style)?;
@@ -340,8 +340,9 @@ fn remove_key_comment(
         &path_segments[..path_segments.len() - 1],
         dot_path,
     )?;
-    let pair_idx =
-        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
+    let pair_idx = obj
+        .find_pair_index(key)
+        .ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let pair_node = obj
@@ -374,8 +375,9 @@ fn remove_inline_comment_for_path(
         &path_segments[..path_segments.len() - 1],
         dot_path,
     )?;
-    let pair_idx =
-        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
+    let pair_idx = obj
+        .find_pair_index(key)
+        .ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     let new_obj = remove_inline_comment(&obj.to_green(), pair_idx)?;
@@ -468,8 +470,9 @@ fn get_comments_before_key(
         &path_segments[..path_segments.len() - 1],
         dot_path,
     )?;
-    let pair_node =
-        obj.find_pair_node(key).ok_or_else(|| HjsonEditError::InvalidPath {
+    let pair_node = obj
+        .find_pair_node(key)
+        .ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
 
@@ -507,8 +510,9 @@ fn get_inline_comment(
         &path_segments[..path_segments.len() - 1],
         dot_path,
     )?;
-    let pair_idx =
-        obj.find_pair_index(key).ok_or_else(|| HjsonEditError::InvalidPath {
+    let pair_idx = obj
+        .find_pair_index(key)
+        .ok_or_else(|| HjsonEditError::InvalidPath {
             path: dot_path.to_string(),
         })?;
     Ok(extract_inline_comments(&obj.to_green(), pair_idx))
@@ -521,10 +525,11 @@ fn resolve_object_for_comment_path(
 ) -> Result<RedNode, HjsonEditError> {
     if path.is_empty() {
         let red = RedNode::new_root(document.green_node().clone());
-        red.resolve_object_child().ok_or(HjsonEditError::InvalidNodeKind {
-            expected: SyntaxKind::Object,
-            found: SyntaxKind::Root,
-        })
+        red.resolve_object_child()
+            .ok_or(HjsonEditError::InvalidNodeKind {
+                expected: SyntaxKind::Object,
+                found: SyntaxKind::Root,
+            })
     } else {
         document
             .navigate_to_node_internal(path)
@@ -668,13 +673,13 @@ fn insert_comment_before_pair(
 
     // If no indentation was found in Pair, it might be in the ObjectEntry's leading_line_trivia.
     // However, since we are inside Pair, we should at least ensure the comment itself is indented
-    // if the key was indented. The problem is that prefix_trivia might be empty if the 
+    // if the key was indented. The problem is that prefix_trivia might be empty if the
     // indentation is handled by the parent Object's formatting.
-    
+
     children.extend(prefix_trivia.clone());
     children.push(NodeOrToken::Token(comment));
     children.push(NodeOrToken::Token(create_token(SyntaxKind::Newline, "\n")));
-    // If prefix_trivia had no newline, it means it's just indentation. 
+    // If prefix_trivia had no newline, it means it's just indentation.
     // We should use it for both the comment and the key.
     if !prefix_trivia.is_empty() && prefix_trivia.iter().all(|t| matches!(t.as_token(), Some(tok) if crate::syntax::kind::HjsonLanguage::kind_from_raw(tok.kind()) == SyntaxKind::Whitespace)) {
         // Current children: [indent, comment, newline]
@@ -710,7 +715,6 @@ fn insert_comment_before_pair(
 
     Ok(create_node(SyntaxKind::Pair, children))
 }
-
 
 fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonEditError> {
     let mut children: Vec<GreenElement> = Vec::new();

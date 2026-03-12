@@ -1,9 +1,9 @@
-use crate::syntax::green::GreenTreeBuilder;
-use crate::syntax::kind::SyntaxKind;
 /// HJSON構文解析器
 ///
 /// Lexerのトークン列をGreen Treeに変換
 use super::lexer::Token;
+use crate::syntax::green::GreenTreeBuilder;
+use crate::syntax::kind::SyntaxKind;
 
 /// 構文解析エラー
 #[derive(Debug, Clone, PartialEq)]
@@ -295,9 +295,8 @@ impl Parser {
                 break;
             }
 
-            // Pair前のトリビアを消費（改行・インデントなど）
-            self.eat_trivia();
             // トリビア消費後に } が来たら終了、またはEOFの場合もループ先頭に戻って適切なエラーを出力
+            // parse_pair() 内でトリビアを消費するため、ここでは Peek 的に確認する
             if self.at(SyntaxKind::RBrace) || self.is_at_end() {
                 break;
             }
@@ -428,6 +427,7 @@ impl Parser {
     /// キー: 値 のペアを解析
     fn parse_pair(&mut self) {
         self.builder.start_node(SyntaxKind::Pair);
+        self.eat_trivia(); // Pair前のトリビアを消費（改行・インデントなど）
 
         // キー
         self.builder.start_node(SyntaxKind::Key);
@@ -778,8 +778,8 @@ pub fn parse(input: &str) -> Result<ParseResult, Vec<ParseError>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::syntax::green::GreenNodeExt;
     use super::*;
+    use crate::syntax::green::GreenNodeExt;
 
     /// 空オブジェクト "{}" のパースとラウンドトリップを検証
     #[test]

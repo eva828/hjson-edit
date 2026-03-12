@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
-pub(crate) mod core;
-pub(crate) mod object;
 pub(crate) mod array;
+pub(crate) mod core;
 pub(crate) mod engine;
+pub(crate) mod object;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FormatTarget {

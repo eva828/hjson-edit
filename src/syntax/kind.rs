@@ -74,15 +74,32 @@ impl Language for HjsonLanguage {
         #[allow(clippy::enum_glob_use)]
         use SyntaxKind::*;
         const KINDS: &[SyntaxKind] = &[
-            LBrace, RBrace, LBracket, RBracket, Colon, Comma,
-            True, False, Null,
-            Integer, Float,
-            String, BlockString, UnquotedString,
+            LBrace,
+            RBrace,
+            LBracket,
+            RBracket,
+            Colon,
+            Comma,
+            True,
+            False,
+            Null,
+            Integer,
+            Float,
+            String,
+            BlockString,
+            UnquotedString,
             Ident,
-            LineComment, HashComment, BlockComment,
-            Whitespace, Newline,
+            LineComment,
+            HashComment,
+            BlockComment,
+            Whitespace,
+            Newline,
             Root,
-            Object, Array, Pair, Key, Value,
+            Object,
+            Array,
+            Pair,
+            Key,
+            Value,
             Error,
         ];
         KINDS[raw.0 as usize]
@@ -140,10 +157,7 @@ impl SyntaxKind {
     /// コメントかどうか
     pub fn is_comment(self) -> bool {
         use SyntaxKind::*;
-        matches!(
-            self,
-            LineComment | HashComment | BlockComment
-        )
+        matches!(self, LineComment | HashComment | BlockComment)
     }
 }
 

@@ -1,4 +1,4 @@
-use hjson_edit::{CommentPath, CommentStyle, StringStyle, HjsonDocument};
+use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, StringStyle};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -7,8 +7,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   version: 1.0.0
 }"#;
 
-    let doc = HjsonDocument::parse(input)
-        .map_err(|e| format!("Parse errors: {:?}", e))?;
+    let doc = HjsonDocument::parse(input).map_err(|e| format!("Parse errors: {:?}", e))?;
 
     // 1. Add a header comment to the document
     let doc = doc.comment_set(
@@ -19,14 +18,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 2. Add an inline comment to a specific key
     let doc = doc.comment_set(
-        &CommentPath::Inline { dot_path: "name".to_string() },
+        &CommentPath::Inline {
+            dot_path: "name".to_string(),
+        },
         " The name of your application",
         Some(CommentStyle::Hash), // Generates `# ...`
     )?;
-    
+
     // 3. Add a comment before a specific key
     let doc = doc.comment_set(
-        &CommentPath::Key { dot_path: "version".to_string() },
+        &CommentPath::Key {
+            dot_path: "version".to_string(),
+        },
         " Use Semantic Versioning",
         Some(CommentStyle::Block), // Generates `/* ... */`
     )?;
@@ -40,11 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     // Unquoted string
-    let doc = doc.set_with_style(
-        "type",
-        "library",
-        StringStyle::Unquoted,
-    )?;
+    let doc = doc.set_with_style("type", "library", StringStyle::Unquoted)?;
 
     println!("=== Styled & Commented Document ===");
     println!("{}", doc);

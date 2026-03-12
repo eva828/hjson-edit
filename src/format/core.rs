@@ -1,6 +1,9 @@
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
-use crate::edit::high_level::{clone_element, create_multiline_string_literal, is_token_of_kind, FormatError, HjsonDocument, StandaloneTriviaBlock};
+use crate::edit::high_level::{
+    clone_element, create_multiline_string_literal, is_token_of_kind, FormatError, HjsonDocument,
+    StandaloneTriviaBlock,
+};
 use crate::format::array::{format_array_node, format_array_node_partial};
 use crate::format::object::{format_object_node, format_object_node_partial};
 use crate::format::FormatTarget;
@@ -311,10 +314,6 @@ pub(crate) fn format_value_node(
     Ok(create_node(SyntaxKind::Value, children))
 }
 
-
-
-
-
 pub(crate) fn adjust_closing_indent(
     node: &GreenNode,
     indent: &str,
@@ -446,7 +445,11 @@ fn inline_comment_elements(pair: &RedNode) -> Vec<GreenElement> {
     result
 }
 
-pub(crate) fn normalize_standalone_block(block: &mut StandaloneTriviaBlock, indent: &str, newline: &str) {
+pub(crate) fn normalize_standalone_block(
+    block: &mut StandaloneTriviaBlock,
+    indent: &str,
+    newline: &str,
+) {
     let mut new_elements = Vec::new();
     let mut pending_blank = 0usize;
 
@@ -509,7 +512,3 @@ fn clone_red_element(
         NodeOrToken::Token(token) => NodeOrToken::Token(create_token(token.kind(), token.text())),
     }
 }
-
-
-
-

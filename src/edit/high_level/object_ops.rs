@@ -1,11 +1,13 @@
 use crate::edit::api::{create_node, create_token};
 
+use crate::edit::high_level::structure::{
+    indentation_from_standalone_block, whitespace_after_last_newline,
+};
 use crate::edit::high_level::{
     build_object_items, clone_element, create_pair_node, extract_key_text, is_token_of_kind,
     rebuild_object_children_for_format, replace_pair_value, EntryTerminator, HjsonEditError,
     HjsonValue, ObjectEntry, ObjectItem, StringStyle,
 };
-use crate::edit::high_level::structure::{indentation_from_standalone_block, whitespace_after_last_newline};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeCoreExt};
@@ -25,7 +27,12 @@ pub(crate) fn insert_object_entry_without_reformat(
     string_style: StringStyle,
     format: &InsertFormat<'_>,
 ) -> Result<(), HjsonEditError> {
-    let InsertFormat { has_braces, newline, entry_indent, closing_indent } = *format;
+    let InsertFormat {
+        has_braces,
+        newline,
+        entry_indent,
+        closing_indent,
+    } = *format;
     let pair = NodeOrToken::Node(create_pair_node(key, value, string_style, None)?);
 
     let has_existing_entries = items
@@ -178,7 +185,9 @@ pub(crate) fn remove_object_entry(
     }
 
     if !found {
-        return Err(HjsonEditError::InvalidPath { path: key.to_string() });
+        return Err(HjsonEditError::InvalidPath {
+            path: key.to_string(),
+        });
     }
 
     Ok(create_node(
@@ -283,4 +292,3 @@ pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String>
         }
     })
 }
-

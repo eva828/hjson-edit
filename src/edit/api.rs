@@ -183,7 +183,6 @@ impl GreenNodeEdit for rowan::GreenNode {
 // `RedNodeNavigateExt` は navigation モジュールで定義 — 後方互換のため再エクスポート
 pub use crate::edit::high_level::navigation::RedNodeNavigateExt;
 
-
 /// 子要素をGreenElementに変換
 fn child_to_green_element(
     child: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
@@ -234,9 +233,9 @@ pub fn create_node(kind: SyntaxKind, children: Vec<GreenElement>) -> rowan::Gree
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::syntax::green::GreenNodeExt;
     use crate::syntax::green::GreenTreeBuilder;
-    use super::*;
 
     fn create_test_node() -> rowan::GreenNode {
         let mut builder = GreenTreeBuilder::new();
