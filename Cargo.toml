@@ -14,7 +14,9 @@ clap = { version = "4.5.60", optional = true }
 anyhow = { version = "1", optional = true }
 
 [dev-dependencies]
+insta = { version = "1.46.3", features = ["yaml"] }
 pretty_assertions = "1.4"
+proptest = "1.10.0"
 
 [[bin]]
 name = "hjson-edit"
