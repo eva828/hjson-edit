@@ -1,0 +1,79 @@
+//! Property-based roundtrip tests
+
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn valid_object_roundtrip(
+        pairs in prop::collection::vec(
+            ("[a-z_][a-z0-9_]{1,10}", "[a-zA-Z0-9][a-zA-Z0-9 ]{0,19}"),
+            0..10
+        )
+    ) {
+        let obj = if pairs.is_empty() {
+            String::from("{}")
+        } else {
+            let mut s = String::from("{\n");
+            for (i, (k, v)) in pairs.iter().enumerate() {
+                if i > 0 {
+                    s.push_str("\n");
+                }
+                s.push_str(&format!("  {}: {}", k, v));
+            }
+            s.push_str("\n}");
+            s
+        };
+
+        let doc = hjson_edit::HjsonDocument::parse(&obj).unwrap();
+        let output = doc.to_string();
+        let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+        prop_assert_eq!(output, reparsed.to_string());
+    }
+
+    #[test]
+    fn valid_array_roundtrip(
+        items in prop::collection::vec("[0-9]{1,5}", 0..20)
+    ) {
+        let arr = format!("[{}]", items.join(", "));
+
+        let doc = hjson_edit::HjsonDocument::parse(&arr).unwrap();
+        let output = doc.to_string();
+        let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+        prop_assert_eq!(output, reparsed.to_string());
+    }
+}
+
+#[test]
+fn deep_nesting_roundtrip() {
+    let mut input = String::new();
+    for _ in 0..50 {
+        input.push_str("{ nested: ");
+    }
+    input.push_str("\"value\"");
+    for _ in 0..50 {
+        input.push_str(" }");
+    }
+
+    let doc = hjson_edit::HjsonDocument::parse(&input).unwrap();
+    let output = doc.to_string();
+    let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+    assert_eq!(output, reparsed.to_string());
+}
+
+#[test]
+fn unicode_roundtrip() {
+    let cases = [
+        r#"{ text: "こんにちは世界" }"#,
+        r#"{ emoji: "🎉🎊🎁" }"#,
+        r#"{ mixed: "Hello 世界 🌍" }"#,
+        r#"{ arabic: "مرحبا" }"#,
+        r#"{ russian: "Привет мир" }"#,
+    ];
+
+    for input in cases {
+        let doc = hjson_edit::HjsonDocument::parse(input).unwrap();
+        let output = doc.to_string();
+        let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+        assert_eq!(output, reparsed.to_string(), "Unicode roundtrip failed for: {}", input);
+    }
+}

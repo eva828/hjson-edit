@@ -1,0 +1,185 @@
+//! CLI integration tests
+
+use std::fs;
+use std::path::PathBuf;
+
+fn cli_binary_path() -> PathBuf {
+    let mut path = std::env::current_exe().unwrap();
+    path.pop();
+    path.pop();
+    path.push("hjson-edit");
+    path
+}
+
+fn run_cli(args: &[&str]) -> (String, String, bool) {
+    use std::process::Command;
+    
+    let output = Command::new(cli_binary_path())
+        .args(args)
+        .output()
+        .expect("Failed to execute CLI command");
+    
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let success = output.status.success();
+    
+    (stdout, stderr, success)
+}
+
+fn temp_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("hjson_test_{}.hjson", name))
+}
+
+#[test]
+fn basic_commands() {
+    let path = temp_path("basic");
+    fs::write(&path, r#"{"key": "value"}"#).unwrap();
+    
+    let (stdout, _, success) = run_cli(&["parse", path.to_str().unwrap()]);
+    assert!(success, "parse command should succeed");
+    assert!(stdout.contains("Parsed successfully"));
+    
+    let (stdout, _, success) = run_cli(&["format", path.to_str().unwrap()]);
+    assert!(success, "format command should succeed");
+    assert!(stdout.contains("key"));
+    
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_object_set_and_remove() {
+    let path = temp_path("object");
+    fs::write(&path, r#"{"name": "test"}"#).unwrap();
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--set", "name", "updated"]);
+    assert!(success);
+    assert!(stdout.contains("updated"));
+    assert!(!stdout.contains("test"));
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--set", "new_key", "42"]);
+    assert!(success);
+    assert!(stdout.contains("new_key"));
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--remove", "name"]);
+    assert!(success);
+    assert!(!stdout.contains("name"));
+    
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_array_operations() {
+    let path = temp_path("array");
+    fs::write(&path, r#"{"items": [1, 2]}"#).unwrap();
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--array-append", "items", "3"]);
+    assert!(success);
+    let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
+    assert_eq!(doc.get("items[2]"), Some(hjson_edit::HjsonValue::Integer(3)));
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--array-remove", "items", "0"]);
+    assert!(success);
+    let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
+    assert_eq!(doc.get("items[0]"), Some(hjson_edit::HjsonValue::Integer(2)));
+    
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_comment_operations() {
+    let path = temp_path("comment");
+    fs::write(&path, r#"{"key": "value"}"#).unwrap();
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--comment-set", ":header", "Config"]);
+    assert!(success);
+    assert!(stdout.contains("Config"));
+    
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_type_inference() {
+    let path = temp_path("types");
+    fs::write(&path, "{}").unwrap();
+    
+    let test_cases = [
+        ("42", hjson_edit::HjsonValue::Integer(42)),
+        ("3.14", hjson_edit::HjsonValue::Float(3.14)),
+        ("true", hjson_edit::HjsonValue::Bool(true)),
+        ("null", hjson_edit::HjsonValue::Null),
+    ];
+    
+    for (input, expected) in test_cases {
+        let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--set", "key", input]);
+        assert!(success, "Type inference should work for: {}", input);
+        
+        let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
+        assert_eq!(doc.get("key"), Some(expected), "Type mismatch for: {}", input);
+    }
+    
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_output_options() {
+    let input_path = temp_path("input");
+    let output_path = temp_path("output");
+    fs::write(&input_path, r#"{"key": "value"}"#).unwrap();
+    
+    let (_, _, success) = run_cli(&[
+        "edit", 
+        input_path.to_str().unwrap(),
+        "--output", output_path.to_str().unwrap(),
+        "--set", "new", "added"
+    ]);
+    assert!(success);
+    
+    let original = fs::read_to_string(&input_path).unwrap();
+    assert!(!original.contains("new"));
+    
+    let output = fs::read_to_string(&output_path).unwrap();
+    assert!(output.contains("new"));
+    
+    fs::remove_file(&input_path).ok();
+    fs::remove_file(&output_path).ok();
+}
+
+#[test]
+fn error_cases() {
+    let (_, stderr, success) = run_cli(&[]);
+    assert!(!success);
+    assert!(stderr.contains("Usage") || stderr.contains("required"));
+    
+    let (_, stderr, success) = run_cli(&["unknown"]);  
+    assert!(!success);
+    assert!(stderr.contains("unrecognized") || stderr.contains("unknown"));
+    
+    let (_, stderr, success) = run_cli(&["parse", "/nonexistent/file.hjson"]);
+    assert!(!success);
+    assert!(stderr.contains("read") || stderr.contains("file"));
+    
+    let path = temp_path("invalid");
+    fs::write(&path, "{invalid").unwrap();
+    let (_, stderr, success) = run_cli(&["parse", path.to_str().unwrap()]);
+    assert!(!success);
+    assert!(stderr.contains("Parse") || stderr.contains("error"));
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn preserves_comments() {
+    let path = temp_path("preserve");
+    fs::write(&path, r#"// Header
+{
+  // Key comment
+  name: "test"
+}"#).unwrap();
+    
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--set", "value", "42"]);
+    assert!(success);
+    
+    assert!(stdout.contains("Header"));
+    assert!(stdout.contains("Key comment"));
+    
+    fs::remove_file(&path).ok();
+}
