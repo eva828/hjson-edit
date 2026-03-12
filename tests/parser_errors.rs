@@ -116,15 +116,13 @@ fn empty_input() {
     assert!(result.is_err() || result.unwrap().to_string().trim().is_empty());
 }
 
-/// CRLF処理（RFCではCRは無視されるべき）
-/// 
-/// TODO: RFC準拠のためCRを正規化する必要あり
+/// CRLF処理（RFC準拠 - CRは正規化され\nのみとなる）
 #[test]
 fn crlf_handling() {
     let input = "{\r\n  key: value\r\n}";
     let doc = HjsonDocument::parse(input).unwrap();
-    // 現在の実装: CRは保持される
     let output = doc.to_string();
-    // RFC準拠ではCRは除去されるべきだが、現状は保持される
     assert!(output.contains("key: value"), "Should parse CRLF content correctly");
+    // RFC準拠: CRは正規化される
+    assert!(!output.contains('\r'), "CR should be normalized to LF");
 }

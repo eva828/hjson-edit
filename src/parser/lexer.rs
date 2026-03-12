@@ -79,13 +79,11 @@ impl Lexer {
             }
 
             if self.match_char('\r') {
-                let text = if self.peek() == Some('\n') {
-                    self.advance();
-                    "\r\n"
-                } else {
-                    "\r"
-                };
-                self.emit(SyntaxKind::Newline, text, start_line, start_col);
+                // \r\n または \r を \n に正規化（RFC準拠）
+                if self.peek() == Some('\n') {
+                    self.advance(); // \n も消費
+                }
+                self.emit(SyntaxKind::Newline, "\n", start_line, start_col);
                 self.line += 1;
                 self.column = 1;
                 continue;
@@ -278,6 +276,14 @@ impl Lexer {
             if c == '\n' {
                 self.line += 1;
                 self.column = 1;
+            } else if c == '\r' {
+                // CRを検出したら行番号をインクリメント（RFC準拠）
+                self.line += 1;
+                self.column = 1;
+                // 次が\nなら消費（CRLFの場合）
+                if self.peek() == Some('\n') {
+                    self.advance();
+                }
             }
         }
 
@@ -305,6 +311,14 @@ impl Lexer {
             if c == '\n' {
                 self.line += 1;
                 self.column = 1;
+            } else if c == '\r' {
+                // CRを検出したら行番号をインクリメント（RFC準拠）
+                self.line += 1;
+                self.column = 1;
+                // 次が\nなら消費（CRLFの場合）
+                if self.peek() == Some('\n') {
+                    self.advance();
+                }
             }
         }
 
