@@ -106,22 +106,54 @@ fn array_of_objects() {
     assert_eq!(doc.get("[1].value"), Some(hjson_edit::HjsonValue::Integer(2)));
 }
 
-/// JSON文字列のエスケープシーケンス
+/// JSON文字列のエスケープシーケンス（RFC 8259準拠）
 /// 
-/// TODO: RFC準拠のエスケープ処理が必要
-/// - \n, \t, \" は実際の文字に変換されるべき
-/// - \uXXXX はUnicode文字に変換されるべき
+/// 以下のエスケープシーケンスが正しく変換されることを確認:
+/// - \n, \t, \" は実際の文字に変換される
+/// - \uXXXX はUnicode文字に変換される
 #[test]
 fn json_string_escapes() {
-    // 現在の実装ではエスケープシーケンスは保持される（RFC非準拠）
-    // 引用符のエスケープをテスト
+    // 引用符のエスケープ
     let doc = HjsonDocument::parse(r#"{"key": "say \"hello\""}"#).unwrap();
-    let value = doc.get("key");
-    assert!(value.is_some(), "Key should exist");
-    if let Some(hjson_edit::HjsonValue::String(s)) = value {
-        // 実装によってはエスケープが保持されるか、解除されるか
-        assert!(s.contains("hello"), "String should contain 'hello', got {:?}", s);
-    }
+    assert_eq!(
+        doc.get("key"),
+        Some(hjson_edit::HjsonValue::String("say \"hello\"".to_string()))
+    );
+
+    // 改行とタブ
+    let doc = HjsonDocument::parse(r#"{"text": "line1\nline2\ttabbed"}"#).unwrap();
+    assert_eq!(
+        doc.get("text"),
+        Some(hjson_edit::HjsonValue::String("line1\nline2\ttabbed".to_string()))
+    );
+
+    // バックスラッシュ
+    let doc = HjsonDocument::parse(r#"{"path": "C:\\Users\\test"}"#).unwrap();
+    assert_eq!(
+        doc.get("path"),
+        Some(hjson_edit::HjsonValue::String("C:\\Users\\test".to_string()))
+    );
+
+    // Unicodeエスケープ \u0041 = 'A', \u0042 = 'B'
+    let doc = HjsonDocument::parse(r#"{"unicode": "\u0041\u0042\u0043"}"#).unwrap();
+    assert_eq!(
+        doc.get("unicode"),
+        Some(hjson_edit::HjsonValue::String("ABC".to_string()))
+    );
+
+    // Unicodeエスケープ（絵文字）\u1F600 = 😀
+    let doc = HjsonDocument::parse(r#"{"emoji": "\uD83D\uDE00"}"#).unwrap();
+    assert_eq!(
+        doc.get("emoji"),
+        Some(hjson_edit::HjsonValue::String("😀".to_string()))
+    );
+
+    // 複合エスケープ
+    let doc = HjsonDocument::parse(r#"{"mixed": "Tab:\there\\Newline:\nQuote:\"End"}"#).unwrap();
+    assert_eq!(
+        doc.get("mixed"),
+        Some(hjson_edit::HjsonValue::String("Tab:\there\\Newline:\nQuote:\"End".to_string()))
+    );
 }
 
 /// 指数表記の数値

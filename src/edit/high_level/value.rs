@@ -102,7 +102,11 @@ pub(crate) fn token_to_value(node: &RedNode) -> Option<HjsonValue> {
             }
 
             return match kind {
-                SyntaxKind::String => Some(HjsonValue::String(strip_surrounding(text, 1))),
+                SyntaxKind::String => {
+    let unquoted = strip_surrounding(text, 1);
+    let unescaped = unescape_json_string(&unquoted);
+    Some(HjsonValue::String(unescaped))
+}
                 SyntaxKind::BlockString => {
                     Some(HjsonValue::String(parse_multiline_string(text, 0)))
                 }
@@ -128,6 +132,125 @@ pub(crate) fn strip_surrounding(text: &str, delimiter_len: usize) -> String {
     } else {
         text.to_string()
     }
+}
+
+/// JSONエスケープシーケンスを実際の文字に変換
+/// 
+/// RFC 8259準拠のエスケープ処理:
+/// - \\ -> \
+/// - \" -> "
+/// - \/ -> /
+/// - \b -> backspace (0x08)
+/// - \f -> form feed (0x0C)
+/// - \n -> newline
+/// - \r -> carriage return
+/// - \t -> tab
+/// - \uXXXX -> Unicode文字（サロゲートペア対応）
+pub(crate) fn unescape_json_string(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some('/') => result.push('/'),
+                Some('b') => result.push('\x08'),
+                Some('f') => result.push('\x0C'),
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('u') => {
+                    // 4桁の16進数を読み取る
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if hex.len() == 4 {
+                        if let Ok(codepoint) = u16::from_str_radix(&hex, 16) {
+                            // サロゲートペアの処理
+                            let high_surrogate_start: u16 = 0xD800;
+                            let high_surrogate_end: u16 = 0xDBFF;
+                            let low_surrogate_start: u16 = 0xDC00;
+                            let low_surrogate_end: u16 = 0xDFFF;
+
+                            if (high_surrogate_start..=high_surrogate_end).contains(&codepoint) {
+                                // 上位サロゲートを検出、次の\u低位サロゲートを確認
+                                if chars.peek() == Some(&'\\') {
+                                    chars.next(); // 消費 '\'
+                                    if chars.peek() == Some(&'u') {
+                                        chars.next(); // 消費 'u'
+                                        let low_hex: String = chars.by_ref().take(4).collect();
+                                        if low_hex.len() == 4 {
+                                            if let Ok(low_codepoint) = u16::from_str_radix(&low_hex, 16) {
+                                                if (low_surrogate_start..=low_surrogate_end).contains(&low_codepoint) {
+                                                    // サロゲートペアを結合
+                                                    let high = codepoint as u32;
+                                                    let low = low_codepoint as u32;
+                                                    let combined = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+                                                    if let Some(ch) = char::from_u32(combined) {
+                                                        result.push(ch);
+                                                        continue;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // 不完全なサロゲートペア - 上位サロゲートのみ出力
+                                        result.push_str("\\u");
+                                        result.push_str(&hex);
+                                        // 読み取った文字を戻して再処理
+                                        result.push('\\');
+                                        result.push('u');
+                                        result.push_str(&low_hex);
+                                    } else {
+                                        // 不完全なサロゲートペア
+                                        result.push_str("\\u");
+                                        result.push_str(&hex);
+                                        result.push('\\');
+                                        if let Some(ch) = chars.peek() {
+                                            result.push(*ch);
+                                        }
+                                    }
+                                } else {
+                    // 孤立した上位サロゲート
+                                    result.push_str("\\u");
+                                    result.push_str(&hex);
+                                }
+                            } else if (low_surrogate_start..=low_surrogate_end).contains(&codepoint) {
+                                // 孤立した低位サロゲート
+                                result.push_str("\\u");
+                                result.push_str(&hex);
+                            } else if let Some(ch) = char::from_u32(codepoint as u32) {
+                                result.push(ch);
+                            } else {
+                                // 無効なUnicodeコードポイント
+                                result.push_str("\\u");
+                                result.push_str(&hex);
+                            }
+                        } else {
+                            // 無効な16進数
+                            result.push_str("\\u");
+                            result.push_str(&hex);
+                        }
+                    } else {
+                        // 不完全なUnicodeエスケープ
+                        result.push_str("\\u");
+                        result.push_str(&hex);
+                    }
+                }
+                Some(other) => {
+                    // 不明なエスケープシーケンス - 元のテキストを保持
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => {
+                    // 末尾のバックスラッシュ
+                    result.push('\\');
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 pub(crate) fn parse_multiline_string(text: &str, head_column: usize) -> String {
@@ -339,7 +462,24 @@ pub(crate) fn create_string_token(value: &str, style: StringStyle) -> rowan::Gre
 }
 
 pub(crate) fn escape_double_quoted(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut result = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => result.push_str("\\\\"),
+            '"' => result.push_str("\\\""),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            '\x08' => result.push_str("\\b"),
+            '\x0C' => result.push_str("\\f"),
+            c if c.is_control() || (c as u32) < 0x20 => {
+                // 制御文字は\uXXXX形式でエスケープ
+                result.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => result.push(c),
+        }
+    }
+    result
 }
 
 pub(crate) fn value_to_green_element(
@@ -497,7 +637,8 @@ pub(crate) fn extract_key_text(key_node: &RedNode) -> Option<String> {
                 SyntaxKind::String => {
                     let text = token.text();
                     if text.len() >= 2 {
-                        return Some(text[1..text.len() - 1].to_string());
+                        let unquoted = &text[1..text.len() - 1];
+                        return Some(unescape_json_string(unquoted));
                     }
                     return Some(text.to_string());
                 }
