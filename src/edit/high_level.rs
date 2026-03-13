@@ -8,7 +8,7 @@ pub(crate) mod object_ops;
 pub(crate) mod structure;
 pub(crate) mod value;
 
-use crate::document_style::{infer_newline_kind_from_elements, DocumentStyle, NewlineKind};
+use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::edit::api::{create_node, EditError as LowLevelEditError, GreenNodeEdit};
 use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
@@ -283,33 +283,39 @@ impl DocumentEditContext {
     }
 }
 
-pub(crate) fn document_newline_kind(document: &HjsonDocument) -> NewlineKind {
-    let source = document.to_string();
-    let root_green = document.green_node();
-    let elements: Vec<GreenElement> = root_green.children().map(clone_element).collect();
+impl DetectNewline for HjsonDocument {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        let root_green = self.green_node();
+        let elements: Vec<GreenElement> = root_green.children().map(clone_element).collect();
 
-    infer_newline_kind_from_elements(&elements)
-        .or_else(|| NewlineKind::detect_in_text(&source))
-        .unwrap_or(NewlineKind::Lf)
+        // まず構造要素から検出を試みる
+        elements
+            .try_detect_newline()
+            // フォールバック: テキスト全体から検出
+            .or_else(|| self.to_string().try_detect_newline())
+    }
 }
 
-pub(crate) fn infer_newline_kind_from_node(node: &RedNode) -> Option<NewlineKind> {
-    let green = node.to_green();
-    let elements: Vec<GreenElement> = green.children().map(clone_element).collect();
-    infer_newline_kind_from_elements(&elements)
+impl DetectNewline for RedNode {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        let green = self.to_green();
+        let elements: Vec<GreenElement> = green.children().map(clone_element).collect();
+        elements.try_detect_newline()
+    }
 }
 
+/// コンテキストに応じた改行コードを検出（親ノードを辿る）
 pub(crate) fn contextual_newline_kind(document: &HjsonDocument, node: &RedNode) -> NewlineKind {
     let mut current = Some(node.clone());
 
     while let Some(candidate) = current {
-        if let Some(kind) = infer_newline_kind_from_node(&candidate) {
+        if let Some(kind) = candidate.try_detect_newline() {
             return kind;
         }
         current = candidate.parent();
     }
 
-    document_newline_kind(document)
+    document.try_detect_newline().unwrap_or_default()
 }
 
 struct ArrayValueLocator;

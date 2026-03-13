@@ -18,7 +18,7 @@ pub mod syntax;
 
 // 公開APIを再エクスポート
 pub use diff::{detect_changed_lines, simple_line_diff, ChangeInfo, ChangeType};
-pub use document_style::{DocumentStyle, NewlineKind, TextNormalizer};
+pub use document_style::{DetectNewline, DocumentStyle, NewlineKind, TextNormalizer};
 pub use edit::api::{
     create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeNavigateExt,
 };

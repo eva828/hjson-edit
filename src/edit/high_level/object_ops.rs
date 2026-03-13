@@ -212,16 +212,14 @@ impl<'a> ObjectInsertPlanner<'a> {
         let has_existing_entries = items
             .iter()
             .any(|item| matches!(item, ObjectItem::Entry(_)));
-        let last_entry_ends_with_newline = items.iter().rev().find_map(|item| match item {
-            ObjectItem::Entry(entry) => {
-                Some(matches!(entry.terminator, EntryTerminator::Newline(_)))
-            }
+        let last_entry_terminator = items.iter().rev().find_map(|item| match item {
+            ObjectItem::Entry(entry) => Some(entry.terminator.clone()),
             ObjectItem::Standalone(_) => None,
         });
 
         if has_existing_entries {
-            if last_entry_ends_with_newline.unwrap_or(false) {
-                return self.indent_only();
+            if let Some(EntryTerminator::Newline(suffix)) = last_entry_terminator {
+                return self.leading_trivia_after_newline_suffix(&suffix);
             }
             return self.newline_with_indent();
         }
@@ -258,6 +256,29 @@ impl<'a> ObjectInsertPlanner<'a> {
         ))];
         trivia.extend(self.indent_only());
         trivia
+    }
+
+    fn leading_trivia_after_newline_suffix(&self, suffix: &[GreenElement]) -> Vec<GreenElement> {
+        let mut saw_newline = false;
+        let mut trailing_whitespace = Vec::new();
+
+        for elem in suffix {
+            if is_token_of_kind(elem, SyntaxKind::Newline) {
+                saw_newline = true;
+                trailing_whitespace.clear();
+                continue;
+            }
+
+            if saw_newline && is_token_of_kind(elem, SyntaxKind::Whitespace) {
+                trailing_whitespace.push(elem.clone());
+            }
+        }
+
+        if saw_newline {
+            trailing_whitespace
+        } else {
+            self.newline_with_indent()
+        }
     }
 
     fn indent_only(&self) -> Vec<GreenElement> {

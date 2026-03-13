@@ -1,9 +1,9 @@
-use crate::document_style::{infer_newline_kind_from_elements, NewlineKind};
+use crate::document_style::{DetectNewline as _, NewlineKind};
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
-    clone_element, contextual_newline_kind, document_newline_kind, CommentPath, CommentStyle,
-    HjsonDocument, HjsonEditError, PathSegment,
+    clone_element, contextual_newline_kind, CommentPath, CommentStyle, HjsonDocument,
+    HjsonEditError, PathSegment,
 };
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
@@ -957,7 +957,9 @@ fn pair_comment_newline_kind(
     obj: &RedNode,
     pair: &RedNode,
 ) -> NewlineKind {
-    leading_comment_newline_kind(pair).unwrap_or_else(|| contextual_newline_kind(document, obj))
+    leading_comment_newline_kind(pair)
+        .or_else(|| Some(contextual_newline_kind(document, obj)))
+        .unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
 }
 
 fn leading_comment_newline_kind(pair: &RedNode) -> Option<NewlineKind> {
@@ -983,7 +985,7 @@ fn leading_comment_newline_kind(pair: &RedNode) -> Option<NewlineKind> {
         break;
     }
 
-    infer_newline_kind_from_elements(&elements)
+    elements.try_detect_newline()
 }
 
 fn header_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
@@ -1010,7 +1012,7 @@ fn header_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
         break;
     }
 
-    infer_newline_kind_from_elements(&elements).unwrap_or_else(|| document_newline_kind(document))
+    elements.try_detect_newline().unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
 }
 
 fn footer_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
@@ -1039,7 +1041,7 @@ fn footer_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
     }
     elements.reverse();
 
-    infer_newline_kind_from_elements(&elements).unwrap_or_else(|| document_newline_kind(document))
+    elements.try_detect_newline().unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
 }
 
 fn remove_inline_comment(

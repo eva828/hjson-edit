@@ -2,17 +2,18 @@ use crate::syntax::green::GreenElement;
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
 use rowan::{Language, NodeOrToken};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// 改行コードの種類
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum NewlineKind {
+    /// Line Feed (`\n`)
+    #[default]
     Lf,
+    /// Carriage Return + Line Feed (`\r\n`)
     CrLf,
 }
 
 impl NewlineKind {
-    pub fn from_text(text: &str) -> Self {
-        Self::detect_in_text(text).unwrap_or(Self::Lf)
-    }
-
+    /// 改行コードを文字列として取得
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Lf => "\n",
@@ -20,6 +21,7 @@ impl NewlineKind {
         }
     }
 
+    /// 改行文字列から改行コード種別を解析
     pub fn from_newline_text(text: &str) -> Option<Self> {
         match text {
             "\n" => Some(Self::Lf),
@@ -27,15 +29,66 @@ impl NewlineKind {
             _ => None,
         }
     }
+}
 
-    pub fn detect_in_text(text: &str) -> Option<Self> {
-        if text.contains("\r\n") {
-            Some(Self::CrLf)
-        } else if text.contains('\n') {
-            Some(Self::Lf)
+/// 改行コードを検出可能な対象
+///
+/// テキスト、構文要素、ドキュメントなどから改行コードを検出するためのtrait。
+/// 検出できない場合は `None` を返す。
+pub trait DetectNewline {
+    /// 改行コードを検出する。検出できない場合は `None` を返す。
+    fn try_detect_newline(&self) -> Option<NewlineKind>;
+}
+
+impl DetectNewline for &str {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        if self.contains("\r\n") {
+            Some(NewlineKind::CrLf)
+        } else if self.contains('\n') {
+            Some(NewlineKind::Lf)
         } else {
             None
         }
+    }
+}
+
+impl DetectNewline for &[GreenElement] {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        let mut saw_lf = false;
+
+        for element in *self {
+            let NodeOrToken::Token(token) = element else {
+                continue;
+            };
+
+            if HjsonLanguage::kind_from_raw(token.kind()) != SyntaxKind::Newline {
+                continue;
+            }
+
+            match NewlineKind::from_newline_text(token.text()) {
+                Some(NewlineKind::CrLf) => return Some(NewlineKind::CrLf),
+                Some(NewlineKind::Lf) => saw_lf = true,
+                None => {}
+            }
+        }
+
+        if saw_lf {
+            Some(NewlineKind::Lf)
+        } else {
+            None
+        }
+    }
+}
+
+impl DetectNewline for String {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        self.as_str().try_detect_newline()
+    }
+}
+
+impl DetectNewline for Vec<GreenElement> {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        self.as_slice().try_detect_newline()
     }
 }
 
@@ -49,7 +102,7 @@ impl<'a> DocumentStyle<'a> {
     }
 
     pub fn newline_kind(&self) -> NewlineKind {
-        NewlineKind::from_text(self.source)
+        self.source.try_detect_newline().unwrap_or_default()
     }
 
     pub fn newline(&self) -> &'static str {
@@ -120,28 +173,4 @@ impl TextNormalizer {
     }
 }
 
-pub(crate) fn infer_newline_kind_from_elements(elements: &[GreenElement]) -> Option<NewlineKind> {
-    let mut saw_lf = false;
 
-    for element in elements {
-        let NodeOrToken::Token(token) = element else {
-            continue;
-        };
-
-        if HjsonLanguage::kind_from_raw(token.kind()) != SyntaxKind::Newline {
-            continue;
-        }
-
-        match NewlineKind::from_newline_text(token.text()) {
-            Some(NewlineKind::CrLf) => return Some(NewlineKind::CrLf),
-            Some(NewlineKind::Lf) => saw_lf = true,
-            None => {}
-        }
-    }
-
-    if saw_lf {
-        Some(NewlineKind::Lf)
-    } else {
-        None
-    }
-}

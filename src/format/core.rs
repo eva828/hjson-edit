@@ -1,9 +1,9 @@
-use crate::document_style::DocumentStyle;
+use crate::document_style::{DetectNewline, DocumentStyle};
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
-    clone_element, contextual_newline_kind, create_multiline_string_literal, document_newline_kind,
-    is_token_of_kind, FormatError, HjsonDocument, StandaloneTriviaBlock,
+    clone_element, contextual_newline_kind, create_multiline_string_literal, is_token_of_kind,
+    FormatError, HjsonDocument, StandaloneTriviaBlock,
 };
 use crate::format::array::{format_array_node, format_array_node_partial};
 use crate::format::object::{format_object_node, format_object_node_partial};
@@ -37,7 +37,7 @@ impl<'a> FormatContext<'a> {
 
     fn format_root_target(&self) -> Result<HjsonDocument, FormatError> {
         let root = RedNode::new_root(self.document.green_node().clone());
-        let newline = document_newline_kind(self.document).as_str();
+        let newline = self.document.try_detect_newline().unwrap_or_default().as_str();
         let new_root = format_root_node(&root, newline, &self.indent_unit)?;
         Ok(HjsonDocument::from_green(new_root))
     }

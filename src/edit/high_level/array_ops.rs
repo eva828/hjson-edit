@@ -1,8 +1,8 @@
+use crate::document_style::DetectNewline;
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::{
-    build_array_items, clone_element, create_value_node, document_newline_kind,
-    infer_newline_kind_from_node, is_token_of_kind, ArrayEntry, ArrayItem, EntryTerminator,
-    HjsonDocument, HjsonEditError, HjsonValue, StringStyle,
+    build_array_items, clone_element, create_value_node, is_token_of_kind, ArrayEntry, ArrayItem,
+    EntryTerminator, HjsonDocument, HjsonEditError, HjsonValue, StringStyle,
 };
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
@@ -69,8 +69,9 @@ impl ArrayEditor {
         string_style: StringStyle,
     ) -> Result<GreenNode, HjsonEditError> {
         let mut context = ArrayLayoutContext::from_node(arr_node);
-        let newline = infer_newline_kind_from_node(arr_node)
-            .unwrap_or_else(|| document_newline_kind(document))
+        let newline = arr_node
+            .try_detect_newline()
+            .unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
             .as_str();
         let mut planner = ArrayInsertPlanner::new(index, newline);
         let mut new_items = Vec::new();
