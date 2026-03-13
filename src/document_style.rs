@@ -1,3 +1,7 @@
+use crate::syntax::green::GreenElement;
+use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
+use rowan::{Language, NodeOrToken};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NewlineKind {
     Lf,
@@ -6,17 +10,31 @@ pub enum NewlineKind {
 
 impl NewlineKind {
     pub fn from_text(text: &str) -> Self {
-        if text.contains("\r\n") {
-            Self::CrLf
-        } else {
-            Self::Lf
-        }
+        Self::detect_in_text(text).unwrap_or(Self::Lf)
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Lf => "\n",
             Self::CrLf => "\r\n",
+        }
+    }
+
+    pub fn from_newline_text(text: &str) -> Option<Self> {
+        match text {
+            "\n" => Some(Self::Lf),
+            "\r\n" => Some(Self::CrLf),
+            _ => None,
+        }
+    }
+
+    pub fn detect_in_text(text: &str) -> Option<Self> {
+        if text.contains("\r\n") {
+            Some(Self::CrLf)
+        } else if text.contains('\n') {
+            Some(Self::Lf)
+        } else {
+            None
         }
     }
 }
@@ -99,5 +117,31 @@ impl TextNormalizer {
             NewlineKind::Lf => normalized,
             NewlineKind::CrLf => normalized.replace('\n', "\r\n"),
         }
+    }
+}
+
+pub(crate) fn infer_newline_kind_from_elements(elements: &[GreenElement]) -> Option<NewlineKind> {
+    let mut saw_lf = false;
+
+    for element in elements {
+        let NodeOrToken::Token(token) = element else {
+            continue;
+        };
+
+        if HjsonLanguage::kind_from_raw(token.kind()) != SyntaxKind::Newline {
+            continue;
+        }
+
+        match NewlineKind::from_newline_text(token.text()) {
+            Some(NewlineKind::CrLf) => return Some(NewlineKind::CrLf),
+            Some(NewlineKind::Lf) => saw_lf = true,
+            None => {}
+        }
+    }
+
+    if saw_lf {
+        Some(NewlineKind::Lf)
+    } else {
+        None
     }
 }

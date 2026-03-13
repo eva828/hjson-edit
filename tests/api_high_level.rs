@@ -120,6 +120,21 @@ fn comment_set_header() {
 }
 
 #[test]
+fn comment_set_header_preserves_crlf() {
+    let doc = HjsonDocument::parse("key: value\r\n").unwrap();
+
+    let updated = doc
+        .comment_set(
+            &CommentPath::Header,
+            "Header comment",
+            Some(CommentStyle::Line),
+        )
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "// Header comment\r\nkey: value\r\n");
+}
+
+#[test]
 fn comment_set_key() {
     let doc = HjsonDocument::parse("{\n  key: value\n}").unwrap();
 
@@ -166,12 +181,100 @@ fn comment_append() {
 }
 
 #[test]
+fn comment_append_preserves_local_crlf() {
+    let doc = HjsonDocument::parse("// existing\r\nkey: value\r\n").unwrap();
+
+    let updated = doc
+        .comment_append(&CommentPath::Header, "appended", Some(CommentStyle::Line))
+        .unwrap();
+    let output = updated.to_string();
+
+    assert_eq!(output, "// existing\r\n// appended\r\nkey: value\r\n");
+}
+
+#[test]
+fn comment_append_preserves_existing_comment_newlines() {
+    let doc = HjsonDocument::parse("// existing\r\nkey: value\n").unwrap();
+
+    let updated = doc
+        .comment_append(&CommentPath::Header, "appended", Some(CommentStyle::Line))
+        .unwrap();
+
+    assert_eq!(
+        updated.to_string(),
+        "// existing\r\n// appended\r\nkey: value\n"
+    );
+}
+
+#[test]
+fn set_uses_parent_newline_style() {
+    let doc = HjsonDocument::parse("{\r\n  key: value\r\n}\n").unwrap();
+
+    let updated = doc.set("added", 1).unwrap();
+
+    assert_eq!(
+        updated.to_string(),
+        "{\r\n  key: value\r\n  added: 1\r\n}\n"
+    );
+}
+
+#[test]
+fn array_insert_uses_parent_newline_style() {
+    let doc = HjsonDocument::parse("items: [\r\n  1\r\n]\n").unwrap();
+
+    let updated = doc.push("items", 2).unwrap();
+
+    assert_eq!(updated.to_string(), "items: [\r\n  1\r\n  2\r\n]\n");
+}
+
+#[test]
 fn comment_remove() {
     let doc = HjsonDocument::parse("// comment\nkey: value\n").unwrap();
 
     let updated = doc.comment_remove(&CommentPath::Header).unwrap();
     let output = updated.to_string();
     assert!(!output.contains("// comment"));
+}
+
+#[test]
+fn comment_set_key_uses_parent_newline_kind() {
+    let input = "{\n  section: {\r\n    key: value\r\n  }\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc
+        .comment_set(
+            &CommentPath::Key {
+                dot_path: "section.key".into(),
+            },
+            "note",
+            Some(CommentStyle::Line),
+        )
+        .unwrap();
+
+    let output = updated.to_string();
+    assert!(output.contains("section: {\r\n    // note\r\n    key: value\r\n  }"));
+}
+
+#[test]
+fn set_preserves_parent_newline_kind_for_inserted_entry() {
+    let input = "{\n  section: {\r\n    first: 1\r\n  }\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc.set("section.second", 2).unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("section: {\r\n    first: 1\r\n    second: 2\r\n  }"));
+}
+
+#[test]
+fn push_preserves_parent_newline_kind_for_inserted_entry() {
+    let input = "{\n  items: [\r\n    1\r\n    2\r\n  ]\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc.push("items", 3).unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("items: [\r\n    1\r\n    2\r\n    3\r\n  ]"));
 }
 
 #[test]

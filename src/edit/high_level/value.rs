@@ -593,9 +593,7 @@ impl StringLiteralCodec {
     }
 
     pub(crate) fn parse_multiline_string(text: &str, head_column: usize) -> String {
-        let normalized = Self::strip_surrounding(text, 3)
-            .replace("\r\n", "\n")
-            .replace('\r', "");
+        let normalized = Self::strip_surrounding(text, 3).replace("\r\n", "\n");
         let body = normalized.strip_prefix('\n').unwrap_or(&normalized);
         let mut lines: Vec<&str> = body.split('\n').collect();
         if lines.last() == Some(&"") {

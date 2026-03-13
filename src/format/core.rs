@@ -2,8 +2,8 @@ use crate::document_style::DocumentStyle;
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
-    clone_element, create_multiline_string_literal, is_token_of_kind, FormatError, HjsonDocument,
-    StandaloneTriviaBlock,
+    clone_element, contextual_newline_kind, create_multiline_string_literal, document_newline_kind,
+    is_token_of_kind, FormatError, HjsonDocument, StandaloneTriviaBlock,
 };
 use crate::format::array::{format_array_node, format_array_node_partial};
 use crate::format::object::{format_object_node, format_object_node_partial};
@@ -17,7 +17,6 @@ use rowan::{GreenNode, NodeOrToken};
 struct FormatContext<'a> {
     document: &'a HjsonDocument,
     source: String,
-    newline: &'static str,
     indent_unit: String,
 }
 
@@ -27,7 +26,6 @@ impl<'a> FormatContext<'a> {
         let style = DocumentStyle::new(&source);
         Self {
             document,
-            newline: style.newline(),
             indent_unit: style.indent_unit(),
             source,
         }
@@ -39,7 +37,8 @@ impl<'a> FormatContext<'a> {
 
     fn format_root_target(&self) -> Result<HjsonDocument, FormatError> {
         let root = RedNode::new_root(self.document.green_node().clone());
-        let new_root = format_root_node(&root, self.newline, &self.indent_unit)?;
+        let newline = document_newline_kind(self.document).as_str();
+        let new_root = format_root_node(&root, newline, &self.indent_unit)?;
         Ok(HjsonDocument::from_green(new_root))
     }
 
@@ -50,14 +49,15 @@ impl<'a> FormatContext<'a> {
             }
         })?;
         let line_indent = self.line_indent_for_offset(node.text_range().start().into());
+        let newline = contextual_newline_kind(self.document, &node).as_str();
         let new_node = match node.kind() {
             SyntaxKind::Object => {
-                format_object_node_partial(&node, &line_indent, self.newline, &self.indent_unit)?
+                format_object_node_partial(&node, &line_indent, newline, &self.indent_unit)?
             }
             SyntaxKind::Array => {
-                format_array_node_partial(&node, &line_indent, self.newline, &self.indent_unit)?
+                format_array_node_partial(&node, &line_indent, newline, &self.indent_unit)?
             }
-            _ => format_red_node(&node, &line_indent, self.newline, &self.indent_unit)?,
+            _ => format_red_node(&node, &line_indent, newline, &self.indent_unit)?,
         };
         self.document
             .replace_green_node_internal(path_from_root, new_node)

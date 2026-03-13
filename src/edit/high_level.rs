@@ -8,15 +8,16 @@ pub(crate) mod object_ops;
 pub(crate) mod structure;
 pub(crate) mod value;
 
-use crate::document_style::DocumentStyle;
+use crate::document_style::{infer_newline_kind_from_elements, DocumentStyle, NewlineKind};
 use crate::edit::api::{create_node, EditError as LowLevelEditError, GreenNodeEdit};
 use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeCoreExt};
 
+use rowan::GreenNode;
 use rowan::Language;
-use rowan::{GreenNode, NodeOrToken};
+use rowan::NodeOrToken;
 
 pub(crate) use navigation::parse_path_for_format;
 pub(crate) use navigation::RedNodeNavigateExt;
@@ -264,7 +265,6 @@ pub enum CommentPath {
 struct DocumentEditContext {
     source: String,
     indent_unit: String,
-    newline: &'static str,
 }
 
 impl DocumentEditContext {
@@ -272,17 +272,44 @@ impl DocumentEditContext {
         let source = document.to_string();
         let style = DocumentStyle::new(&source);
         let indent_unit = style.indent_unit();
-        let newline = style.newline();
         Self {
             source,
             indent_unit,
-            newline,
         }
     }
 
     fn line_indent_for_offset(&self, offset: usize) -> String {
         DocumentStyle::new(&self.source).line_indent_for_offset(offset)
     }
+}
+
+pub(crate) fn document_newline_kind(document: &HjsonDocument) -> NewlineKind {
+    let source = document.to_string();
+    let root_green = document.green_node();
+    let elements: Vec<GreenElement> = root_green.children().map(clone_element).collect();
+
+    infer_newline_kind_from_elements(&elements)
+        .or_else(|| NewlineKind::detect_in_text(&source))
+        .unwrap_or(NewlineKind::Lf)
+}
+
+pub(crate) fn infer_newline_kind_from_node(node: &RedNode) -> Option<NewlineKind> {
+    let green = node.to_green();
+    let elements: Vec<GreenElement> = green.children().map(clone_element).collect();
+    infer_newline_kind_from_elements(&elements)
+}
+
+pub(crate) fn contextual_newline_kind(document: &HjsonDocument, node: &RedNode) -> NewlineKind {
+    let mut current = Some(node.clone());
+
+    while let Some(candidate) = current {
+        if let Some(kind) = infer_newline_kind_from_node(&candidate) {
+            return kind;
+        }
+        current = candidate.parent();
+    }
+
+    document_newline_kind(document)
 }
 
 struct ArrayValueLocator;
@@ -407,6 +434,7 @@ impl HjsonDocument {
                 let context = DocumentEditContext::from_document(self);
                 let base_indent =
                     context.line_indent_for_offset(obj_node.text_range().start().into());
+                let newline = contextual_newline_kind(self, &obj_node).as_str();
 
                 let new_obj = object_ops::set_object_entry(
                     &obj_node,
@@ -415,7 +443,7 @@ impl HjsonDocument {
                     string_style,
                     &base_indent,
                     &context.indent_unit,
-                    context.newline,
+                    newline,
                 )?;
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
                 let dirty_target = if value_needs_contextual_formatting(value, string_style, None) {
@@ -591,8 +619,13 @@ impl HjsonDocument {
         let path = path.into_path()?;
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
-        let new_arr =
-            array_ops::insert_array_entry_structural(&arr_node, usize::MAX, &value, string_style)?;
+        let new_arr = array_ops::insert_array_entry_structural(
+            self,
+            &arr_node,
+            usize::MAX,
+            &value,
+            string_style,
+        )?;
         let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
         Ok(EditResult::new(
             updated,
@@ -620,7 +653,7 @@ impl HjsonDocument {
         let value = value.into();
         let arr_node = self.resolve_array_node(&path)?;
         let new_arr =
-            array_ops::insert_array_entry_structural(&arr_node, index, &value, string_style)?;
+            array_ops::insert_array_entry_structural(self, &arr_node, index, &value, string_style)?;
         let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
         Ok(EditResult::new(
             updated,
@@ -1063,8 +1096,7 @@ impl std::fmt::Display for HjsonDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use crate::syntax::green::GreenNodeExt;
         let text = self.green.text();
-        let style = DocumentStyle::new(&text);
-        f.write_str(&style.normalize_text(&text))
+        f.write_str(&text)
     }
 }
 

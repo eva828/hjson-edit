@@ -74,10 +74,17 @@ fn block_strings_with_crlf() {
     );
 
     let output = doc.to_string();
-    assert!(output.contains("'''\n    line1\n      line2\n    '''"));
+    assert_eq!(output, input);
 
     let reparsed = HjsonDocument::parse(&output).unwrap();
     assert_eq!(reparsed.get("text"), doc.get("text"));
+}
+
+#[test]
+fn mixed_newlines_roundtrip() {
+    let input = "{\r\n  first: 1\n  second: 2\r\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    assert_eq!(doc.to_string(), input);
 }
 
 /// Test deeply nested structures

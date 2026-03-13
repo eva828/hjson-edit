@@ -1,7 +1,8 @@
 use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::{
-    build_array_items, clone_element, create_value_node, is_token_of_kind, ArrayEntry, ArrayItem,
-    EntryTerminator, HjsonEditError, HjsonValue, StringStyle,
+    build_array_items, clone_element, create_value_node, document_newline_kind,
+    infer_newline_kind_from_node, is_token_of_kind, ArrayEntry, ArrayItem, EntryTerminator,
+    HjsonDocument, HjsonEditError, HjsonValue, StringStyle,
 };
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
@@ -61,13 +62,17 @@ impl ArrayEditor {
     }
 
     pub(crate) fn insert_entry(
+        document: &HjsonDocument,
         arr_node: &RedNode,
         index: usize,
         value: &HjsonValue,
         string_style: StringStyle,
     ) -> Result<GreenNode, HjsonEditError> {
         let mut context = ArrayLayoutContext::from_node(arr_node);
-        let mut planner = ArrayInsertPlanner::new(index);
+        let newline = infer_newline_kind_from_node(arr_node)
+            .unwrap_or_else(|| document_newline_kind(document))
+            .as_str();
+        let mut planner = ArrayInsertPlanner::new(index, newline);
         let mut new_items = Vec::new();
 
         for item in std::mem::take(&mut context.items) {
@@ -133,17 +138,19 @@ struct ArrayInsertPlanner {
     is_append: bool,
     inserted: bool,
     entry_index: usize,
+    newline: String,
     last_entry_indent: Option<GreenElement>,
     trailing_standalone: Vec<ArrayItem>,
 }
 
 impl ArrayInsertPlanner {
-    fn new(index: usize) -> Self {
+    fn new(index: usize, newline: &str) -> Self {
         Self {
             insert_at: index,
             is_append: index == usize::MAX,
             inserted: false,
             entry_index: 0,
+            newline: newline.to_string(),
             last_entry_indent: None,
             trailing_standalone: Vec::new(),
         }
@@ -176,7 +183,7 @@ impl ArrayInsertPlanner {
             entry.leading_line_trivia.clone(),
             EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
                 SyntaxKind::Newline,
-                "\n",
+                &self.newline,
             ))]),
             value,
             string_style,
@@ -230,7 +237,7 @@ impl ArrayInsertPlanner {
             if context.has_closing_bracket() {
                 return EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
                     SyntaxKind::Newline,
-                    "\n",
+                    &self.newline,
                 ))]);
             }
             return EntryTerminator::EndOfContainer;
@@ -238,7 +245,7 @@ impl ArrayInsertPlanner {
 
         EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
             SyntaxKind::Newline,
-            "\n",
+            &self.newline,
         ))])
     }
 
@@ -266,10 +273,11 @@ pub(crate) fn remove_array_entry(
 }
 
 pub(crate) fn insert_array_entry_structural(
+    document: &HjsonDocument,
     arr_node: &RedNode,
     index: usize,
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> Result<GreenNode, HjsonEditError> {
-    ArrayEditor::insert_entry(arr_node, index, value, string_style)
+    ArrayEditor::insert_entry(document, arr_node, index, value, string_style)
 }

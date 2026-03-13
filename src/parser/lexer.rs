@@ -80,13 +80,14 @@ impl Lexer {
             }
 
             if self.match_char('\r') {
-                // \r\n または \r を \n に正規化（RFC準拠）
                 if self.peek() == Some('\n') {
                     self.advance(); // \n も消費
+                    self.emit(SyntaxKind::Newline, "\r\n", start_line, start_col);
+                    self.line += 1;
+                    self.column = 1;
+                    continue;
                 }
-                self.emit(SyntaxKind::Newline, "\n", start_line, start_col);
-                self.line += 1;
-                self.column = 1;
+                self.emit(SyntaxKind::Whitespace, "\r", start_line, start_col);
                 continue;
             }
 
@@ -314,10 +315,12 @@ impl Lexer {
             '\r' => {
                 if self.peek() == Some('\n') {
                     self.advance();
+                    text.push_str("\r\n");
+                    self.line += 1;
+                    self.column = 1;
+                } else {
+                    text.push('\r');
                 }
-                text.push('\n');
-                self.line += 1;
-                self.column = 1;
             }
             other => text.push(other),
         }

@@ -123,6 +123,27 @@ fn edit_comment_operations() {
 }
 
 #[test]
+fn edit_preserves_crlf_when_writing() {
+    let path = temp_path("crlf_edit");
+    fs::write(&path, "{\r\n  key: value\r\n}\r\n").unwrap();
+
+    let (_, _, success) = run_cli(&[
+        "edit",
+        path.to_str().unwrap(),
+        "--in-place",
+        "--set",
+        "added",
+        "1",
+    ]);
+    assert!(success);
+
+    let output = fs::read_to_string(&path).unwrap();
+    assert_eq!(output, "{\r\n  key: value\r\n  added: 1\r\n}\r\n");
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 fn edit_type_inference() {
     let path = temp_path("types");
     fs::write(&path, "{}").unwrap();

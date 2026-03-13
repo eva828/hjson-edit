@@ -119,16 +119,11 @@ fn empty_input() {
     assert!(result.is_err() || result.unwrap().to_string().trim().is_empty());
 }
 
-/// CRLF処理（RFC準拠 - CRは正規化され\nのみとなる）
+/// CRLF処理（入力の改行コードを保持する）
 #[test]
 fn crlf_handling() {
     let input = "{\r\n  key: value\r\n}";
     let doc = HjsonDocument::parse(input).unwrap();
     let output = doc.to_string();
-    assert!(
-        output.contains("key: value"),
-        "Should parse CRLF content correctly"
-    );
-    // RFC準拠: CRは正規化される
-    assert!(!output.contains('\r'), "CR should be normalized to LF");
+    assert_eq!(output, input);
 }
