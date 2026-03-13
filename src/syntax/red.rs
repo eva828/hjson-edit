@@ -144,5 +144,3 @@ impl RedElementExt for RedElement {
         }
     }
 }
-
-

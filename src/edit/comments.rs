@@ -9,152 +9,228 @@ use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
-pub(crate) fn get_header_comment(document: &HjsonDocument) -> Vec<String> {
-    let red = RedNode::new_root(document.green_node().clone());
-    let mut comments = Vec::new();
+pub(crate) struct CommentEditor;
 
-    for elem in red.children_with_tokens() {
-        if let Some(token) = elem.as_token() {
-            let kind = token.kind();
-            if matches!(
-                kind,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-            ) {
-                comments.push(token.text().to_string());
+struct CommentTargetResolver<'a> {
+    document: &'a HjsonDocument,
+    dot_path: &'a str,
+    path_segments: Vec<PathSegment>,
+}
+
+struct PairCommentEditor;
+
+struct InlineCommentEditor;
+
+struct RootCommentEditor;
+
+struct PreparedPair {
+    green: GreenNode,
+    prepended_indent_len: usize,
+}
+
+impl CommentEditor {
+    fn set(
+        document: &HjsonDocument,
+        path: &CommentPath,
+        text: &str,
+        style: Option<CommentStyle>,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        match path {
+            CommentPath::Key { dot_path } => set_key_comment(document, dot_path, text, style),
+            CommentPath::Inline { dot_path } => {
+                set_inline_comment_for_path(document, dot_path, text, style)
             }
-        } else {
-            break;
+            CommentPath::Header => set_header_comment(document, text, style),
+            CommentPath::Footer => set_footer_comment(document, text, style),
         }
     }
 
-    comments
-}
-
-pub(crate) fn get_footer_comment(document: &HjsonDocument) -> Vec<String> {
-    let red = RedNode::new_root(document.green_node().clone());
-    let mut comments = Vec::new();
-    let children: Vec<_> = red.children_with_tokens().collect();
-
-    for elem in children.iter().rev() {
-        if let Some(token) = elem.as_token() {
-            let kind = token.kind();
-            if matches!(
-                kind,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-            ) {
-                comments.push(token.text().to_string());
-            } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
-                break;
+    fn append(
+        document: &HjsonDocument,
+        path: &CommentPath,
+        text: &str,
+        style: Option<CommentStyle>,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        let current_comments = match path {
+            CommentPath::Key { dot_path } => PairCommentEditor::get_for_path(document, dot_path)?,
+            CommentPath::Inline { dot_path } => {
+                InlineCommentEditor::get_for_path(document, dot_path)?
             }
-        } else {
-            break;
+            CommentPath::Header => RootCommentEditor::get_header(document),
+            CommentPath::Footer => RootCommentEditor::get_footer(document),
+        };
+
+        if current_comments.is_empty() {
+            return Self::set(document, path, text, style);
+        }
+
+        let append_style = style
+            .unwrap_or_else(|| infer_comment_style_from_text(current_comments.last().unwrap()));
+        if matches!(append_style, CommentStyle::Line | CommentStyle::Hash) && text.contains('\n') {
+            return Self::set(document, path, text, Some(CommentStyle::Block));
+        }
+
+        let existing = current_comments
+            .iter()
+            .map(|comment| strip_comment_prefix(comment))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let new_text = format!("{}\n{}", existing, text);
+        Self::set(document, path, &new_text, Some(append_style))
+    }
+
+    fn remove(
+        document: &HjsonDocument,
+        path: &CommentPath,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        match path {
+            CommentPath::Key { dot_path } => remove_key_comment(document, dot_path),
+            CommentPath::Inline { dot_path } => remove_inline_comment_for_path(document, dot_path),
+            CommentPath::Header => remove_header_comment(document),
+            CommentPath::Footer => remove_footer_comment(document),
+        }
+    }
+}
+
+impl<'a> CommentTargetResolver<'a> {
+    fn new(document: &'a HjsonDocument, dot_path: &'a str) -> Result<Self, HjsonEditError> {
+        let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
+        if path_segments.is_empty() {
+            return Err(HjsonEditError::InvalidPath {
+                path: dot_path.to_string(),
+            });
+        }
+
+        Ok(Self {
+            document,
+            dot_path,
+            path_segments,
+        })
+    }
+
+    fn key(&self) -> Result<&str, HjsonEditError> {
+        expect_terminal_key(&self.path_segments, self.dot_path)
+    }
+
+    fn parent_path(&self) -> &[PathSegment] {
+        &self.path_segments[..self.path_segments.len() - 1]
+    }
+
+    fn object(&self) -> Result<RedNode, HjsonEditError> {
+        resolve_object_for_comment_path(self.document, self.parent_path(), self.dot_path)
+    }
+
+    fn pair_node(&self) -> Result<RedNode, HjsonEditError> {
+        let key = self.key()?;
+        self.object()?
+            .find_pair_node(key)
+            .ok_or_else(|| HjsonEditError::InvalidPath {
+                path: self.dot_path.to_string(),
+            })
+    }
+
+    fn pair_index(&self) -> Result<usize, HjsonEditError> {
+        let key = self.key()?;
+        self.object()?
+            .find_pair_index(key)
+            .ok_or_else(|| HjsonEditError::InvalidPath {
+                path: self.dot_path.to_string(),
+            })
+    }
+}
+
+impl PairCommentEditor {
+    fn set_for_path(
+        document: &HjsonDocument,
+        dot_path: &str,
+        text: &str,
+        style: Option<CommentStyle>,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        let resolver = CommentTargetResolver::new(document, dot_path)?;
+        let obj = resolver.object()?;
+        let pair_node = resolver.pair_node()?;
+        let prepared_pair = Self::prepare_pair(&obj, &pair_node);
+
+        let comment_style = determine_comment_style(&prepared_pair.green, style)?;
+        let new_comment = create_comment_token(text, comment_style);
+        let mut updated_pair = insert_comment_before_pair(&prepared_pair.green, new_comment)?;
+
+        if prepared_pair.prepended_indent_len > 0 {
+            updated_pair =
+                Self::strip_prepended_indent(&updated_pair, prepared_pair.prepended_indent_len);
+        }
+
+        document.replace_green_node_internal(&pair_node.path_from_root(), updated_pair)
+    }
+
+    fn remove_for_path(
+        document: &HjsonDocument,
+        dot_path: &str,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        let resolver = CommentTargetResolver::new(document, dot_path)?;
+        let pair_node = resolver.pair_node()?;
+        let new_pair = remove_comments_from_pair(&pair_node.to_green())?;
+        document.replace_green_node_internal(&pair_node.path_from_root(), new_pair)
+    }
+
+    fn get_for_path(
+        document: &HjsonDocument,
+        dot_path: &str,
+    ) -> Result<Vec<String>, HjsonEditError> {
+        let resolver = CommentTargetResolver::new(document, dot_path)?;
+        let pair_node = resolver.pair_node()?;
+
+        let mut comments = Vec::new();
+        for elem in pair_node.children_with_tokens() {
+            if let rowan::NodeOrToken::Token(token) = elem {
+                let kind = token.kind();
+                if matches!(
+                    kind,
+                    SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                ) {
+                    comments.push(token.text().to_string());
+                } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                    break;
+                }
+            }
+        }
+        Ok(comments)
+    }
+
+    fn prepare_pair(obj: &RedNode, pair_node: &RedNode) -> PreparedPair {
+        let indentation = Self::object_indentation(obj, pair_node);
+        let mut pair_green = pair_node.to_green();
+
+        if !indentation.is_empty() && !Self::starts_with_whitespace(&pair_green) {
+            let mut new_pair_children = indentation.clone();
+            new_pair_children.extend(pair_green.children().map(clone_element));
+            pair_green = create_node(SyntaxKind::Pair, new_pair_children);
+        }
+
+        PreparedPair {
+            green: pair_green,
+            prepended_indent_len: indentation.len(),
         }
     }
 
-    comments.reverse();
-    comments
-}
-
-pub(crate) fn comment_set(
-    document: &HjsonDocument,
-    path: &CommentPath,
-    text: &str,
-    style: Option<CommentStyle>,
-) -> Result<HjsonDocument, HjsonEditError> {
-    match path {
-        CommentPath::Key { dot_path } => set_key_comment(document, dot_path, text, style),
-        CommentPath::Inline { dot_path } => {
-            set_inline_comment_for_path(document, dot_path, text, style)
-        }
-        CommentPath::Header => set_header_comment(document, text, style),
-        CommentPath::Footer => set_footer_comment(document, text, style),
-    }
-}
-
-pub(crate) fn comment_append(
-    document: &HjsonDocument,
-    path: &CommentPath,
-    text: &str,
-    style: Option<CommentStyle>,
-) -> Result<HjsonDocument, HjsonEditError> {
-    let current_comments = match path {
-        CommentPath::Key { dot_path } => get_comments_before_key(document, dot_path)?,
-        CommentPath::Inline { dot_path } => get_inline_comment(document, dot_path)?,
-        CommentPath::Header => get_header_comment(document),
-        CommentPath::Footer => get_footer_comment(document),
-    };
-
-    if current_comments.is_empty() {
-        return comment_set(document, path, text, style);
-    }
-
-    let append_style =
-        style.unwrap_or_else(|| infer_comment_style_from_text(current_comments.last().unwrap()));
-    if matches!(append_style, CommentStyle::Line | CommentStyle::Hash) && text.contains('\n') {
-        return comment_set(document, path, text, Some(CommentStyle::Block));
-    }
-
-    let existing = current_comments
-        .iter()
-        .map(|comment| strip_comment_prefix(comment))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let new_text = format!("{}\n{}", existing, text);
-    comment_set(document, path, &new_text, Some(append_style))
-}
-
-pub(crate) fn comment_remove(
-    document: &HjsonDocument,
-    path: &CommentPath,
-) -> Result<HjsonDocument, HjsonEditError> {
-    match path {
-        CommentPath::Key { dot_path } => remove_key_comment(document, dot_path),
-        CommentPath::Inline { dot_path } => remove_inline_comment_for_path(document, dot_path),
-        CommentPath::Header => remove_header_comment(document),
-        CommentPath::Footer => remove_footer_comment(document),
-    }
-}
-
-fn set_key_comment(
-    document: &HjsonDocument,
-    dot_path: &str,
-    text: &str,
-    style: Option<CommentStyle>,
-) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
-    if path_segments.is_empty() {
-        return Err(HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        });
-    }
-
-    let key = expect_terminal_key(&path_segments, dot_path)?;
-    let parent_path = &path_segments[..path_segments.len() - 1];
-    let obj = resolve_object_for_comment_path(document, parent_path, dot_path)?;
-
-    let pair_node = obj
-        .find_pair_node(key)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-
-    // Try to find indentation from the Object children if the Pair node doesn't have it
-    let mut indentation = Vec::new();
-    let obj_green = obj.to_green();
-    let mut pair_idx_in_obj = 0;
-    for (i, child) in obj_green.children().enumerate() {
-        if let NodeOrToken::Node(n) = child {
-            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
-                if *n == *pair_node.green() {
+    fn object_indentation(obj: &RedNode, pair_node: &RedNode) -> Vec<GreenElement> {
+        let obj_green = obj.to_green();
+        let mut pair_idx_in_obj = 0;
+        for (i, child) in obj_green.children().enumerate() {
+            if let NodeOrToken::Node(n) = child {
+                if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair
+                    && *n == *pair_node.green()
+                {
                     pair_idx_in_obj = i;
                     break;
                 }
             }
         }
-    }
 
-    // Look backwards from pair_idx_in_obj for whitespace
-    if pair_idx_in_obj > 0 {
+        if pair_idx_in_obj == 0 {
+            return Vec::new();
+        }
+
         let mut idx = pair_idx_in_obj - 1;
         let mut temp_indent = Vec::new();
         loop {
@@ -163,55 +239,167 @@ fn set_key_comment(
                 if kind == SyntaxKind::Whitespace {
                     temp_indent.push(NodeOrToken::Token(create_token(kind, t.text())));
                 } else if kind == SyntaxKind::Newline {
-                    indentation = temp_indent.into_iter().rev().collect();
-                    break;
+                    return temp_indent.into_iter().rev().collect();
                 } else {
-                    break;
+                    return Vec::new();
                 }
             } else {
-                break;
+                return Vec::new();
             }
+
             if idx == 0 {
-                break;
+                return Vec::new();
             }
             idx -= 1;
         }
     }
 
-    let mut pair_green = pair_node.to_green();
-
-    // If we found indentation in the object and the pair doesn't start with whitespace,
-    // prepend it to pair_green temporarily so insert_comment_before_pair can use it.
-    if !indentation.is_empty() {
-        let first_child = pair_green.children().next();
-        let already_has_whitespace = matches!(first_child, Some(NodeOrToken::Token(t)) if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Whitespace);
-        if !already_has_whitespace {
-            let mut new_pair_children = indentation.clone();
-            new_pair_children.extend(pair_green.children().map(clone_element));
-            pair_green = create_node(SyntaxKind::Pair, new_pair_children);
-        }
+    fn starts_with_whitespace(pair_green: &GreenNode) -> bool {
+        matches!(
+            pair_green.children().next(),
+            Some(NodeOrToken::Token(t))
+                if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Whitespace
+        )
     }
 
-    let comment_style = determine_comment_style(&pair_green, style)?;
-    let new_comment = create_comment_token(text, comment_style);
-    let mut updated_pair = insert_comment_before_pair(&pair_green, new_comment)?;
-
-    // If we prepended indentation to pair_green, we should remove it from the start of updated_pair
-    // because it's still present in the Object's trivia.
-    if !indentation.is_empty() {
+    fn strip_prepended_indent(pair_green: &GreenNode, indent_len: usize) -> GreenNode {
         let mut final_children = Vec::new();
-        let mut skip_count = indentation.len();
-        for child in updated_pair.children() {
+        let mut skip_count = indent_len;
+        for child in pair_green.children() {
             if skip_count > 0 {
                 skip_count -= 1;
                 continue;
             }
             final_children.push(clone_element(child));
         }
-        updated_pair = create_node(SyntaxKind::Pair, final_children);
+        create_node(SyntaxKind::Pair, final_children)
+    }
+}
+
+impl InlineCommentEditor {
+    fn set_for_path(
+        document: &HjsonDocument,
+        dot_path: &str,
+        text: &str,
+        style: Option<CommentStyle>,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        let resolver = CommentTargetResolver::new(document, dot_path)?;
+        let obj = resolver.object()?;
+        let pair_idx = resolver.pair_index()?;
+        let new_obj = set_inline_comment(&obj.to_green(), pair_idx, text, style)?;
+        document.replace_green_node_internal(&obj.path_from_root(), new_obj)
     }
 
-    document.replace_green_node_internal(&pair_node.path_from_root(), updated_pair)
+    fn remove_for_path(
+        document: &HjsonDocument,
+        dot_path: &str,
+    ) -> Result<HjsonDocument, HjsonEditError> {
+        let resolver = CommentTargetResolver::new(document, dot_path)?;
+        let obj = resolver.object()?;
+        let pair_idx = resolver.pair_index()?;
+        let new_obj = remove_inline_comment(&obj.to_green(), pair_idx)?;
+        document.replace_green_node_internal(&obj.path_from_root(), new_obj)
+    }
+
+    fn get_for_path(
+        document: &HjsonDocument,
+        dot_path: &str,
+    ) -> Result<Vec<String>, HjsonEditError> {
+        let resolver = CommentTargetResolver::new(document, dot_path)?;
+        let obj = resolver.object()?;
+        let pair_idx = resolver.pair_index()?;
+        Ok(extract_inline_comments(&obj.to_green(), pair_idx))
+    }
+}
+
+impl RootCommentEditor {
+    fn get_header(document: &HjsonDocument) -> Vec<String> {
+        let red = RedNode::new_root(document.green_node().clone());
+        let mut comments = Vec::new();
+
+        for elem in red.children_with_tokens() {
+            if let Some(token) = elem.as_token() {
+                let kind = token.kind();
+                if matches!(
+                    kind,
+                    SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                ) {
+                    comments.push(token.text().to_string());
+                }
+            } else {
+                break;
+            }
+        }
+
+        comments
+    }
+
+    fn get_footer(document: &HjsonDocument) -> Vec<String> {
+        let red = RedNode::new_root(document.green_node().clone());
+        let mut comments = Vec::new();
+        let children: Vec<_> = red.children_with_tokens().collect();
+
+        for elem in children.iter().rev() {
+            if let Some(token) = elem.as_token() {
+                let kind = token.kind();
+                if matches!(
+                    kind,
+                    SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                ) {
+                    comments.push(token.text().to_string());
+                } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        comments.reverse();
+        comments
+    }
+}
+
+pub(crate) fn get_header_comment(document: &HjsonDocument) -> Vec<String> {
+    RootCommentEditor::get_header(document)
+}
+
+pub(crate) fn get_footer_comment(document: &HjsonDocument) -> Vec<String> {
+    RootCommentEditor::get_footer(document)
+}
+
+pub(crate) fn comment_set(
+    document: &HjsonDocument,
+    path: &CommentPath,
+    text: &str,
+    style: Option<CommentStyle>,
+) -> Result<HjsonDocument, HjsonEditError> {
+    CommentEditor::set(document, path, text, style)
+}
+
+pub(crate) fn comment_append(
+    document: &HjsonDocument,
+    path: &CommentPath,
+    text: &str,
+    style: Option<CommentStyle>,
+) -> Result<HjsonDocument, HjsonEditError> {
+    CommentEditor::append(document, path, text, style)
+}
+
+pub(crate) fn comment_remove(
+    document: &HjsonDocument,
+    path: &CommentPath,
+) -> Result<HjsonDocument, HjsonEditError> {
+    CommentEditor::remove(document, path)
+}
+
+fn set_key_comment(
+    document: &HjsonDocument,
+    dot_path: &str,
+    text: &str,
+    style: Option<CommentStyle>,
+) -> Result<HjsonDocument, HjsonEditError> {
+    PairCommentEditor::set_for_path(document, dot_path, text, style)
 }
 
 fn set_inline_comment_for_path(
@@ -220,26 +408,7 @@ fn set_inline_comment_for_path(
     text: &str,
     style: Option<CommentStyle>,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
-    if path_segments.is_empty() {
-        return Err(HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        });
-    }
-
-    let key = expect_terminal_key(&path_segments, dot_path)?;
-    let obj = resolve_object_for_comment_path(
-        document,
-        &path_segments[..path_segments.len() - 1],
-        dot_path,
-    )?;
-    let pair_idx = obj
-        .find_pair_index(key)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-    let new_obj = set_inline_comment(&obj.to_green(), pair_idx, text, style)?;
-    document.replace_green_node_internal(&obj.path_from_root(), new_obj)
+    InlineCommentEditor::set_for_path(document, dot_path, text, style)
 }
 
 fn set_header_comment(
@@ -327,61 +496,14 @@ fn remove_key_comment(
     document: &HjsonDocument,
     dot_path: &str,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
-    if path_segments.is_empty() {
-        return Err(HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        });
-    }
-
-    let key = expect_terminal_key(&path_segments, dot_path)?;
-    let obj = resolve_object_for_comment_path(
-        document,
-        &path_segments[..path_segments.len() - 1],
-        dot_path,
-    )?;
-    let pair_idx = obj
-        .find_pair_index(key)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-    let pair_node = obj
-        .children_nodes()
-        .enumerate()
-        .filter(|(_, n)| n.kind() == SyntaxKind::Pair)
-        .nth(pair_idx)
-        .map(|(_, n)| n)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-    let new_pair = remove_comments_from_pair(&pair_node.to_green())?;
-    document.replace_green_node_internal(&pair_node.path_from_root(), new_pair)
+    PairCommentEditor::remove_for_path(document, dot_path)
 }
 
 fn remove_inline_comment_for_path(
     document: &HjsonDocument,
     dot_path: &str,
 ) -> Result<HjsonDocument, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
-    if path_segments.is_empty() {
-        return Err(HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        });
-    }
-
-    let key = expect_terminal_key(&path_segments, dot_path)?;
-    let obj = resolve_object_for_comment_path(
-        document,
-        &path_segments[..path_segments.len() - 1],
-        dot_path,
-    )?;
-    let pair_idx = obj
-        .find_pair_index(key)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-    let new_obj = remove_inline_comment(&obj.to_green(), pair_idx)?;
-    document.replace_green_node_internal(&obj.path_from_root(), new_obj)
+    InlineCommentEditor::remove_for_path(document, dot_path)
 }
 
 fn remove_header_comment(document: &HjsonDocument) -> Result<HjsonDocument, HjsonEditError> {
@@ -451,71 +573,6 @@ fn remove_footer_comment(document: &HjsonDocument) -> Result<HjsonDocument, Hjso
         SyntaxKind::Root,
         new_children,
     )))
-}
-
-fn get_comments_before_key(
-    document: &HjsonDocument,
-    dot_path: &str,
-) -> Result<Vec<String>, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
-    if path_segments.is_empty() {
-        return Err(HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        });
-    }
-
-    let key = expect_terminal_key(&path_segments, dot_path)?;
-    let obj = resolve_object_for_comment_path(
-        document,
-        &path_segments[..path_segments.len() - 1],
-        dot_path,
-    )?;
-    let pair_node = obj
-        .find_pair_node(key)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-
-    let mut comments = Vec::new();
-    for elem in pair_node.children_with_tokens() {
-        if let rowan::NodeOrToken::Token(token) = elem {
-            let kind = token.kind();
-            if matches!(
-                kind,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-            ) {
-                comments.push(token.text().to_string());
-            } else if kind != SyntaxKind::Whitespace && kind != SyntaxKind::Newline {
-                break;
-            }
-        }
-    }
-    Ok(comments)
-}
-
-fn get_inline_comment(
-    document: &HjsonDocument,
-    dot_path: &str,
-) -> Result<Vec<String>, HjsonEditError> {
-    let path_segments = crate::edit::high_level::parse_path_for_format(dot_path)?;
-    if path_segments.is_empty() {
-        return Err(HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        });
-    }
-
-    let key = expect_terminal_key(&path_segments, dot_path)?;
-    let obj = resolve_object_for_comment_path(
-        document,
-        &path_segments[..path_segments.len() - 1],
-        dot_path,
-    )?;
-    let pair_idx = obj
-        .find_pair_index(key)
-        .ok_or_else(|| HjsonEditError::InvalidPath {
-            path: dot_path.to_string(),
-        })?;
-    Ok(extract_inline_comments(&obj.to_green(), pair_idx))
 }
 
 fn resolve_object_for_comment_path(

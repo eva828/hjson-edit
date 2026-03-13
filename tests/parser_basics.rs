@@ -18,13 +18,9 @@ fn root_types_parsing() {
     ];
 
     for (name, input) in cases {
-        let doc = HjsonDocument::parse(input).expect(&format!("{} should parse", name));
+        let doc = HjsonDocument::parse(input).unwrap_or_else(|_| panic!("{} should parse", name));
         let output = doc.to_string();
-        assert_eq!(
-            output, input,
-            "{}: roundtrip should preserve content",
-            name
-        );
+        assert_eq!(output, input, "{}: roundtrip should preserve content", name);
     }
 }
 
@@ -45,13 +41,9 @@ fn hjson_extensions() {
     ];
 
     for (name, input) in cases {
-        let doc = HjsonDocument::parse(input).expect(&format!("{} should parse", name));
+        let doc = HjsonDocument::parse(input).unwrap_or_else(|_| panic!("{} should parse", name));
         let output = doc.to_string();
-        assert_eq!(
-            output, input,
-            "{}: HJSON extension should roundtrip",
-            name
-        );
+        assert_eq!(output, input, "{}: HJSON extension should roundtrip", name);
     }
 }
 
@@ -60,12 +52,12 @@ fn hjson_extensions() {
 fn block_strings() {
     let input = "text: '''\n    line1\n      line2\n    '''\n";
     let doc = HjsonDocument::parse(input).unwrap();
-    
+
     assert_eq!(
         doc.get("text"),
         Some(hjson_edit::HjsonValue::String("line1\n  line2".to_string()))
     );
-    
+
     let output = doc.to_string();
     let reparsed = HjsonDocument::parse(&output).unwrap();
     assert_eq!(output, reparsed.to_string());
@@ -102,12 +94,18 @@ fn array_of_objects() {
 ]"#;
 
     let doc = HjsonDocument::parse(input).unwrap();
-    assert_eq!(doc.get("[0].name"), Some(hjson_edit::HjsonValue::String("first".to_string())));
-    assert_eq!(doc.get("[1].value"), Some(hjson_edit::HjsonValue::Integer(2)));
+    assert_eq!(
+        doc.get("[0].name"),
+        Some(hjson_edit::HjsonValue::String("first".to_string()))
+    );
+    assert_eq!(
+        doc.get("[1].value"),
+        Some(hjson_edit::HjsonValue::Integer(2))
+    );
 }
 
 /// JSON文字列のエスケープシーケンス（RFC 8259準拠）
-/// 
+///
 /// 以下のエスケープシーケンスが正しく変換されることを確認:
 /// - \n, \t, \" は実際の文字に変換される
 /// - \uXXXX はUnicode文字に変換される
@@ -124,14 +122,18 @@ fn json_string_escapes() {
     let doc = HjsonDocument::parse(r#"{"text": "line1\nline2\ttabbed"}"#).unwrap();
     assert_eq!(
         doc.get("text"),
-        Some(hjson_edit::HjsonValue::String("line1\nline2\ttabbed".to_string()))
+        Some(hjson_edit::HjsonValue::String(
+            "line1\nline2\ttabbed".to_string()
+        ))
     );
 
     // バックスラッシュ
     let doc = HjsonDocument::parse(r#"{"path": "C:\\Users\\test"}"#).unwrap();
     assert_eq!(
         doc.get("path"),
-        Some(hjson_edit::HjsonValue::String("C:\\Users\\test".to_string()))
+        Some(hjson_edit::HjsonValue::String(
+            "C:\\Users\\test".to_string()
+        ))
     );
 
     // Unicodeエスケープ \u0041 = 'A', \u0042 = 'B'
@@ -152,7 +154,9 @@ fn json_string_escapes() {
     let doc = HjsonDocument::parse(r#"{"mixed": "Tab:\there\\Newline:\nQuote:\"End"}"#).unwrap();
     assert_eq!(
         doc.get("mixed"),
-        Some(hjson_edit::HjsonValue::String("Tab:\there\\Newline:\nQuote:\"End".to_string()))
+        Some(hjson_edit::HjsonValue::String(
+            "Tab:\there\\Newline:\nQuote:\"End".to_string()
+        ))
     );
 }
 
@@ -170,7 +174,13 @@ fn number_exponent_notation() {
     for (name, input, expected) in cases {
         let doc = HjsonDocument::parse(&format!("{{ value: {} }}", input)).unwrap();
         if let Some(hjson_edit::HjsonValue::Float(v)) = doc.get("value") {
-            assert!((v - expected).abs() < f64::EPSILON, "{}: expected {}, got {}", name, expected, v);
+            assert!(
+                (v - expected).abs() < f64::EPSILON,
+                "{}: expected {}, got {}",
+                name,
+                expected,
+                v
+            );
         } else {
             panic!("{}: Expected float for {}", name, input);
         }
@@ -194,7 +204,8 @@ fn literal_and_number_end_checking() {
         assert_eq!(
             doc.get("key"),
             Some(hjson_edit::HjsonValue::String(expected.to_string())),
-            "{}: should be parsed as string, not literal/number", name
+            "{}: should be parsed as string, not literal/number",
+            name
         );
     }
 }
@@ -204,5 +215,8 @@ fn literal_and_number_end_checking() {
 fn quoteless_string_edge_cases() {
     // パンクチュエータで始まる場合は引用符が必要
     let result = HjsonDocument::parse("key: ,value\n");
-    assert!(result.is_err(), "Quoteless string starting with punctuator should fail");
+    assert!(
+        result.is_err(),
+        "Quoteless string starting with punctuator should fail"
+    );
 }

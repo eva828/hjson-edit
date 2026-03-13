@@ -238,5 +238,3 @@ pub(crate) fn navigate_from_node(start: &RedNode, path: &[PathSegment]) -> Optio
 
     Some(current)
 }
-
-

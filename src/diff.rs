@@ -5,6 +5,26 @@
 
 use rowan::GreenNode;
 
+struct LineDiff;
+
+impl LineDiff {
+    fn diff_lines(before: &str, after: &str) -> Vec<usize> {
+        let before_lines: Vec<&str> = before.lines().collect();
+        let after_lines: Vec<&str> = after.lines().collect();
+
+        let max_len = before_lines.len().max(after_lines.len());
+        let mut changed = Vec::new();
+
+        for i in 0..max_len {
+            if before_lines.get(i) != after_lines.get(i) {
+                changed.push(i + 1);
+            }
+        }
+
+        changed
+    }
+}
+
 /// Information about a single line change
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChangeInfo {
@@ -32,22 +52,7 @@ pub enum ChangeType {
 /// assert_eq!(changes, vec![2]);
 /// ```
 pub fn simple_line_diff(before: &str, after: &str) -> Vec<usize> {
-    let before_lines: Vec<&str> = before.lines().collect();
-    let after_lines: Vec<&str> = after.lines().collect();
-
-    let max_len = before_lines.len().max(after_lines.len());
-    let mut changed = Vec::new();
-
-    for i in 0..max_len {
-        let b = before_lines.get(i);
-        let a = after_lines.get(i);
-
-        if b != a {
-            changed.push(i + 1); // 1-indexed
-        }
-    }
-
-    changed
+    LineDiff::diff_lines(before, after)
 }
 
 /// Convert a byte offset to a line number (1-indexed)
@@ -82,23 +87,7 @@ pub fn detect_changed_lines(before: &GreenNode, after: &GreenNode, _source: &str
         return Vec::new();
     }
 
-    // Simple line-by-line comparison
-    let before_lines: Vec<&str> = before_text.lines().collect();
-    let after_lines: Vec<&str> = after_text.lines().collect();
-
-    let max_len = before_lines.len().max(after_lines.len());
-    let mut changed = Vec::new();
-
-    for i in 0..max_len {
-        let b = before_lines.get(i);
-        let a = after_lines.get(i);
-
-        if b != a {
-            changed.push(i + 1);
-        }
-    }
-
-    changed
+    LineDiff::diff_lines(&before_text, &after_text)
 }
 
 #[cfg(test)]
@@ -120,7 +109,7 @@ mod tests {
         let s = "\u{00e9}";
         assert_eq!(nearest_char_boundary_at_or_before(s, 1), 0);
         assert_eq!(nearest_char_boundary_at_or_before(s, 2), 2);
-        
+
         // ASCII boundary
         let s = "abc";
         assert_eq!(nearest_char_boundary_at_or_before(s, 1), 1);

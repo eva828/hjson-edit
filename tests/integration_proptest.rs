@@ -16,7 +16,7 @@ proptest! {
             let mut s = String::from("{\n");
             for (i, (k, v)) in pairs.iter().enumerate() {
                 if i > 0 {
-                    s.push_str("\n");
+                    s.push('\n');
                 }
                 s.push_str(&format!("  {}: {}", k, v));
             }
@@ -84,6 +84,11 @@ fn unicode_roundtrip() {
         let doc = hjson_edit::HjsonDocument::parse(input).unwrap();
         let output = doc.to_string();
         let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
-        assert_eq!(output, reparsed.to_string(), "Unicode roundtrip failed for: {}", input);
+        assert_eq!(
+            output,
+            reparsed.to_string(),
+            "Unicode roundtrip failed for: {}",
+            input
+        );
     }
 }

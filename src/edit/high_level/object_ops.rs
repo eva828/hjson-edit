@@ -1,5 +1,4 @@
 use crate::edit::api::{create_node, create_token};
-
 use crate::edit::high_level::structure::{
     indentation_from_standalone_block, whitespace_after_last_newline,
 };
@@ -20,180 +19,286 @@ pub(crate) struct InsertFormat<'a> {
     pub closing_indent: &'a str,
 }
 
-pub(crate) fn insert_object_entry_without_reformat(
-    items: &mut Vec<ObjectItem>,
-    key: &str,
-    value: &HjsonValue,
-    string_style: StringStyle,
-    format: &InsertFormat<'_>,
-) -> Result<(), HjsonEditError> {
-    let InsertFormat {
-        has_braces,
-        newline,
-        entry_indent,
-        closing_indent,
-    } = *format;
-    let pair = NodeOrToken::Node(create_pair_node(key, value, string_style, None)?);
+pub(crate) struct ObjectEditor;
 
-    let has_existing_entries = items
-        .iter()
-        .any(|item| matches!(item, ObjectItem::Entry(_)));
-    let last_entry_ends_with_newline = items.iter().rev().find_map(|item| match item {
-        ObjectItem::Entry(entry) => Some(matches!(entry.terminator, EntryTerminator::Newline(_))),
-        ObjectItem::Standalone(_) => None,
-    });
+impl ObjectEditor {
+    pub(crate) fn set_entry(
+        obj_node: &RedNode,
+        key: &str,
+        value: &HjsonValue,
+        string_style: StringStyle,
+        base_indent: &str,
+        indent_unit: &str,
+        newline: &str,
+    ) -> Result<GreenNode, HjsonEditError> {
+        let mut context = ObjectLayoutContext::from_node(obj_node);
+        let entry_indent = context.entry_indent(base_indent, indent_unit);
+        let has_braces = context.has_braces();
 
-    let leading_line_trivia = if has_existing_entries {
-        if last_entry_ends_with_newline.unwrap_or(false) {
-            if entry_indent.is_empty() {
-                Vec::new()
-            } else {
-                vec![NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    entry_indent,
-                ))]
+        let mut replaced = false;
+        let mut new_items = Vec::new();
+
+        for item in std::mem::take(&mut context.items) {
+            match item {
+                ObjectItem::Entry(mut entry) => {
+                    if Self::pair_matches_key(&entry, key) {
+                        entry.pair = NodeOrToken::Node(replace_pair_value(
+                            Self::pair_green(&entry)?,
+                            value,
+                            string_style,
+                        )?);
+                        replaced = true;
+                    }
+                    new_items.push(ObjectItem::Entry(entry));
+                }
+                ObjectItem::Standalone(block) => new_items.push(ObjectItem::Standalone(block)),
             }
-        } else {
-            let mut trivia = vec![NodeOrToken::Token(create_token(
-                SyntaxKind::Newline,
-                newline,
-            ))];
-            if !entry_indent.is_empty() {
-                trivia.push(NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    entry_indent,
-                )));
-            }
-            trivia
         }
-    } else if has_braces {
+
+        if !replaced {
+            ObjectInsertPlanner::new(&InsertFormat {
+                has_braces,
+                newline,
+                entry_indent: &entry_indent,
+                closing_indent: base_indent,
+            })
+            .insert_entry(&mut new_items, key, value, string_style)?;
+        }
+
+        Ok(context.rebuild(new_items))
+    }
+
+    pub(crate) fn remove_entry(obj_node: &RedNode, key: &str) -> Result<GreenNode, HjsonEditError> {
+        let mut context = ObjectLayoutContext::from_node(obj_node);
+        let mut found = false;
+        let mut pending_terminator: Option<EntryTerminator> = None;
+        let mut has_surviving_entry = false;
+        let mut new_items = Vec::new();
+
+        for item in std::mem::take(&mut context.items) {
+            match item {
+                ObjectItem::Entry(entry) if Self::pair_matches_key(&entry, key) => {
+                    found = true;
+                    if !has_surviving_entry {
+                        pending_terminator = Some(entry.terminator.clone());
+                    }
+                }
+                ObjectItem::Entry(entry) => {
+                    let entry = PendingTerminator::apply(entry, &mut pending_terminator);
+                    new_items.push(ObjectItem::Entry(entry));
+                    has_surviving_entry = true;
+                }
+                ObjectItem::Standalone(block) => new_items.push(ObjectItem::Standalone(block)),
+            }
+        }
+
+        if !found {
+            return Err(HjsonEditError::InvalidPath {
+                path: key.to_string(),
+            });
+        }
+
+        Ok(context.rebuild(new_items))
+    }
+
+    fn pair_matches_key(entry: &ObjectEntry, key: &str) -> bool {
+        let Some(pair_green) = entry.pair.as_node() else {
+            return false;
+        };
+        let pair_red = RedNode::new_root(pair_green.clone());
+        let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) else {
+            return false;
+        };
+        extract_key_text(&key_node).as_deref() == Some(key)
+    }
+
+    fn pair_green(entry: &ObjectEntry) -> Result<&GreenNode, HjsonEditError> {
+        entry.pair.as_node().ok_or(HjsonEditError::InvalidNodeKind {
+            expected: SyntaxKind::Pair,
+            found: SyntaxKind::Error,
+        })
+    }
+}
+
+struct ObjectLayoutContext {
+    lbrace: Option<GreenElement>,
+    rbrace: Option<GreenElement>,
+    items: Vec<ObjectItem>,
+}
+
+impl ObjectLayoutContext {
+    fn from_node(obj_node: &RedNode) -> Self {
+        let obj_green: GreenNode = obj_node.to_green();
+        let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
+        Self {
+            lbrace: children
+                .iter()
+                .find(|elem| is_token_of_kind(elem, SyntaxKind::LBrace))
+                .cloned(),
+            rbrace: children
+                .iter()
+                .find(|elem| is_token_of_kind(elem, SyntaxKind::RBrace))
+                .cloned(),
+            items: build_object_items(&children),
+        }
+    }
+
+    fn has_braces(&self) -> bool {
+        self.lbrace.is_some() && self.rbrace.is_some()
+    }
+
+    fn entry_indent(&self, base_indent: &str, indent_unit: &str) -> String {
+        detect_object_entry_indent(&self.items).unwrap_or_else(|| {
+            if self.has_braces() {
+                format!("{}{}", base_indent, indent_unit)
+            } else {
+                String::new()
+            }
+        })
+    }
+
+    fn rebuild(self, items: Vec<ObjectItem>) -> GreenNode {
+        create_node(
+            SyntaxKind::Object,
+            rebuild_object_children_for_format(self.lbrace, items, self.rbrace),
+        )
+    }
+}
+
+struct ObjectInsertPlanner<'a> {
+    has_braces: bool,
+    newline: &'a str,
+    entry_indent: &'a str,
+    closing_indent: &'a str,
+}
+
+impl<'a> ObjectInsertPlanner<'a> {
+    fn new(format: &'a InsertFormat<'a>) -> Self {
+        Self {
+            has_braces: format.has_braces,
+            newline: format.newline,
+            entry_indent: format.entry_indent,
+            closing_indent: format.closing_indent,
+        }
+    }
+
+    fn insert_entry(
+        &self,
+        items: &mut Vec<ObjectItem>,
+        key: &str,
+        value: &HjsonValue,
+        string_style: StringStyle,
+    ) -> Result<(), HjsonEditError> {
+        let new_entry = ObjectItem::Entry(ObjectEntry {
+            leading_line_trivia: self.leading_line_trivia(items),
+            leading_comments: Vec::new(),
+            pair: NodeOrToken::Node(create_pair_node(key, value, string_style, None)?),
+            trailing_inline_trivia: Vec::new(),
+            terminator: self.terminator(),
+        });
+
+        let mut trailing_standalone = Vec::new();
+        while matches!(items.last(), Some(ObjectItem::Standalone(_))) {
+            trailing_standalone.push(items.pop().expect("standalone item exists"));
+        }
+        trailing_standalone.reverse();
+
+        items.push(new_entry);
+        items.extend(trailing_standalone);
+        Ok(())
+    }
+
+    fn leading_line_trivia(&self, items: &[ObjectItem]) -> Vec<GreenElement> {
+        let has_existing_entries = items
+            .iter()
+            .any(|item| matches!(item, ObjectItem::Entry(_)));
+        let last_entry_ends_with_newline = items.iter().rev().find_map(|item| match item {
+            ObjectItem::Entry(entry) => {
+                Some(matches!(entry.terminator, EntryTerminator::Newline(_)))
+            }
+            ObjectItem::Standalone(_) => None,
+        });
+
+        if has_existing_entries {
+            if last_entry_ends_with_newline.unwrap_or(false) {
+                return self.indent_only();
+            }
+            return self.newline_with_indent();
+        }
+
+        if self.has_braces {
+            self.newline_with_indent()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn terminator(&self) -> EntryTerminator {
+        if !self.has_braces {
+            return EntryTerminator::EndOfContainer;
+        }
+
+        let mut suffix = vec![NodeOrToken::Token(create_token(
+            SyntaxKind::Newline,
+            self.newline,
+        ))];
+        if !self.closing_indent.is_empty() {
+            suffix.push(NodeOrToken::Token(create_token(
+                SyntaxKind::Whitespace,
+                self.closing_indent,
+            )));
+        }
+        EntryTerminator::Newline(suffix)
+    }
+
+    fn newline_with_indent(&self) -> Vec<GreenElement> {
         let mut trivia = vec![NodeOrToken::Token(create_token(
             SyntaxKind::Newline,
-            newline,
+            self.newline,
         ))];
-        if !entry_indent.is_empty() {
-            trivia.push(NodeOrToken::Token(create_token(
-                SyntaxKind::Whitespace,
-                entry_indent,
-            )));
-        }
+        trivia.extend(self.indent_only());
         trivia
-    } else {
-        Vec::new()
-    };
+    }
 
-    let mut terminator_suffix = Vec::new();
-    if has_braces {
-        terminator_suffix.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        )));
-        if !closing_indent.is_empty() {
-            terminator_suffix.push(NodeOrToken::Token(create_token(
+    fn indent_only(&self) -> Vec<GreenElement> {
+        if self.entry_indent.is_empty() {
+            Vec::new()
+        } else {
+            vec![NodeOrToken::Token(create_token(
                 SyntaxKind::Whitespace,
-                closing_indent,
-            )));
+                self.entry_indent,
+            ))]
         }
     }
+}
 
-    let new_entry = ObjectItem::Entry(ObjectEntry {
-        leading_line_trivia,
-        leading_comments: Vec::new(),
-        pair,
-        trailing_inline_trivia: Vec::new(),
-        terminator: if has_braces {
-            EntryTerminator::Newline(terminator_suffix)
-        } else {
-            EntryTerminator::EndOfContainer
-        },
-    });
+struct PendingTerminator;
 
-    let mut trailing_standalone = Vec::new();
-    while matches!(items.last(), Some(ObjectItem::Standalone(_))) {
-        trailing_standalone.push(items.pop().unwrap());
+impl PendingTerminator {
+    fn apply(entry: ObjectEntry, pending: &mut Option<EntryTerminator>) -> ObjectEntry {
+        let Some(EntryTerminator::Newline(suffix)) = pending.take() else {
+            return entry;
+        };
+
+        let mut modified_entry = entry;
+        if !modified_entry
+            .leading_line_trivia
+            .iter()
+            .any(|elem| is_token_of_kind(elem, SyntaxKind::Newline))
+        {
+            let mut merged = suffix;
+            merged.extend(modified_entry.leading_line_trivia);
+            modified_entry.leading_line_trivia = merged;
+        }
+        modified_entry
     }
-    trailing_standalone.reverse();
-
-    items.push(new_entry);
-    items.extend(trailing_standalone);
-    Ok(())
 }
 
 pub(crate) fn remove_object_entry(
     obj_node: &RedNode,
     key: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let obj_green: GreenNode = obj_node.to_green();
-    let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
-    let lbrace = children
-        .iter()
-        .find(|e| is_token_of_kind(e, SyntaxKind::LBrace))
-        .cloned();
-    let rbrace = children
-        .iter()
-        .find(|e| is_token_of_kind(e, SyntaxKind::RBrace))
-        .cloned();
-    let items = build_object_items(&children);
-
-    let mut found = false;
-    let mut new_items: Vec<ObjectItem> = Vec::new();
-    let mut pending_terminator: Option<EntryTerminator> = None;
-    let mut has_surviving_entry = false;
-
-    for item in items {
-        match &item {
-            ObjectItem::Entry(entry) => {
-                if let NodeOrToken::Node(pair_node) = &entry.pair {
-                    let pair_red = RedNode::new_root(pair_node.clone());
-                    if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
-                        if let Some(key_text) = extract_key_text(&key_node) {
-                            if key_text == key {
-                                found = true;
-                                if !has_surviving_entry {
-                                    pending_terminator = Some(entry.terminator.clone());
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                let mut modified_entry = entry.clone();
-                if let Some(ref term) = pending_terminator {
-                    if let EntryTerminator::Newline(suffix) = term {
-                        let mut new_leading = entry.leading_line_trivia.clone();
-                        if !new_leading
-                            .iter()
-                            .any(|elem| is_token_of_kind(elem, SyntaxKind::Newline))
-                        {
-                            let mut merged = suffix.clone();
-                            merged.extend(new_leading);
-                            new_leading = merged;
-                        }
-                        modified_entry.leading_line_trivia = new_leading;
-                    }
-                    pending_terminator = None;
-                }
-
-                new_items.push(ObjectItem::Entry(modified_entry));
-                has_surviving_entry = true;
-            }
-            ObjectItem::Standalone(_) => {
-                new_items.push(item);
-            }
-        }
-    }
-
-    if !found {
-        return Err(HjsonEditError::InvalidPath {
-            path: key.to_string(),
-        });
-    }
-
-    Ok(create_node(
-        SyntaxKind::Object,
-        rebuild_object_children_for_format(lbrace, new_items, rbrace),
-    ))
+    ObjectEditor::remove_entry(obj_node, key)
 }
 
 pub(crate) fn set_object_entry(
@@ -205,73 +310,17 @@ pub(crate) fn set_object_entry(
     indent_unit: &str,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let obj_green: GreenNode = obj_node.to_green();
-    let children: Vec<GreenElement> = obj_green.children().map(clone_element).collect();
-
-    let lbrace = children
-        .iter()
-        .find(|c| is_token_of_kind(c, SyntaxKind::LBrace))
-        .cloned();
-    let rbrace = children
-        .iter()
-        .find(|c| is_token_of_kind(c, SyntaxKind::RBrace))
-        .cloned();
-    let items = build_object_items(&children);
-    let mut found = false;
-    let mut new_items = Vec::new();
-    let has_braces = lbrace.is_some() && rbrace.is_some();
-    let entry_indent = detect_object_entry_indent(&items).unwrap_or_else(|| {
-        if has_braces {
-            format!("{}{}", base_indent, indent_unit)
-        } else {
-            String::new()
-        }
-    });
-
-    for item in items {
-        match item {
-            ObjectItem::Entry(mut entry) => {
-                if let NodeOrToken::Node(pair_green) = &entry.pair {
-                    let pair_red = RedNode::new_root(pair_green.clone());
-                    if let Some(key_node) = pair_red.child_by_kind(SyntaxKind::Key) {
-                        if let Some(key_text) = extract_key_text(&key_node) {
-                            if key_text == key {
-                                entry.pair = NodeOrToken::Node(replace_pair_value(
-                                    pair_green,
-                                    value,
-                                    string_style,
-                                )?);
-                                found = true;
-                            }
-                        }
-                    }
-                }
-                new_items.push(ObjectItem::Entry(entry));
-            }
-            ObjectItem::Standalone(block) => new_items.push(ObjectItem::Standalone(block)),
-        }
-    }
-
-    if !found {
-        insert_object_entry_without_reformat(
-            &mut new_items,
-            key,
-            value,
-            string_style,
-            &InsertFormat {
-                has_braces,
-                newline,
-                entry_indent: &entry_indent,
-                closing_indent: base_indent,
-            },
-        )?;
-    }
-
-    Ok(create_node(
-        SyntaxKind::Object,
-        rebuild_object_children_for_format(lbrace, new_items, rbrace),
-    ))
+    ObjectEditor::set_entry(
+        obj_node,
+        key,
+        value,
+        string_style,
+        base_indent,
+        indent_unit,
+        newline,
+    )
 }
+
 pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {
     items.iter().find_map(|item| match item {
         ObjectItem::Entry(entry) => {

@@ -5,71 +5,264 @@ use crate::edit::high_level::{
 };
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::RedNode;
-use crate::syntax::red::RedNodeCoreExt;
+use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::{GreenNode, NodeOrToken};
+
+pub(crate) struct ArrayEditor;
+
+impl ArrayEditor {
+    pub(crate) fn remove_entry(
+        arr_node: &RedNode,
+        index: usize,
+    ) -> Result<GreenNode, HjsonEditError> {
+        let mut context = ArrayLayoutContext::from_node(arr_node);
+        let mut found = false;
+        let mut entry_index = 0usize;
+        let mut pending_leading = Vec::new();
+        let mut new_items = Vec::new();
+
+        for item in std::mem::take(&mut context.items) {
+            match item {
+                ArrayItem::Entry(mut entry) => {
+                    if entry_index == index {
+                        found = true;
+                        if new_items
+                            .iter()
+                            .all(|item| !matches!(item, ArrayItem::Entry(_)))
+                        {
+                            pending_leading = entry.leading_line_trivia.clone();
+                        }
+                        entry_index += 1;
+                        continue;
+                    }
+
+                    if !pending_leading.is_empty() {
+                        let mut merged = pending_leading;
+                        merged.extend(entry.leading_line_trivia);
+                        entry.leading_line_trivia = merged;
+                        pending_leading = Vec::new();
+                    }
+
+                    new_items.push(ArrayItem::Entry(entry));
+                    entry_index += 1;
+                }
+                ArrayItem::Standalone(block) => new_items.push(ArrayItem::Standalone(block)),
+            }
+        }
+
+        if !found {
+            return Err(HjsonEditError::InvalidIndex {
+                index,
+                count: entry_index,
+            });
+        }
+
+        Ok(context.rebuild(new_items))
+    }
+
+    pub(crate) fn insert_entry(
+        arr_node: &RedNode,
+        index: usize,
+        value: &HjsonValue,
+        string_style: StringStyle,
+    ) -> Result<GreenNode, HjsonEditError> {
+        let mut context = ArrayLayoutContext::from_node(arr_node);
+        let mut planner = ArrayInsertPlanner::new(index);
+        let mut new_items = Vec::new();
+
+        for item in std::mem::take(&mut context.items) {
+            match item {
+                ArrayItem::Entry(entry) => {
+                    planner.record_indent(&entry);
+                    planner.insert_before_if_needed(&mut new_items, &entry, value, string_style)?;
+                    new_items.push(ArrayItem::Entry(entry));
+                    planner.entry_index += 1;
+                }
+                ArrayItem::Standalone(block) => planner.route_standalone(&mut new_items, block),
+            }
+        }
+
+        planner.finish(&mut new_items, value, string_style, &context)?;
+        Ok(context.rebuild(new_items))
+    }
+}
+
+struct ArrayLayoutContext {
+    lbracket: Option<GreenElement>,
+    rbracket: Option<GreenElement>,
+    items: Vec<ArrayItem>,
+}
+
+impl ArrayLayoutContext {
+    fn from_node(arr_node: &RedNode) -> Self {
+        let arr_green: GreenNode = arr_node.to_green();
+        let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
+        Self {
+            lbracket: children
+                .iter()
+                .find(|elem| is_token_of_kind(elem, SyntaxKind::LBracket))
+                .cloned(),
+            rbracket: children
+                .iter()
+                .find(|elem| is_token_of_kind(elem, SyntaxKind::RBracket))
+                .cloned(),
+            items: build_array_items(&children),
+        }
+    }
+
+    fn rebuild(self, items: Vec<ArrayItem>) -> GreenNode {
+        create_node(
+            SyntaxKind::Array,
+            crate::edit::high_level::rebuild_array_children_for_format(
+                self.lbracket,
+                items,
+                self.rbracket,
+            ),
+        )
+    }
+
+    fn has_closing_bracket(&self) -> bool {
+        self.rbracket
+            .as_ref()
+            .is_some_and(|elem| is_token_of_kind(elem, SyntaxKind::RBracket))
+    }
+}
+
+struct ArrayInsertPlanner {
+    insert_at: usize,
+    is_append: bool,
+    inserted: bool,
+    entry_index: usize,
+    last_entry_indent: Option<GreenElement>,
+    trailing_standalone: Vec<ArrayItem>,
+}
+
+impl ArrayInsertPlanner {
+    fn new(index: usize) -> Self {
+        Self {
+            insert_at: index,
+            is_append: index == usize::MAX,
+            inserted: false,
+            entry_index: 0,
+            last_entry_indent: None,
+            trailing_standalone: Vec::new(),
+        }
+    }
+
+    fn record_indent(&mut self, entry: &ArrayEntry) {
+        if let Some(indent) = entry
+            .leading_line_trivia
+            .iter()
+            .rev()
+            .find(|elem| is_token_of_kind(elem, SyntaxKind::Whitespace))
+            .cloned()
+        {
+            self.last_entry_indent = Some(indent);
+        }
+    }
+
+    fn insert_before_if_needed(
+        &mut self,
+        new_items: &mut Vec<ArrayItem>,
+        entry: &ArrayEntry,
+        value: &HjsonValue,
+        string_style: StringStyle,
+    ) -> Result<(), HjsonEditError> {
+        if self.is_append || self.inserted || self.entry_index != self.insert_at {
+            return Ok(());
+        }
+
+        new_items.push(self.create_entry(
+            entry.leading_line_trivia.clone(),
+            EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
+                SyntaxKind::Newline,
+                "\n",
+            ))]),
+            value,
+            string_style,
+        )?);
+        self.inserted = true;
+        Ok(())
+    }
+
+    fn route_standalone(
+        &mut self,
+        new_items: &mut Vec<ArrayItem>,
+        block: crate::edit::high_level::StandaloneTriviaBlock,
+    ) {
+        if self.is_append {
+            self.trailing_standalone.push(ArrayItem::Standalone(block));
+        } else {
+            new_items.push(ArrayItem::Standalone(block));
+        }
+    }
+
+    fn finish(
+        mut self,
+        new_items: &mut Vec<ArrayItem>,
+        value: &HjsonValue,
+        string_style: StringStyle,
+        context: &ArrayLayoutContext,
+    ) -> Result<(), HjsonEditError> {
+        if !self.inserted {
+            new_items.push(self.create_entry(
+                self.leading_line_trivia(new_items),
+                self.terminator(context),
+                value,
+                string_style,
+            )?);
+        }
+
+        new_items.append(&mut self.trailing_standalone);
+        Ok(())
+    }
+
+    fn leading_line_trivia(&self, items: &[ArrayItem]) -> Vec<GreenElement> {
+        if items.iter().any(|item| matches!(item, ArrayItem::Entry(_))) {
+            self.last_entry_indent.iter().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn terminator(&self, context: &ArrayLayoutContext) -> EntryTerminator {
+        if self.trailing_standalone.is_empty() {
+            if context.has_closing_bracket() {
+                return EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
+                    SyntaxKind::Newline,
+                    "\n",
+                ))]);
+            }
+            return EntryTerminator::EndOfContainer;
+        }
+
+        EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
+            SyntaxKind::Newline,
+            "\n",
+        ))])
+    }
+
+    fn create_entry(
+        &self,
+        leading_line_trivia: Vec<GreenElement>,
+        terminator: EntryTerminator,
+        value: &HjsonValue,
+        string_style: StringStyle,
+    ) -> Result<ArrayItem, HjsonEditError> {
+        Ok(ArrayItem::Entry(ArrayEntry {
+            leading_line_trivia,
+            value: NodeOrToken::Node(create_value_node(value, string_style, None)?),
+            trailing_inline_trivia: Vec::new(),
+            terminator,
+        }))
+    }
+}
 
 pub(crate) fn remove_array_entry(
     arr_node: &RedNode,
     index: usize,
 ) -> Result<GreenNode, HjsonEditError> {
-    let arr_green: GreenNode = arr_node.to_green();
-    let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
-    let lbracket = children
-        .iter()
-        .find(|c| is_token_of_kind(c, SyntaxKind::LBracket))
-        .cloned();
-    let rbracket = children
-        .iter()
-        .find(|c| is_token_of_kind(c, SyntaxKind::RBracket))
-        .cloned();
-    let items = build_array_items(&children);
-
-    let mut found = false;
-    let mut entry_index = 0usize;
-    let mut new_items: Vec<ArrayItem> = Vec::new();
-    let mut pending_leading: Vec<GreenElement> = Vec::new();
-
-    for item in items {
-        match item {
-            ArrayItem::Entry(mut entry) => {
-                if entry_index == index {
-                    found = true;
-                    if new_items
-                        .iter()
-                        .all(|item| !matches!(item, ArrayItem::Entry(_)))
-                    {
-                        pending_leading = entry.leading_line_trivia.clone();
-                    }
-                    entry_index += 1;
-                    continue;
-                }
-
-                if !pending_leading.is_empty() {
-                    let mut merged = pending_leading;
-                    merged.extend(entry.leading_line_trivia);
-                    entry.leading_line_trivia = merged;
-                    pending_leading = Vec::new();
-                }
-
-                new_items.push(ArrayItem::Entry(entry));
-                entry_index += 1;
-            }
-            ArrayItem::Standalone(block) => new_items.push(ArrayItem::Standalone(block)),
-        }
-    }
-
-    if !found {
-        return Err(HjsonEditError::InvalidIndex {
-            index,
-            count: entry_index,
-        });
-    }
-
-    Ok(create_node(
-        SyntaxKind::Array,
-        crate::edit::high_level::rebuild_array_children_for_format(lbracket, new_items, rbracket),
-    ))
+    ArrayEditor::remove_entry(arr_node, index)
 }
 
 pub(crate) fn insert_array_entry_structural(
@@ -78,104 +271,5 @@ pub(crate) fn insert_array_entry_structural(
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> Result<GreenNode, HjsonEditError> {
-    let arr_green: GreenNode = arr_node.to_green();
-    let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
-    let lbracket = children
-        .iter()
-        .find(|c| is_token_of_kind(c, SyntaxKind::LBracket))
-        .cloned();
-    let rbracket = children
-        .iter()
-        .find(|c| is_token_of_kind(c, SyntaxKind::RBracket))
-        .cloned();
-    let items = build_array_items(&children);
-
-    let mut new_items = Vec::new();
-    let mut entry_index = 0usize;
-    let insert_at = index;
-    let is_append = index == usize::MAX;
-    let mut inserted = false;
-    let mut last_entry_indent: Option<GreenElement> = None;
-    let mut trailing_standalone = Vec::new();
-
-    for item in items {
-        match item {
-            ArrayItem::Entry(entry) => {
-                if let Some(indent) = entry
-                    .leading_line_trivia
-                    .iter()
-                    .rev()
-                    .find(|elem| is_token_of_kind(elem, SyntaxKind::Whitespace))
-                    .cloned()
-                {
-                    last_entry_indent = Some(indent);
-                }
-                if !is_append && !inserted && entry_index == insert_at {
-                    new_items.push(ArrayItem::Entry(ArrayEntry {
-                        leading_line_trivia: entry.leading_line_trivia.clone(),
-                        value: NodeOrToken::Node(create_value_node(value, string_style, None)?),
-                        trailing_inline_trivia: Vec::new(),
-                        terminator: EntryTerminator::Newline(vec![NodeOrToken::Token(
-                            create_token(SyntaxKind::Newline, "\n"),
-                        )]),
-                    }));
-                    inserted = true;
-                }
-
-                entry_index += 1;
-                new_items.push(ArrayItem::Entry(entry));
-            }
-            ArrayItem::Standalone(block) => {
-                if is_append {
-                    trailing_standalone.push(ArrayItem::Standalone(block));
-                } else {
-                    new_items.push(ArrayItem::Standalone(block));
-                }
-            }
-        }
-    }
-
-    if !inserted {
-        let terminator = if trailing_standalone.is_empty() {
-            match rbracket.as_ref() {
-                Some(elem) if is_token_of_kind(elem, SyntaxKind::RBracket) => {
-                    EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-                        SyntaxKind::Newline,
-                        "\n",
-                    ))])
-                }
-                _ => EntryTerminator::EndOfContainer,
-            }
-        } else {
-            EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-                SyntaxKind::Newline,
-                "\n",
-            ))])
-        };
-        let leading_line_trivia = if new_items
-            .iter()
-            .any(|item| matches!(item, ArrayItem::Entry(_)))
-        {
-            let mut trivia = Vec::new();
-            if let Some(indent) = last_entry_indent {
-                trivia.push(indent);
-            }
-            trivia
-        } else {
-            Vec::new()
-        };
-        new_items.push(ArrayItem::Entry(ArrayEntry {
-            leading_line_trivia,
-            value: NodeOrToken::Node(create_value_node(value, string_style, None)?),
-            trailing_inline_trivia: Vec::new(),
-            terminator,
-        }));
-    }
-
-    new_items.extend(trailing_standalone);
-
-    Ok(create_node(
-        SyntaxKind::Array,
-        crate::edit::high_level::rebuild_array_children_for_format(lbracket, new_items, rbracket),
-    ))
+    ArrayEditor::insert_entry(arr_node, index, value, string_style)
 }

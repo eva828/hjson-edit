@@ -72,5 +72,3 @@ impl GreenNodeExt for rowan::GreenNode {
         node_text_recursive(self)
     }
 }
-
-

@@ -64,8 +64,11 @@ fn nested_error_line_numbers() {
     let result = HjsonDocument::parse(input);
     if let Err(errors) = result {
         for error in errors {
-            assert!(error.line >= 3 && error.line <= 5,
-                "Error should be on line ~4, got {}", error.line);
+            assert!(
+                error.line >= 3 && error.line <= 5,
+                "Error should be on line ~4, got {}",
+                error.line
+            );
         }
     } else {
         panic!("Expected error for invalid syntax");
@@ -122,7 +125,10 @@ fn crlf_handling() {
     let input = "{\r\n  key: value\r\n}";
     let doc = HjsonDocument::parse(input).unwrap();
     let output = doc.to_string();
-    assert!(output.contains("key: value"), "Should parse CRLF content correctly");
+    assert!(
+        output.contains("key: value"),
+        "Should parse CRLF content correctly"
+    );
     // RFC準拠: CRは正規化される
     assert!(!output.contains('\r'), "CR should be normalized to LF");
 }
