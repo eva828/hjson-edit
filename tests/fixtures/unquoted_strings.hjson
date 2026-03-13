@@ -1,5 +1,0 @@
-{
-  key1: unquoted value,
-  key2: another unquoted value,
-  "quoted key": "quoted_value"
-}

@@ -1,6 +1,0 @@
-{
-  unclosed_string: "hello
-  invalid_hex: 0xZZ
-  missing_colon key value
-  trailing_comma: value,
-}
