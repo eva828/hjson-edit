@@ -271,21 +271,7 @@ impl Lexer {
                 return;
             }
 
-            let c = self.advance().unwrap();
-            text.push(c);
-
-            if c == '\n' {
-                self.line += 1;
-                self.column = 1;
-            } else if c == '\r' {
-                // CRを検出したら行番号をインクリメント（RFC準拠）
-                self.line += 1;
-                self.column = 1;
-                // 次が\nなら消費（CRLFの場合）
-                if self.peek() == Some('\n') {
-                    self.advance();
-                }
-            }
+            self.push_multiline_text_char(&mut text);
         }
 
         self.errors.push(LexError::new(
@@ -306,21 +292,7 @@ impl Lexer {
                 return;
             }
 
-            let c = self.advance().unwrap();
-            text.push(c);
-
-            if c == '\n' {
-                self.line += 1;
-                self.column = 1;
-            } else if c == '\r' {
-                // CRを検出したら行番号をインクリメント（RFC準拠）
-                self.line += 1;
-                self.column = 1;
-                // 次が\nなら消費（CRLFの場合）
-                if self.peek() == Some('\n') {
-                    self.advance();
-                }
-            }
+            self.push_multiline_text_char(&mut text);
         }
 
         self.errors.push(LexError::new(
@@ -329,6 +301,26 @@ impl Lexer {
             start_col,
         ));
         self.emit(SyntaxKind::BlockString, text, start_line, start_col);
+    }
+
+    fn push_multiline_text_char(&mut self, text: &mut String) {
+        let c = self.advance().unwrap();
+        match c {
+            '\n' => {
+                text.push('\n');
+                self.line += 1;
+                self.column = 1;
+            }
+            '\r' => {
+                if self.peek() == Some('\n') {
+                    self.advance();
+                }
+                text.push('\n');
+                self.line += 1;
+                self.column = 1;
+            }
+            other => text.push(other),
+        }
     }
 
     fn read_double_quoted_string(&mut self, start_line: usize, start_col: usize) {

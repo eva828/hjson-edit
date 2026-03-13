@@ -63,6 +63,23 @@ fn block_strings() {
     assert_eq!(output, reparsed.to_string());
 }
 
+#[test]
+fn block_strings_with_crlf() {
+    let input = "text: '''\r\n    line1\r\n      line2\r\n    '''\r\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    assert_eq!(
+        doc.get("text"),
+        Some(hjson_edit::HjsonValue::String("line1\n  line2".to_string()))
+    );
+
+    let output = doc.to_string();
+    assert!(output.contains("'''\n    line1\n      line2\n    '''"));
+
+    let reparsed = HjsonDocument::parse(&output).unwrap();
+    assert_eq!(reparsed.get("text"), doc.get("text"));
+}
+
 /// Test deeply nested structures
 #[test]
 fn nested_structures() {
