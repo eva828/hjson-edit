@@ -1000,7 +1000,9 @@ fn header_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
         break;
     }
 
-    elements.try_detect_newline().unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
+    elements
+        .try_detect_newline()
+        .unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
 }
 
 fn footer_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
@@ -1029,7 +1031,9 @@ fn footer_comment_newline_kind(document: &HjsonDocument) -> NewlineKind {
     }
     elements.reverse();
 
-    elements.try_detect_newline().unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
+    elements
+        .try_detect_newline()
+        .unwrap_or_else(|| document.try_detect_newline().unwrap_or_default())
 }
 
 fn remove_inline_comment(
