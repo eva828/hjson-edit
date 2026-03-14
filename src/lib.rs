@@ -25,4 +25,4 @@ pub use format::FormatTarget;
 pub use parser::parser::ParseError;
 pub use syntax::green::GreenElement;
 pub use syntax::kind::SyntaxKind;
-pub use syntax::red::{RedNode, RedNodeCoreExt};
+pub use syntax::red::{AstDebugExt, RedNode, RedNodeCoreExt};

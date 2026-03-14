@@ -2,7 +2,9 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue, StringStyle};
+use hjson_edit::{
+    AstDebugExt, CommentPath, CommentStyle, HjsonDocument, HjsonValue, RedNode, StringStyle,
+};
 
 #[derive(Debug, Clone)]
 enum EditOp {
@@ -536,8 +538,9 @@ fn run_parse(matches: &ArgMatches) -> Result<()> {
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
     match HjsonDocument::parse(&content) {
-        Ok(_) => {
-            println!("Parsed successfully!");
+        Ok(document) => {
+            let red = RedNode::new_root(document.green_node().clone());
+            red.print_ast();
             Ok(())
         }
         Err(errors) => anyhow::bail!(ParseReporter::render(&errors)),
