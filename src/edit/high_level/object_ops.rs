@@ -274,8 +274,16 @@ impl<'a> ObjectInsertPlanner<'a> {
             }
         }
 
+        // If a newline was seen and there is trailing whitespace after it, use that whitespace.
+        // If a newline was seen but no whitespace follows it, return only the indent (no extra newline)
+        // so the existing newline from the previous terminator is kept and the new entry is
+        // indented correctly. If no newline was seen at all, return newline + indent.
         if saw_newline {
-            trailing_whitespace
+            if !trailing_whitespace.is_empty() {
+                trailing_whitespace
+            } else {
+                self.indent_only()
+            }
         } else {
             self.newline_with_indent()
         }
