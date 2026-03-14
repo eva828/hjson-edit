@@ -53,6 +53,9 @@ pub enum HjsonEditError {
         expected: SyntaxKind,
         found: SyntaxKind,
     },
+    /// 空の配列に対してpopを試みた
+    #[error("Cannot pop from an empty array")]
+    EmptyArray,
     /// 低レベルAPIのエラー
     #[error("{0}")]
     LowLevel(#[from] LowLevelEditError),
@@ -762,6 +765,7 @@ impl HjsonDocument {
     }
 
     /// パスに対応する値を設定
+    #[must_use]
     pub fn set(
         &self,
         path: impl IntoPath,
@@ -773,6 +777,7 @@ impl HjsonDocument {
     }
 
     /// パスに対応する値を設定（文字列スタイル指定付き）
+    #[must_use]
     pub fn set_with_style(
         &self,
         path: impl IntoPath,
@@ -785,6 +790,7 @@ impl HjsonDocument {
     }
 
     /// キー/値を削除
+    #[must_use]
     pub fn remove(&self, path: impl IntoPath) -> Result<Self, HjsonEditError> {
         self.edit_remove(path)?
             .format()
@@ -792,6 +798,7 @@ impl HjsonDocument {
     }
 
     /// オブジェクトに新しいキーを追加
+    #[must_use]
     pub fn insert(
         &self,
         path: impl IntoPath,
@@ -802,6 +809,7 @@ impl HjsonDocument {
     }
 
     /// オブジェクトに新しいキーを追加（文字列スタイル指定付き）
+    #[must_use]
     pub fn insert_with_style(
         &self,
         path: impl IntoPath,
@@ -815,6 +823,7 @@ impl HjsonDocument {
     }
 
     /// 配列の末尾に要素を追加
+    #[must_use]
     pub fn push(
         &self,
         path: impl IntoPath,
@@ -826,6 +835,7 @@ impl HjsonDocument {
     }
 
     /// 配列の末尾に要素を追加（文字列スタイル指定付き）
+    #[must_use]
     pub fn push_with_style(
         &self,
         path: impl IntoPath,
@@ -838,6 +848,7 @@ impl HjsonDocument {
     }
 
     /// 配列の末尾の要素を削除
+    #[must_use]
     pub fn pop(&self, path: impl IntoPath) -> Result<Self, HjsonEditError> {
         let path = path.into_path()?;
 
@@ -884,7 +895,7 @@ impl HjsonDocument {
         let children: Vec<GreenElement> = arr_green.children().map(clone_element).collect();
 
         let Some(remove_idx) = ArrayValueLocator::last_value_index(&children) else {
-            return Err(HjsonEditError::InvalidIndex { index: 0, count: 0 });
+            return Err(HjsonEditError::EmptyArray);
         };
 
         let new_arr = arr_green.remove_child(remove_idx)?;
@@ -892,6 +903,7 @@ impl HjsonDocument {
     }
 
     /// 配列の指定位置に要素を挿入
+    #[must_use]
     pub fn insert_at(
         &self,
         path: impl IntoPath,
@@ -904,6 +916,7 @@ impl HjsonDocument {
     }
 
     /// 配列の指定位置に要素を挿入（文字列スタイル指定付き）
+    #[must_use]
     pub fn insert_at_with_style(
         &self,
         path: impl IntoPath,
@@ -917,6 +930,7 @@ impl HjsonDocument {
     }
 
     /// 配列の指定位置の要素を削除
+    #[must_use]
     pub fn remove_at(&self, path: impl IntoPath, index: usize) -> Result<Self, HjsonEditError> {
         self.edit_remove_at(path, index)?
             .format()
@@ -934,6 +948,7 @@ impl HjsonDocument {
     }
 
     /// コメントを設定
+    #[must_use]
     pub fn comment_set(
         &self,
         path: &CommentPath,
@@ -944,6 +959,7 @@ impl HjsonDocument {
     }
 
     /// コメントに行を追加
+    #[must_use]
     pub fn comment_append(
         &self,
         path: &CommentPath,
@@ -954,6 +970,7 @@ impl HjsonDocument {
     }
 
     /// コメントを削除
+    #[must_use]
     pub fn comment_remove(&self, path: &CommentPath) -> Result<Self, HjsonEditError> {
         crate::edit::comments::comment_remove(self, path)
     }

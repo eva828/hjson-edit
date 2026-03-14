@@ -71,38 +71,36 @@ impl Language for HjsonLanguage {
     type Kind = SyntaxKind;
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
-        #[allow(clippy::enum_glob_use)]
-        use SyntaxKind::*;
-        const KINDS: &[SyntaxKind] = &[
-            LBrace,
-            RBrace,
-            LBracket,
-            RBracket,
-            Colon,
-            Comma,
-            True,
-            False,
-            Null,
-            Integer,
-            Float,
-            String,
-            BlockString,
-            UnquotedString,
-            Ident,
-            LineComment,
-            HashComment,
-            BlockComment,
-            Whitespace,
-            Newline,
-            Root,
-            Object,
-            Array,
-            Pair,
-            Key,
-            Value,
-            Error,
-        ];
-        KINDS[raw.0 as usize]
+        match raw.0 {
+            0 => SyntaxKind::LBrace,
+            1 => SyntaxKind::RBrace,
+            2 => SyntaxKind::LBracket,
+            3 => SyntaxKind::RBracket,
+            4 => SyntaxKind::Colon,
+            5 => SyntaxKind::Comma,
+            6 => SyntaxKind::True,
+            7 => SyntaxKind::False,
+            8 => SyntaxKind::Null,
+            9 => SyntaxKind::Integer,
+            10 => SyntaxKind::Float,
+            11 => SyntaxKind::String,
+            12 => SyntaxKind::BlockString,
+            13 => SyntaxKind::UnquotedString,
+            14 => SyntaxKind::Ident,
+            15 => SyntaxKind::LineComment,
+            16 => SyntaxKind::HashComment,
+            17 => SyntaxKind::BlockComment,
+            18 => SyntaxKind::Whitespace,
+            19 => SyntaxKind::Newline,
+            20 => SyntaxKind::Root,
+            21 => SyntaxKind::Object,
+            22 => SyntaxKind::Array,
+            23 => SyntaxKind::Pair,
+            24 => SyntaxKind::Key,
+            25 => SyntaxKind::Value,
+            26 => SyntaxKind::Error,
+            n => panic!("Unknown SyntaxKind: {n}"),
+        }
     }
 
     fn kind_to_raw(kind: SyntaxKind) -> rowan::SyntaxKind {
@@ -172,5 +170,48 @@ mod tests {
         let raw: rowan::SyntaxKind = kind.into();
         let converted = HjsonLanguage::kind_from_raw(raw);
         assert_eq!(kind, converted);
+    }
+
+    /// 全SyntaxKindバリアントの往復変換（kind_to_raw → kind_from_raw）が一致することを検証
+    ///
+    /// これにより kind_from_raw の match アームが全バリアントを網羅していることが
+    /// テスト実行時に保証される。バリアントを追加した場合はここに追加すること。
+    #[test]
+    fn test_all_kind_roundtrip() {
+        use SyntaxKind::*;
+        let all_kinds = [
+            LBrace,
+            RBrace,
+            LBracket,
+            RBracket,
+            Colon,
+            Comma,
+            True,
+            False,
+            Null,
+            Integer,
+            Float,
+            String,
+            BlockString,
+            UnquotedString,
+            Ident,
+            LineComment,
+            HashComment,
+            BlockComment,
+            Whitespace,
+            Newline,
+            Root,
+            Object,
+            Array,
+            Pair,
+            Key,
+            Value,
+            Error,
+        ];
+        for kind in all_kinds {
+            let raw = HjsonLanguage::kind_to_raw(kind);
+            let roundtripped = HjsonLanguage::kind_from_raw(raw);
+            assert_eq!(kind, roundtripped, "Roundtrip failed for {:?}", kind);
+        }
     }
 }
