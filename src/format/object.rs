@@ -1,4 +1,3 @@
-use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::{
     build_object_items, clone_element, detect_object_entry_indent, is_token_of_kind,
     EntryTerminator, FormatError, ObjectItem,
@@ -34,8 +33,7 @@ impl<'a> ObjectFormatPass<'a> {
         let mut formatted_items = self.format_items(&context)?;
         self.normalize_terminators(&mut formatted_items, context.is_braceless);
         self.normalize_standalone_blocks(&mut formatted_items, &context.entry_indent);
-        Ok(create_node(
-            SyntaxKind::Object,
+        Ok(SyntaxKind::Object.create_node(
             crate::edit::high_level::rebuild_object_children_for_format(
                 context.lbrace,
                 formatted_items,
@@ -84,10 +82,9 @@ impl<'a> ObjectFormatPass<'a> {
             entry.leading_line_trivia = if is_first_entry {
                 newline_indent_elements(self.newline, &context.entry_indent)
             } else if !context.entry_indent.is_empty() {
-                vec![NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    &context.entry_indent,
-                ))]
+                vec![NodeOrToken::Token(
+                    SyntaxKind::Whitespace.create_token(&context.entry_indent),
+                )]
             } else {
                 Vec::new()
             };
@@ -110,7 +107,7 @@ impl<'a> ObjectFormatPass<'a> {
             if let ObjectItem::Entry(entry) = &mut items[window[0]] {
                 if matches!(entry.terminator, EntryTerminator::EndOfContainer) {
                     entry.terminator = EntryTerminator::Newline(vec![NodeOrToken::Token(
-                        create_token(SyntaxKind::Newline, self.newline),
+                        SyntaxKind::Newline.create_token(self.newline),
                     )]);
                 }
             }

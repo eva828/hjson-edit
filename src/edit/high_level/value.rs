@@ -1,4 +1,3 @@
-use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
     clone_element, HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
@@ -147,21 +146,17 @@ impl ValueCodec {
                 text,
                 StringStyleResolver::resolve(text, string_style, existing_style),
             ))),
-            HjsonValue::Integer(value) => Ok(NodeOrToken::Token(create_token(
-                SyntaxKind::Integer,
-                value.to_string(),
-            ))),
-            HjsonValue::Float(value) => Ok(NodeOrToken::Token(create_token(
-                SyntaxKind::Float,
-                format!("{value}"),
-            ))),
-            HjsonValue::Bool(true) => {
-                Ok(NodeOrToken::Token(create_token(SyntaxKind::True, "true")))
-            }
+            HjsonValue::Integer(value) => Ok(NodeOrToken::Token(
+                SyntaxKind::Integer.create_token(value.to_string()),
+            )),
+            HjsonValue::Float(value) => Ok(NodeOrToken::Token(
+                SyntaxKind::Float.create_token(format!("{value}")),
+            )),
+            HjsonValue::Bool(true) => Ok(NodeOrToken::Token(SyntaxKind::True.create_token("true"))),
             HjsonValue::Bool(false) => {
-                Ok(NodeOrToken::Token(create_token(SyntaxKind::False, "false")))
+                Ok(NodeOrToken::Token(SyntaxKind::False.create_token("false")))
             }
-            HjsonValue::Null => Ok(NodeOrToken::Token(create_token(SyntaxKind::Null, "null"))),
+            HjsonValue::Null => Ok(NodeOrToken::Token(SyntaxKind::Null.create_token("null"))),
             HjsonValue::Array(items) => Self::array_to_green_element(items, string_style),
             HjsonValue::Object(pairs) => Self::object_to_green_element(pairs, string_style),
         }
@@ -171,10 +166,10 @@ impl ValueCodec {
         items: &[HjsonValue],
         string_style: StringStyle,
     ) -> Result<GreenElement, HjsonEditError> {
-        let mut children = vec![NodeOrToken::Token(create_token(SyntaxKind::LBracket, "["))];
+        let mut children = vec![NodeOrToken::Token(SyntaxKind::LBracket.create_token("["))];
         for (index, item) in items.iter().enumerate() {
             if index > 0 {
-                children.push(NodeOrToken::Token(create_token(SyntaxKind::Comma, ",")));
+                children.push(NodeOrToken::Token(SyntaxKind::Comma.create_token(",")));
             }
             children.push(NodeOrToken::Node(Self::create_value_node(
                 item,
@@ -182,18 +177,18 @@ impl ValueCodec {
                 None,
             )?));
         }
-        children.push(NodeOrToken::Token(create_token(SyntaxKind::RBracket, "]")));
-        Ok(NodeOrToken::Node(create_node(SyntaxKind::Array, children)))
+        children.push(NodeOrToken::Token(SyntaxKind::RBracket.create_token("]")));
+        Ok(NodeOrToken::Node(SyntaxKind::Array.create_node(children)))
     }
 
     fn object_to_green_element(
         pairs: &[(String, HjsonValue)],
         string_style: StringStyle,
     ) -> Result<GreenElement, HjsonEditError> {
-        let mut children = vec![NodeOrToken::Token(create_token(SyntaxKind::LBrace, "{"))];
+        let mut children = vec![NodeOrToken::Token(SyntaxKind::LBrace.create_token("{"))];
         for (index, (key, value)) in pairs.iter().enumerate() {
             if index > 0 {
-                children.push(NodeOrToken::Token(create_token(SyntaxKind::Comma, ",")));
+                children.push(NodeOrToken::Token(SyntaxKind::Comma.create_token(",")));
             }
             children.push(NodeOrToken::Node(Self::create_pair_node(
                 key,
@@ -202,8 +197,8 @@ impl ValueCodec {
                 None,
             )?));
         }
-        children.push(NodeOrToken::Token(create_token(SyntaxKind::RBrace, "}")));
-        Ok(NodeOrToken::Node(create_node(SyntaxKind::Object, children)))
+        children.push(NodeOrToken::Token(SyntaxKind::RBrace.create_token("}")));
+        Ok(NodeOrToken::Node(SyntaxKind::Object.create_node(children)))
     }
 
     pub(crate) fn value_to_green_node(
@@ -213,10 +208,9 @@ impl ValueCodec {
     ) -> Result<GreenNode, HjsonEditError> {
         match Self::value_to_green_element(value, string_style, existing_style)? {
             NodeOrToken::Node(node) => Ok(node),
-            NodeOrToken::Token(token) => Ok(create_node(
-                SyntaxKind::Value,
-                vec![NodeOrToken::Token(token)],
-            )),
+            NodeOrToken::Token(token) => {
+                Ok(SyntaxKind::Value.create_node(vec![NodeOrToken::Token(token)]))
+            }
         }
     }
 
@@ -225,14 +219,13 @@ impl ValueCodec {
         string_style: StringStyle,
         existing_style: Option<StringStyle>,
     ) -> Result<GreenNode, HjsonEditError> {
-        Ok(create_node(
-            SyntaxKind::Value,
-            vec![Self::value_to_green_element(
+        Ok(
+            SyntaxKind::Value.create_node(vec![Self::value_to_green_element(
                 value,
                 string_style,
                 existing_style,
-            )?],
-        ))
+            )?]),
+        )
     }
 
     fn replace_value_node(
@@ -253,40 +246,35 @@ impl ValueCodec {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
         {
-            create_token(SyntaxKind::Ident, key)
+            SyntaxKind::Ident.create_token(key)
         } else {
-            create_token(
-                SyntaxKind::String,
-                format!("\"{}\"", StringLiteralCodec::escape_double_quoted(key)),
-            )
+            SyntaxKind::String.create_token(format!(
+                "\"{}\"",
+                StringLiteralCodec::escape_double_quoted(key)
+            ))
         };
 
         let value_node = Self::create_value_node(value, string_style, existing_style)?;
-        Ok(create_node(
-            SyntaxKind::Pair,
-            vec![
-                NodeOrToken::Node(create_node(
-                    SyntaxKind::Key,
-                    vec![NodeOrToken::Token(key_token)],
-                )),
-                NodeOrToken::Token(create_token(SyntaxKind::Colon, ":")),
-                NodeOrToken::Token(create_token(SyntaxKind::Whitespace, " ")),
-                NodeOrToken::Node(value_node),
-            ],
-        ))
+        Ok(SyntaxKind::Pair.create_node(vec![
+            NodeOrToken::Node(SyntaxKind::Key.create_node(vec![NodeOrToken::Token(key_token)])),
+            NodeOrToken::Token(SyntaxKind::Colon.create_token(":")),
+            NodeOrToken::Token(SyntaxKind::Whitespace.create_token(" ")),
+            NodeOrToken::Node(value_node),
+        ]))
     }
 
     fn create_string_token(value: &str, style: StringStyle) -> rowan::GreenToken {
         match style {
-            StringStyle::DoubleQuoted | StringStyle::Preserve | StringStyle::Auto => create_token(
-                SyntaxKind::String,
-                format!("\"{}\"", StringLiteralCodec::escape_double_quoted(value)),
-            ),
-            StringStyle::Block => create_token(
-                SyntaxKind::BlockString,
+            StringStyle::DoubleQuoted | StringStyle::Preserve | StringStyle::Auto => {
+                SyntaxKind::String.create_token(format!(
+                    "\"{}\"",
+                    StringLiteralCodec::escape_double_quoted(value)
+                ))
+            }
+            StringStyle::Block => SyntaxKind::BlockString.create_token(
                 StringLiteralCodec::create_multiline_string_literal(value, "", "\n"),
             ),
-            StringStyle::Unquoted => create_token(SyntaxKind::UnquotedString, value),
+            StringStyle::Unquoted => SyntaxKind::UnquotedString.create_token(value),
         }
     }
 }
@@ -331,7 +319,7 @@ impl PairValueEditor {
         }
 
         if replaced {
-            return Ok(create_node(SyntaxKind::Pair, children));
+            return Ok(SyntaxKind::Pair.create_node(children));
         }
 
         Self::rebuild_pair(pair_green, value, string_style, existing_style)
@@ -342,10 +330,7 @@ impl PairValueEditor {
             return;
         }
 
-        children.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Whitespace,
-            " ",
-        )));
+        children.push(NodeOrToken::Token(SyntaxKind::Whitespace.create_token(" ")));
     }
 
     fn has_space_after_colon(pair_green: &GreenNode) -> bool {

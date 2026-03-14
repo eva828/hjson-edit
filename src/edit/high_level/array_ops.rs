@@ -1,5 +1,5 @@
 use crate::document_style::DetectNewline;
-use crate::edit::api::{create_node, create_token};
+
 use crate::edit::high_level::{
     build_array_items, clone_element, create_value_node, is_token_of_kind, ArrayEntry, ArrayItem,
     EntryTerminator, HjsonDocument, HjsonEditError, HjsonValue, StringStyle,
@@ -117,14 +117,11 @@ impl ArrayLayoutContext {
     }
 
     fn rebuild(self, items: Vec<ArrayItem>) -> GreenNode {
-        create_node(
-            SyntaxKind::Array,
-            crate::edit::high_level::rebuild_array_children_for_format(
-                self.lbracket,
-                items,
-                self.rbracket,
-            ),
-        )
+        SyntaxKind::Array.create_node(crate::edit::high_level::rebuild_array_children_for_format(
+            self.lbracket,
+            items,
+            self.rbracket,
+        ))
     }
 
     fn has_closing_bracket(&self) -> bool {
@@ -182,10 +179,9 @@ impl ArrayInsertPlanner {
 
         new_items.push(self.create_entry(
             entry.leading_line_trivia.clone(),
-            EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-                SyntaxKind::Newline,
-                &self.newline,
-            ))]),
+            EntryTerminator::Newline(vec![NodeOrToken::Token(
+                SyntaxKind::Newline.create_token(&self.newline),
+            )]),
             value,
             string_style,
         )?);
@@ -236,18 +232,16 @@ impl ArrayInsertPlanner {
     fn terminator(&self, context: &ArrayLayoutContext) -> EntryTerminator {
         if self.trailing_standalone.is_empty() {
             if context.has_closing_bracket() {
-                return EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-                    SyntaxKind::Newline,
-                    &self.newline,
-                ))]);
+                return EntryTerminator::Newline(vec![NodeOrToken::Token(
+                    SyntaxKind::Newline.create_token(&self.newline),
+                )]);
             }
             return EntryTerminator::EndOfContainer;
         }
 
-        EntryTerminator::Newline(vec![NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            &self.newline,
-        ))])
+        EntryTerminator::Newline(vec![NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(&self.newline),
+        )])
     }
 
     fn create_entry(

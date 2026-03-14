@@ -215,26 +215,11 @@ fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement)
     }
 }
 
-/// ヘルパー関数：新しいトークンを作成
-pub fn create_token(kind: SyntaxKind, text: impl Into<String>) -> rowan::GreenToken {
-    rowan::GreenToken::new(kind.into(), text.into().as_str())
-}
-
-/// ヘルパー関数：新しいノードを作成
-pub fn create_node(kind: SyntaxKind, children: Vec<GreenElement>) -> rowan::GreenNode {
-    let mut builder = GreenNodeBuilder::new();
-    builder.start_node(kind.into());
-    for child in children {
-        push_element(&mut builder, &child);
-    }
-    builder.finish_node();
-    builder.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::syntax::green::GreenTreeBuilder;
+    use crate::syntax::kind::SyntaxKind;
 
     fn create_test_node() -> rowan::GreenNode {
         let mut builder = GreenTreeBuilder::new();
@@ -251,12 +236,12 @@ mod tests {
         let node = create_test_node();
 
         // Invalid index returns InvalidIndex error for replace
-        let new_token = create_token(SyntaxKind::LBrace, "{");
+        let new_token = SyntaxKind::LBrace.create_token("{");
         let result = node.replace_child(10, new_token.into());
         assert!(matches!(result, Err(EditError::InvalidIndex { .. })));
 
         // Invalid index for insert
-        let new_token = create_token(SyntaxKind::LBrace, "{");
+        let new_token = SyntaxKind::LBrace.create_token("{");
         let result = node.insert_child(10, new_token.into());
         assert!(matches!(result, Err(EditError::InvalidIndex { .. })));
 

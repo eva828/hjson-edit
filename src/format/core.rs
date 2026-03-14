@@ -1,5 +1,5 @@
 use crate::document_style::{DetectNewline, DocumentStyle};
-use crate::edit::api::{create_node, create_token};
+
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
     clone_element, contextual_newline_kind, create_multiline_string_literal, is_token_of_kind,
@@ -37,7 +37,11 @@ impl<'a> FormatContext<'a> {
 
     fn format_root_target(&self) -> Result<HjsonDocument, FormatError> {
         let root = RedNode::new_root(self.document.green_node().clone());
-        let newline = self.document.try_detect_newline().unwrap_or_default().as_str();
+        let newline = self
+            .document
+            .try_detect_newline()
+            .unwrap_or_default()
+            .as_str();
         let new_root = format_root_node(&root, newline, &self.indent_unit)?;
         Ok(HjsonDocument::from_green(new_root))
     }
@@ -139,15 +143,13 @@ pub(crate) fn entry_indent_matches_context(entry_indent: &str, base_indent: &str
 }
 
 pub(crate) fn newline_indent_elements(newline: &str, indent: &str) -> Vec<GreenElement> {
-    let mut elements = vec![NodeOrToken::Token(create_token(
-        SyntaxKind::Newline,
-        newline,
-    ))];
+    let mut elements = vec![NodeOrToken::Token(
+        SyntaxKind::Newline.create_token(newline),
+    )];
     if !indent.is_empty() {
-        elements.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Whitespace,
-            indent,
-        )));
+        elements.push(NodeOrToken::Token(
+            SyntaxKind::Whitespace.create_token(indent),
+        ));
     }
     elements
 }
@@ -172,7 +174,7 @@ fn format_root_node(
             }
         }
     }
-    Ok(create_node(SyntaxKind::Root, children))
+    Ok(SyntaxKind::Root.create_node(children))
 }
 
 fn format_red_node(
@@ -219,29 +221,24 @@ pub(crate) fn format_pair_node(
 
     children.extend(leading_comments_and_blank_lines(pair, indent, newline));
     children.push(NodeOrToken::Node(key.to_green()));
-    children.push(NodeOrToken::Token(create_token(SyntaxKind::Colon, ":")));
+    children.push(NodeOrToken::Token(SyntaxKind::Colon.create_token(":")));
 
     let value_indent = child_indent(indent, indent_unit);
     let formatted_value = format_value_node(&value, indent, newline, indent_unit)?;
     if pair_uses_multiline_value_layout(pair) {
-        children.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        )));
-        children.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Whitespace,
-            &value_indent,
-        )));
+        children.push(NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(newline),
+        ));
+        children.push(NodeOrToken::Token(
+            SyntaxKind::Whitespace.create_token(&value_indent),
+        ));
     } else {
-        children.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Whitespace,
-            " ",
-        )));
+        children.push(NodeOrToken::Token(SyntaxKind::Whitespace.create_token(" ")));
     }
     children.push(NodeOrToken::Node(formatted_value));
     children.extend(inline_comment_elements(pair));
 
-    Ok(create_node(SyntaxKind::Pair, children))
+    Ok(SyntaxKind::Pair.create_node(children))
 }
 
 pub(crate) fn format_value_node(
@@ -272,17 +269,16 @@ pub(crate) fn format_value_node(
                         &multiline_indent,
                         newline,
                     );
-                    children.push(NodeOrToken::Token(create_token(
-                        SyntaxKind::BlockString,
-                        rendered,
-                    )));
+                    children.push(NodeOrToken::Token(
+                        SyntaxKind::BlockString.create_token(rendered),
+                    ));
                 } else {
                     children.push(clone_red_element(NodeOrToken::Token(token)));
                 }
             }
         }
     }
-    Ok(create_node(SyntaxKind::Value, children))
+    Ok(SyntaxKind::Value.create_node(children))
 }
 
 pub(crate) fn adjust_closing_indent(
@@ -310,14 +306,11 @@ pub(crate) fn adjust_closing_indent(
     {
         children.insert(
             insert_pos,
-            NodeOrToken::Token(create_token(SyntaxKind::Whitespace, indent)),
+            NodeOrToken::Token(SyntaxKind::Whitespace.create_token(indent)),
         );
     }
 
-    Ok(create_node(
-        HjsonLanguage::kind_from_raw(node.kind()),
-        children,
-    ))
+    Ok(HjsonLanguage::kind_from_raw(node.kind()).create_node(children))
 }
 
 fn leading_comments_and_blank_lines(
@@ -336,24 +329,20 @@ fn leading_comments_and_blank_lines(
             SyntaxKind::Whitespace => {}
             SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
                 if pending_blank > 1 {
-                    result.push(NodeOrToken::Token(create_token(
-                        SyntaxKind::Newline,
-                        newline,
-                    )));
-                    result.push(NodeOrToken::Token(create_token(
-                        SyntaxKind::Whitespace,
-                        indent,
-                    )));
+                    result.push(NodeOrToken::Token(
+                        SyntaxKind::Newline.create_token(newline),
+                    ));
+                    result.push(NodeOrToken::Token(
+                        SyntaxKind::Whitespace.create_token(indent),
+                    ));
                 }
-                result.push(NodeOrToken::Token(create_token(token.kind(), token.text())));
-                result.push(NodeOrToken::Token(create_token(
-                    SyntaxKind::Newline,
-                    newline,
-                )));
-                result.push(NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    indent,
-                )));
+                result.push(NodeOrToken::Token(token.kind().create_token(token.text())));
+                result.push(NodeOrToken::Token(
+                    SyntaxKind::Newline.create_token(newline),
+                ));
+                result.push(NodeOrToken::Token(
+                    SyntaxKind::Whitespace.create_token(indent),
+                ));
                 pending_blank = 0;
             }
             _ => break,
@@ -398,12 +387,11 @@ fn inline_comment_elements(pair: &RedNode) -> Vec<GreenElement> {
                 }
                 SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
                     if !last_was_space {
-                        result.push(NodeOrToken::Token(create_token(
-                            SyntaxKind::Whitespace,
-                            "  ",
-                        )));
+                        result.push(NodeOrToken::Token(
+                            SyntaxKind::Whitespace.create_token("  "),
+                        ));
                     }
-                    result.push(NodeOrToken::Token(create_token(token.kind(), token.text())));
+                    result.push(NodeOrToken::Token(token.kind().create_token(token.text())));
                     last_was_space = false;
                 }
                 SyntaxKind::Newline => break,
@@ -435,24 +423,21 @@ pub(crate) fn normalize_standalone_block(
                     | SyntaxKind::HashComment
                     | SyntaxKind::BlockComment => {
                         if pending_blank == 0 && !new_elements.is_empty() {
-                            new_elements.push(NodeOrToken::Token(create_token(
-                                SyntaxKind::Newline,
-                                newline,
-                            )));
+                            new_elements.push(NodeOrToken::Token(
+                                SyntaxKind::Newline.create_token(newline),
+                            ));
                         }
                         for _ in 0..pending_blank {
-                            new_elements.push(NodeOrToken::Token(create_token(
-                                SyntaxKind::Newline,
-                                newline,
-                            )));
+                            new_elements.push(NodeOrToken::Token(
+                                SyntaxKind::Newline.create_token(newline),
+                            ));
                         }
                         if (pending_blank > 0 || !new_elements.is_empty()) && !indent.is_empty() {
-                            new_elements.push(NodeOrToken::Token(create_token(
-                                SyntaxKind::Whitespace,
-                                indent,
-                            )));
+                            new_elements.push(NodeOrToken::Token(
+                                SyntaxKind::Whitespace.create_token(indent),
+                            ));
                         }
-                        new_elements.push(NodeOrToken::Token(create_token(kind, token.text())));
+                        new_elements.push(NodeOrToken::Token(kind.create_token(token.text())));
                         pending_blank = 0;
                     }
                     _ => {
@@ -466,10 +451,9 @@ pub(crate) fn normalize_standalone_block(
     }
 
     for _ in 0..pending_blank {
-        new_elements.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        )));
+        new_elements.push(NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(newline),
+        ));
     }
 
     block.elements = new_elements;
@@ -480,6 +464,6 @@ fn clone_red_element(
 ) -> GreenElement {
     match elem {
         NodeOrToken::Node(node) => NodeOrToken::Node(node.to_green()),
-        NodeOrToken::Token(token) => NodeOrToken::Token(create_token(token.kind(), token.text())),
+        NodeOrToken::Token(token) => NodeOrToken::Token(token.kind().create_token(token.text())),
     }
 }

@@ -9,7 +9,7 @@ pub(crate) mod structure;
 pub(crate) mod value;
 
 use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
-use crate::edit::api::{create_node, EditError as LowLevelEditError, GreenNodeEdit};
+use crate::edit::api::{EditError as LowLevelEditError, GreenNodeEdit};
 use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
@@ -521,10 +521,9 @@ impl HjsonDocument {
                     });
                 }
 
-                let new_arr = create_node(
-                    SyntaxKind::Array,
-                    rebuild_array_children_for_format(lbracket, new_items, rbracket),
-                );
+                let new_arr = SyntaxKind::Array.create_node(rebuild_array_children_for_format(
+                    lbracket, new_items, rbracket,
+                ));
                 let updated = self.replace_green_node(&arr_node.path_from_root(), new_arr)?;
                 let dirty_target = if value_needs_contextual_formatting(
                     value,
@@ -973,13 +972,6 @@ impl HjsonDocument {
     #[must_use]
     pub fn comment_remove(&self, path: &CommentPath) -> Result<Self, HjsonEditError> {
         crate::edit::comments::comment_remove(self, path)
-    }
-
-    /// 他のドキュメントとの差分行を検出
-    pub fn changed_lines(&self, other: &Self) -> Vec<usize> {
-        let before = self.to_string();
-        let after = other.to_string();
-        crate::diff::simple_line_diff(&before, &after)
     }
 
     fn resolve_array_node(&self, path: &[PathSegment]) -> Result<RedNode, HjsonEditError> {

@@ -30,8 +30,5 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("\n=== Modified ===");
     println!("{}", updated);
 
-    // Get changed lines for external diffing/patching (1-indexed)
-    println!("\nChanged lines: {:?}", doc.changed_lines(&updated));
-
     Ok(())
 }

@@ -2,10 +2,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use hjson_edit::{
-    AstDebugExt, CommentPath, CommentStyle, HjsonDocument, HjsonNumber, HjsonValue, NumberKind,
-    StringStyle,
-};
+use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue, StringStyle};
 
 #[derive(Debug, Clone)]
 enum EditOp {
@@ -216,14 +213,12 @@ impl CliValueParser {
             _ => {}
         }
 
-        match HjsonNumber::classify(raw) {
-            Some(NumberKind::Integer) => {
-                return HjsonValue::Integer(raw.parse::<i64>().expect("validated integer"));
-            }
-            Some(NumberKind::Float) => {
-                return HjsonValue::Float(raw.parse::<f64>().expect("validated float"));
-            }
-            None => {}
+        // Try to parse as number
+        if let Ok(n) = raw.parse::<i64>() {
+            return HjsonValue::Integer(n);
+        }
+        if let Ok(n) = raw.parse::<f64>() {
+            return HjsonValue::Float(n);
         }
 
         if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
@@ -540,12 +535,9 @@ fn run_parse(matches: &ArgMatches) -> Result<()> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
-    match hjson_edit::parse(&content) {
-        Ok(result) => {
-            let red = hjson_edit::RedNode::new_root(result.green);
+    match HjsonDocument::parse(&content) {
+        Ok(_) => {
             println!("Parsed successfully!");
-            println!("AST:");
-            red.print_ast();
             Ok(())
         }
         Err(errors) => anyhow::bail!(ParseReporter::render(&errors)),

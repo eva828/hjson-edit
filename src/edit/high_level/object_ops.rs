@@ -1,4 +1,3 @@
-use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::structure::{
     indentation_from_standalone_block, whitespace_after_last_newline,
 };
@@ -158,10 +157,11 @@ impl ObjectLayoutContext {
     }
 
     fn rebuild(self, items: Vec<ObjectItem>) -> GreenNode {
-        create_node(
-            SyntaxKind::Object,
-            rebuild_object_children_for_format(self.lbrace, items, self.rbrace),
-        )
+        SyntaxKind::Object.create_node(rebuild_object_children_for_format(
+            self.lbrace,
+            items,
+            self.rbrace,
+        ))
     }
 }
 
@@ -236,24 +236,21 @@ impl<'a> ObjectInsertPlanner<'a> {
             return EntryTerminator::EndOfContainer;
         }
 
-        let mut suffix = vec![NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            self.newline,
-        ))];
+        let mut suffix = vec![NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(self.newline),
+        )];
         if !self.closing_indent.is_empty() {
-            suffix.push(NodeOrToken::Token(create_token(
-                SyntaxKind::Whitespace,
-                self.closing_indent,
-            )));
+            suffix.push(NodeOrToken::Token(
+                SyntaxKind::Whitespace.create_token(self.closing_indent),
+            ));
         }
         EntryTerminator::Newline(suffix)
     }
 
     fn newline_with_indent(&self) -> Vec<GreenElement> {
-        let mut trivia = vec![NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            self.newline,
-        ))];
+        let mut trivia = vec![NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(self.newline),
+        )];
         trivia.extend(self.indent_only());
         trivia
     }
@@ -293,10 +290,9 @@ impl<'a> ObjectInsertPlanner<'a> {
         if self.entry_indent.is_empty() {
             Vec::new()
         } else {
-            vec![NodeOrToken::Token(create_token(
-                SyntaxKind::Whitespace,
-                self.entry_indent,
-            ))]
+            vec![NodeOrToken::Token(
+                SyntaxKind::Whitespace.create_token(self.entry_indent),
+            )]
         }
     }
 }

@@ -1,5 +1,4 @@
 use crate::document_style::{DetectNewline as _, NewlineKind};
-use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
     clone_element, contextual_newline_kind, CommentPath, CommentStyle, HjsonDocument,
@@ -210,7 +209,7 @@ impl PairCommentEditor {
         if !indentation.is_empty() && !Self::starts_with_whitespace(&pair_green) {
             let mut new_pair_children = indentation.clone();
             new_pair_children.extend(pair_green.children().map(clone_element));
-            pair_green = create_node(SyntaxKind::Pair, new_pair_children);
+            pair_green = SyntaxKind::Pair.create_node(new_pair_children);
         }
 
         PreparedPair {
@@ -243,7 +242,7 @@ impl PairCommentEditor {
             if let Some(NodeOrToken::Token(t)) = obj_green.children().nth(idx) {
                 let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
                 if kind == SyntaxKind::Whitespace {
-                    temp_indent.push(NodeOrToken::Token(create_token(kind, t.text())));
+                    temp_indent.push(NodeOrToken::Token(kind.create_token(t.text())));
                 } else if kind == SyntaxKind::Newline {
                     return temp_indent.into_iter().rev().collect();
                 } else {
@@ -278,7 +277,7 @@ impl PairCommentEditor {
             }
             final_children.push(clone_element(child));
         }
-        create_node(SyntaxKind::Pair, final_children)
+        SyntaxKind::Pair.create_node(final_children)
     }
 }
 
@@ -437,17 +436,15 @@ fn set_header_comment(
     let mut new_children: Vec<GreenElement> = Vec::new();
     append_comment_tokens(&mut new_children, text, style, newline);
     if split_idx < children.len() {
-        new_children.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        )));
+        new_children.push(NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(newline),
+        ));
         new_children.extend(children.into_iter().skip(split_idx));
     }
 
-    Ok(HjsonDocument::from_green(create_node(
-        SyntaxKind::Root,
-        new_children,
-    )))
+    Ok(HjsonDocument::from_green(
+        SyntaxKind::Root.create_node(new_children),
+    ))
 }
 
 fn set_footer_comment(
@@ -494,17 +491,15 @@ fn set_footer_comment(
                 if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Newline
         )
     {
-        children.push(NodeOrToken::Token(create_token(
-            SyntaxKind::Newline,
-            newline,
-        )));
+        children.push(NodeOrToken::Token(
+            SyntaxKind::Newline.create_token(newline),
+        ));
     }
     append_comment_tokens(&mut children, text, style, newline);
 
-    Ok(HjsonDocument::from_green(create_node(
-        SyntaxKind::Root,
-        children,
-    )))
+    Ok(HjsonDocument::from_green(
+        SyntaxKind::Root.create_node(children),
+    ))
 }
 
 fn remove_key_comment(
@@ -555,10 +550,9 @@ fn remove_header_comment(document: &HjsonDocument) -> Result<HjsonDocument, Hjso
         }
     }
 
-    Ok(HjsonDocument::from_green(create_node(
-        SyntaxKind::Root,
-        new_children,
-    )))
+    Ok(HjsonDocument::from_green(
+        SyntaxKind::Root.create_node(new_children),
+    ))
 }
 
 fn remove_footer_comment(document: &HjsonDocument) -> Result<HjsonDocument, HjsonEditError> {
@@ -584,10 +578,9 @@ fn remove_footer_comment(document: &HjsonDocument) -> Result<HjsonDocument, Hjso
         }
     }
 
-    Ok(HjsonDocument::from_green(create_node(
-        SyntaxKind::Root,
-        new_children,
-    )))
+    Ok(HjsonDocument::from_green(
+        SyntaxKind::Root.create_node(new_children),
+    ))
 }
 
 fn resolve_object_for_comment_path(
@@ -661,7 +654,7 @@ fn create_comment_token(text: &str, style: CommentStyle, newline: &str) -> rowan
         CommentStyle::Hash => (SyntaxKind::HashComment, format!("# {}", text)),
         CommentStyle::Block => (SyntaxKind::BlockComment, format!("/* {} */", text)),
     };
-    create_token(kind, &content)
+    kind.create_token(&content)
 }
 
 fn append_comment_tokens(
@@ -684,10 +677,9 @@ fn append_comment_tokens(
                     line, style, newline,
                 )));
                 if lines.peek().is_some() {
-                    children.push(NodeOrToken::Token(create_token(
-                        SyntaxKind::Newline,
-                        newline,
-                    )));
+                    children.push(NodeOrToken::Token(
+                        SyntaxKind::Newline.create_token(newline),
+                    ));
                 }
             }
         }
@@ -745,7 +737,7 @@ fn insert_comment_before_pair(
         if let NodeOrToken::Token(t) = child {
             let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
             if kind == SyntaxKind::Whitespace || kind == SyntaxKind::Newline {
-                let elem = NodeOrToken::Token(create_token(kind, t.text()));
+                let elem = NodeOrToken::Token(kind.create_token(t.text()));
                 prefix_trivia.push(elem.clone());
                 if kind == SyntaxKind::Newline {
                     line_indent.clear();
@@ -765,10 +757,9 @@ fn insert_comment_before_pair(
 
     children.extend(prefix_trivia.clone());
     children.push(NodeOrToken::Token(comment));
-    children.push(NodeOrToken::Token(create_token(
-        SyntaxKind::Newline,
-        newline,
-    )));
+    children.push(NodeOrToken::Token(
+        SyntaxKind::Newline.create_token(newline),
+    ));
     // If prefix_trivia had no newline, it means it's just indentation.
     // We should use it for both the comment and the key.
     if !prefix_trivia.is_empty() && prefix_trivia.iter().all(|t| matches!(t.as_token(), Some(tok) if crate::syntax::kind::HjsonLanguage::kind_from_raw(tok.kind()) == SyntaxKind::Whitespace)) {
@@ -803,7 +794,7 @@ fn insert_comment_before_pair(
         children.push(clone_element(child));
     }
 
-    Ok(create_node(SyntaxKind::Pair, children))
+    Ok(SyntaxKind::Pair.create_node(children))
 }
 
 fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonEditError> {
@@ -830,7 +821,7 @@ fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonE
         children.push(clone_element(child));
     }
 
-    Ok(create_node(SyntaxKind::Pair, children))
+    Ok(SyntaxKind::Pair.create_node(children))
 }
 
 fn set_inline_comment(
@@ -896,21 +887,18 @@ fn set_inline_comment(
             break;
         }
         let mut replacement = vec![
-            NodeOrToken::Token(create_token(SyntaxKind::Whitespace, "  ")),
+            NodeOrToken::Token(SyntaxKind::Whitespace.create_token("  ")),
             NodeOrToken::Token(comment),
         ];
         if let Some(comma_pos) = comma_pos {
             if comma_pos >= end {
-                replacement.push(NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    " ",
-                )));
+                replacement.push(NodeOrToken::Token(SyntaxKind::Whitespace.create_token(" ")));
             }
         }
         children.splice(start..end, replacement);
     }
 
-    Ok(create_node(SyntaxKind::Object, children))
+    Ok(SyntaxKind::Object.create_node(children))
 }
 
 fn normalize_newlines_for_style(text: &str, newline: &str) -> String {
@@ -1093,7 +1081,7 @@ fn remove_inline_comment(
         children.drain(start..end);
     }
 
-    Ok(create_node(SyntaxKind::Object, children))
+    Ok(SyntaxKind::Object.create_node(children))
 }
 
 fn extract_inline_comments(obj_green: &GreenNode, pair_idx: usize) -> Vec<String> {

@@ -6,62 +6,23 @@
 //! - HJSONフル対応（コメント、引用符なしキー/値、複数行文字列など）
 //! - ロスレス編集（空白・改行・コメントを保持）
 //! - Green/Red Tree方式による効率的な編集
-//! - 変更行の検出（1始まり）
 
-pub mod diff;
 pub(crate) mod document_style;
 pub mod edit;
-pub mod format;
+pub(crate) mod format;
 pub(crate) mod number;
-pub mod parser;
-pub mod syntax;
+pub(crate) mod parser;
+pub(crate) mod syntax;
 
 // 公開APIを再エクスポート
-pub use diff::{detect_changed_lines, simple_line_diff, ChangeInfo, ChangeType};
-pub use document_style::{DetectNewline, DocumentStyle, NewlineKind, TextNormalizer};
-pub use edit::api::{
-    create_node, create_token, EditError, EditOp, GreenNodeEdit, RedNodeNavigateExt,
-};
+pub use document_style::{DetectNewline, DocumentStyle, NewlineKind};
+pub use edit::api::{EditError, GreenNodeEdit, RedNodeNavigateExt};
 pub use edit::high_level::{
     CommentPath, CommentStyle, EditResult, FormatError, HjsonDocument, HjsonEditError, HjsonValue,
     IntoPath, PathSegment, StringStyle,
 };
 pub use format::FormatTarget;
-pub use number::{HjsonNumber, NumberKind};
-pub use parser::lexer::{lex, LexError, LexResult, Token};
-pub use parser::parser::{parse, ParseError, ParseResult};
-pub use syntax::green::{GreenElement, GreenNodeExt, GreenTreeBuilder};
-pub use syntax::kind::{HjsonLanguage, SyntaxKind};
-pub use syntax::red::{AstDebugExt, RedElement, RedElementExt, RedNode, RedNodeCoreExt, RedToken};
-
-/// パースしてRedNodeを取得（エラー時はErr）
-pub fn parse_to_red(input: &str) -> Result<RedNode, Vec<ParseError>> {
-    let result = parse(input)?;
-    Ok(RedNode::new_root(result.green))
-}
-
-/// 編集操作を適用して新しいGreenNodeを取得
-pub fn apply_edit(node: &rowan::GreenNode, edit: EditOp) -> Result<rowan::GreenNode, EditError> {
-    match edit {
-        EditOp::Replace { index, new } => node.replace_child(index, new),
-        EditOp::Insert { index, child } => node.insert_child(index, child),
-        EditOp::Delete { index } => node.remove_child(index),
-    }
-}
-
-/// 複数の編集を適用
-pub fn apply_edits(
-    node: &rowan::GreenNode,
-    edits: Vec<EditOp>,
-) -> Result<rowan::GreenNode, EditError> {
-    node.apply_edits(edits)
-}
-
-/// 変更行を検出
-pub fn get_changed_lines(
-    before: &rowan::GreenNode,
-    after: &rowan::GreenNode,
-    source: &str,
-) -> Vec<usize> {
-    detect_changed_lines(before, after, source)
-}
+pub use parser::parser::ParseError;
+pub use syntax::green::GreenElement;
+pub use syntax::kind::SyntaxKind;
+pub use syntax::red::{RedNode, RedNodeCoreExt};

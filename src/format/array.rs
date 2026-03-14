@@ -1,4 +1,3 @@
-use crate::edit::api::{create_node, create_token};
 use crate::edit::high_level::{
     build_array_items, clone_element, detect_array_entry_indent, is_token_of_kind, ArrayItem,
     EntryTerminator, FormatError,
@@ -34,8 +33,7 @@ impl<'a> ArrayFormatPass<'a> {
         let mut formatted_items = self.format_items(&context)?;
         self.normalize_terminators(&mut formatted_items);
         self.normalize_standalone_blocks(&mut formatted_items, &context.entry_indent);
-        Ok(create_node(
-            SyntaxKind::Array,
+        Ok(SyntaxKind::Array.create_node(
             crate::edit::high_level::rebuild_array_children_for_format(
                 context.lbracket,
                 formatted_items,
@@ -86,10 +84,9 @@ impl<'a> ArrayFormatPass<'a> {
             entry.leading_line_trivia = if is_first_entry {
                 newline_indent_elements(self.newline, entry_indent)
             } else if !entry_indent.is_empty() {
-                vec![NodeOrToken::Token(create_token(
-                    SyntaxKind::Whitespace,
-                    entry_indent,
-                ))]
+                vec![NodeOrToken::Token(
+                    SyntaxKind::Whitespace.create_token(entry_indent),
+                )]
             } else {
                 Vec::new()
             };
@@ -112,7 +109,7 @@ impl<'a> ArrayFormatPass<'a> {
             if let ArrayItem::Entry(entry) = &mut items[window[0]] {
                 if matches!(entry.terminator, EntryTerminator::EndOfContainer) {
                     entry.terminator = EntryTerminator::Newline(vec![NodeOrToken::Token(
-                        create_token(SyntaxKind::Newline, self.newline),
+                        SyntaxKind::Newline.create_token(self.newline),
                     )]);
                 }
             }
@@ -126,7 +123,7 @@ impl<'a> ArrayFormatPass<'a> {
             if let ArrayItem::Entry(last_entry) = &mut items[last_idx] {
                 if !has_trailing_standalone {
                     last_entry.terminator = EntryTerminator::Newline(vec![NodeOrToken::Token(
-                        create_token(SyntaxKind::Newline, self.newline),
+                        SyntaxKind::Newline.create_token(self.newline),
                     )]);
                 }
             }
