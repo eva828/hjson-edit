@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use hjson_edit::{
-    CommentPath, CommentStyle, HjsonDocument, HjsonNumber, HjsonValue, NumberKind, StringStyle,
+    AstDebugExt, CommentPath, CommentStyle, HjsonDocument, HjsonNumber, HjsonValue, NumberKind,
+    StringStyle,
 };
 
 #[derive(Debug, Clone)]
@@ -543,7 +544,8 @@ fn run_parse(matches: &ArgMatches) -> Result<()> {
         Ok(result) => {
             let red = hjson_edit::RedNode::new_root(result.green);
             println!("Parsed successfully!");
-            println!("AST: {:?}", red);
+            println!("AST:");
+            red.print_ast();
             Ok(())
         }
         Err(errors) => anyhow::bail!(ParseReporter::render(&errors)),

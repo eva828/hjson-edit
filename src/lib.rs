@@ -32,7 +32,7 @@ pub use parser::lexer::{lex, LexError, LexResult, Token};
 pub use parser::parser::{parse, ParseError, ParseResult};
 pub use syntax::green::{GreenElement, GreenNodeExt, GreenTreeBuilder};
 pub use syntax::kind::{HjsonLanguage, SyntaxKind};
-pub use syntax::red::{RedElement, RedElementExt, RedNode, RedNodeCoreExt, RedToken};
+pub use syntax::red::{AstDebugExt, RedElement, RedElementExt, RedNode, RedNodeCoreExt, RedToken};
 
 /// パースしてRedNodeを取得（エラー時はErr）
 pub fn parse_to_red(input: &str) -> Result<RedNode, Vec<ParseError>> {

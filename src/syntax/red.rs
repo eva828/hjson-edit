@@ -115,6 +115,41 @@ impl RedNodeCoreExt for RedNode {
     }
 }
 
+/// ASTのデバッグ・診断用拡張
+pub trait AstDebugExt {
+    /// 内部再帰ヘルパー（直接呼び出し不要）
+    #[doc(hidden)]
+    fn dump_node(&self, indent: usize, buf: &mut String);
+
+    /// ASTを字下げ付き文字列として返す
+    fn dump_ast(&self) -> String {
+        let mut buf = String::new();
+        self.dump_node(0, &mut buf);
+        buf
+    }
+
+    /// ASTをstdoutに出力する
+    fn print_ast(&self) {
+        print!("{}", self.dump_ast());
+    }
+}
+
+impl AstDebugExt for RedNode {
+    fn dump_node(&self, indent: usize, buf: &mut String) {
+        use std::fmt::Write;
+        let prefix = "  ".repeat(indent);
+        let _ = writeln!(buf, "{}Node {:?}", prefix, self.kind());
+        for child in self.children_with_tokens() {
+            match child {
+                rowan::NodeOrToken::Node(n) => n.dump_node(indent + 1, buf),
+                rowan::NodeOrToken::Token(t) => {
+                    let _ = writeln!(buf, "{}  Token {:?}: {:?}", prefix, t.kind(), t.text());
+                }
+            }
+        }
+    }
+}
+
 /// RedNodeを操作する際のヘルパー
 pub trait RedElementExt {
     fn as_node(&self) -> Option<&RedNode>;
