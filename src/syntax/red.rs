@@ -149,33 +149,3 @@ impl AstDebugExt for RedNode {
         }
     }
 }
-
-/// RedNodeを操作する際のヘルパー
-pub trait RedElementExt {
-    fn as_node(&self) -> Option<&RedNode>;
-    fn as_token(&self) -> Option<&RedToken>;
-    fn text(&self) -> String;
-}
-
-impl RedElementExt for RedElement {
-    fn as_node(&self) -> Option<&RedNode> {
-        match self {
-            rowan::NodeOrToken::Node(node) => Some(node),
-            rowan::NodeOrToken::Token(_) => None,
-        }
-    }
-
-    fn as_token(&self) -> Option<&RedToken> {
-        match self {
-            rowan::NodeOrToken::Node(_) => None,
-            rowan::NodeOrToken::Token(token) => Some(token),
-        }
-    }
-
-    fn text(&self) -> String {
-        match self {
-            rowan::NodeOrToken::Node(node) => node.to_string(),
-            rowan::NodeOrToken::Token(token) => token.text().to_string(),
-        }
-    }
-}
