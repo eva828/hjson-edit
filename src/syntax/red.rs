@@ -121,6 +121,10 @@ pub trait AstDebugExt {
     #[doc(hidden)]
     fn dump_node(&self, indent: usize, buf: &mut String);
 
+    /// 内部再帰ヘルパー（trivia付き版）
+    #[doc(hidden)]
+    fn dump_node_with_trivia(&self, indent: usize, buf: &mut String);
+
     /// ASTを字下げ付き文字列として返す
     fn dump_ast(&self) -> String {
         let mut buf = String::new();
@@ -128,9 +132,21 @@ pub trait AstDebugExt {
         buf
     }
 
+    /// ASTを字下げ付き文字列として返す（trivia付き）
+    fn dump_ast_with_trivia(&self) -> String {
+        let mut buf = String::new();
+        self.dump_node_with_trivia(0, &mut buf);
+        buf
+    }
+
     /// ASTをstdoutに出力する
     fn print_ast(&self) {
         print!("{}", self.dump_ast());
+    }
+
+    /// ASTをstdoutに出力する（trivia付き）
+    fn print_ast_with_trivia(&self) {
+        print!("{}", self.dump_ast_with_trivia());
     }
 }
 
@@ -143,7 +159,28 @@ impl AstDebugExt for RedNode {
             match child {
                 rowan::NodeOrToken::Node(n) => n.dump_node(indent + 1, buf),
                 rowan::NodeOrToken::Token(t) => {
-                    let _ = writeln!(buf, "{}  Token {:?}: {:?}", prefix, t.kind(), t.text());
+                    if !t.kind().is_trivia() {
+                        let _ = writeln!(buf, "{}  Token {:?}: {:?}", prefix, t.kind(), t.text());
+                    }
+                }
+            }
+        }
+    }
+
+    fn dump_node_with_trivia(&self, indent: usize, buf: &mut String) {
+        use std::fmt::Write;
+        let prefix = "  ".repeat(indent);
+        let _ = writeln!(buf, "{}Node {:?}", prefix, self.kind());
+        for child in self.children_with_tokens() {
+            match child {
+                rowan::NodeOrToken::Node(n) => n.dump_node_with_trivia(indent + 1, buf),
+                rowan::NodeOrToken::Token(t) => {
+                    let kind = t.kind();
+                    if kind.is_trivia() {
+                        let _ = writeln!(buf, "{}  Trivia {:?}: {:?}", prefix, kind, t.text());
+                    } else {
+                        let _ = writeln!(buf, "{}  Token {:?}: {:?}", prefix, kind, t.text());
+                    }
                 }
             }
         }

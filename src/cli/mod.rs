@@ -69,6 +69,12 @@ impl CliApp {
                     .required(true)
                     .value_parser(clap::value_parser!(PathBuf)),
             )
+            .arg(
+                Arg::new("show-trivia")
+                    .long("show-trivia")
+                    .action(ArgAction::SetTrue)
+                    .help("Show trivia tokens (whitespace, newlines, comments)"),
+            )
     }
 
     fn format_command() -> Command {
@@ -534,13 +540,18 @@ pub fn build_cli() -> Command {
 
 fn run_parse(matches: &ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
+    let show_trivia = *matches.get_one::<bool>("show-trivia").unwrap_or(&false);
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
             let red = RedNode::new_root(document.green_node().clone());
-            red.print_ast();
+            if show_trivia {
+                red.print_ast_with_trivia();
+            } else {
+                red.print_ast();
+            }
             Ok(())
         }
         Err(errors) => anyhow::bail!(ParseReporter::render(&errors)),
