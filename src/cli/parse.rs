@@ -218,9 +218,8 @@ impl SyntaxKindDebugExt for SyntaxKind {
             | SyntaxKind::LBracket
             | SyntaxKind::RBracket
             | SyntaxKind::Colon
-            | SyntaxKind::Comma => 37,
-            SyntaxKind::Ident => 33,
-            _ => 37,
+            | SyntaxKind::Comma
+            | _ => 37,
         }
     }
 

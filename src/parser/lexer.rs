@@ -464,7 +464,6 @@ impl Lexer {
             _ => match HjsonNumber::classify(text) {
                 Some(NumberKind::Integer) => SyntaxKind::Integer,
                 Some(NumberKind::Float) => SyntaxKind::Float,
-                None if is_ident(text) => SyntaxKind::Ident,
                 None => SyntaxKind::UnquotedString,
             },
         }
@@ -473,14 +472,6 @@ impl Lexer {
 
 fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
-}
-
-fn is_ident(text: &str) -> bool {
-    !text.is_empty() && text.chars().all(is_non_punctuator_char)
-}
-
-fn is_non_punctuator_char(c: char) -> bool {
-    !matches!(c, '{' | '}' | '[' | ']' | ',' | ':') && !c.is_whitespace()
 }
 
 pub(crate) fn is_valid_number(text: &str) -> bool {

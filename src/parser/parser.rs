@@ -78,7 +78,6 @@ impl<'a> ScalarScanner<'a> {
                     break
                 }
                 SyntaxKind::Whitespace
-                | SyntaxKind::Ident
                 | SyntaxKind::UnquotedString
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
@@ -176,7 +175,6 @@ impl<'a> ScalarScanner<'a> {
                 | SyntaxKind::LBracket
                 | SyntaxKind::String
                 | SyntaxKind::BlockString
-                | SyntaxKind::Ident
                 | SyntaxKind::UnquotedString
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
@@ -197,7 +195,7 @@ impl<'a> ScalarScanner<'a> {
                     return true;
                 }
                 SyntaxKind::Newline | SyntaxKind::RBrace => return true,
-                SyntaxKind::Ident | SyntaxKind::String => {
+                SyntaxKind::UnquotedString | SyntaxKind::String => {
                     pos += 1;
                     while let Some(next) = self.tokens.get(pos) {
                         if next.kind.is_trivia() {
@@ -410,7 +408,6 @@ impl Parser {
                 SyntaxKind::String
                 | SyntaxKind::BlockString
                 | SyntaxKind::UnquotedString
-                | SyntaxKind::Ident
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
                 | SyntaxKind::True
@@ -502,7 +499,6 @@ impl Parser {
                     SyntaxKind::Comma,
                     SyntaxKind::RBrace,
                     SyntaxKind::String,
-                    SyntaxKind::Ident,
                     SyntaxKind::UnquotedString,
                 ]);
                 self.finish_error_node();
@@ -604,9 +600,7 @@ impl Parser {
 
         let token = self.current();
         match token.map(|t| t.kind) {
-            Some(SyntaxKind::String)
-            | Some(SyntaxKind::Ident)
-            | Some(SyntaxKind::UnquotedString) => {
+            Some(SyntaxKind::String) | Some(SyntaxKind::UnquotedString) => {
                 self.bump();
             }
             _ => {
@@ -647,7 +641,6 @@ impl Parser {
                 SyntaxKind::String,
                 SyntaxKind::BlockString,
                 SyntaxKind::UnquotedString,
-                SyntaxKind::Ident,
                 SyntaxKind::Integer,
                 SyntaxKind::Float,
                 SyntaxKind::True,
@@ -674,7 +667,7 @@ impl Parser {
         if let Some(token) = self.current() {
             match token.kind {
                 SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
-                SyntaxKind::Ident | SyntaxKind::UnquotedString => {
+                SyntaxKind::UnquotedString => {
                     let (text, consumed) =
                         ScalarScanner::new(&self.tokens, self.position, context).collect();
                     if consumed == 1 {
@@ -714,7 +707,7 @@ impl Parser {
             }
 
             if !consumed_key {
-                if matches!(token.kind, SyntaxKind::Ident | SyntaxKind::String) {
+                if matches!(token.kind, SyntaxKind::UnquotedString | SyntaxKind::String) {
                     consumed_key = true;
                     pos += 1;
                     continue;
@@ -729,11 +722,11 @@ impl Parser {
     }
 
     /// ブレースレスルートオブジェクトの開始かチェック
-    /// 引用符なしキー（Ident/UnquotedString）のみで開始される
+    /// 引用符なしキー（UnquotedString）のみで開始される
     fn is_braceless_object_start(&self) -> bool {
         matches!(
             self.current_kind(),
-            Some(SyntaxKind::Ident) | Some(SyntaxKind::String)
+            Some(SyntaxKind::UnquotedString) | Some(SyntaxKind::String)
         ) && self.has_colon_after_key()
     }
 

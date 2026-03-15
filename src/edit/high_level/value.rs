@@ -111,9 +111,7 @@ impl ValueCodec {
                 SyntaxKind::BlockString => Some(HjsonValue::String(
                     StringLiteralCodec::parse_multiline_string(token.text(), 0),
                 )),
-                SyntaxKind::UnquotedString | SyntaxKind::Ident => {
-                    Some(HjsonValue::String(token.text().to_string()))
-                }
+                SyntaxKind::UnquotedString => Some(HjsonValue::String(token.text().to_string())),
                 SyntaxKind::Integer => token.text().parse::<i64>().ok().map(HjsonValue::Integer),
                 SyntaxKind::Float => token.text().parse::<f64>().ok().map(HjsonValue::Float),
                 SyntaxKind::True => Some(HjsonValue::Bool(true)),
@@ -246,7 +244,7 @@ impl ValueCodec {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
         {
-            SyntaxKind::Ident.create_token(key)
+            SyntaxKind::UnquotedString.create_token(key)
         } else {
             SyntaxKind::String.create_token(format!(
                 "\"{}\"",
@@ -671,9 +669,7 @@ impl KeyText {
             };
 
             match token.kind() {
-                SyntaxKind::Ident | SyntaxKind::UnquotedString => {
-                    return Some(token.text().to_string())
-                }
+                SyntaxKind::UnquotedString => return Some(token.text().to_string()),
                 SyntaxKind::String => {
                     let text = token.text();
                     if text.len() >= 2 {

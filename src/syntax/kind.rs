@@ -31,9 +31,6 @@ pub enum SyntaxKind {
     BlockString,    // '''...'''
     UnquotedString, // 引用符なし文字列
 
-    // 識別子（キーとして使用可能）
-    Ident, // 識別子
-
     // コメント
     LineComment,  // // 行コメント
     HashComment,  // # 行コメント
@@ -93,19 +90,18 @@ impl Language for HjsonLanguage {
             11 => SyntaxKind::String,
             12 => SyntaxKind::BlockString,
             13 => SyntaxKind::UnquotedString,
-            14 => SyntaxKind::Ident,
-            15 => SyntaxKind::LineComment,
-            16 => SyntaxKind::HashComment,
-            17 => SyntaxKind::BlockComment,
-            18 => SyntaxKind::Whitespace,
-            19 => SyntaxKind::Newline,
-            20 => SyntaxKind::Root,
-            21 => SyntaxKind::Object,
-            22 => SyntaxKind::Array,
-            23 => SyntaxKind::Pair,
-            24 => SyntaxKind::Key,
-            25 => SyntaxKind::Value,
-            26 => SyntaxKind::Error,
+            14 => SyntaxKind::LineComment,
+            15 => SyntaxKind::HashComment,
+            16 => SyntaxKind::BlockComment,
+            17 => SyntaxKind::Whitespace,
+            18 => SyntaxKind::Newline,
+            19 => SyntaxKind::Root,
+            20 => SyntaxKind::Object,
+            21 => SyntaxKind::Array,
+            22 => SyntaxKind::Pair,
+            23 => SyntaxKind::Key,
+            24 => SyntaxKind::Value,
+            25 => SyntaxKind::Error,
             n => panic!("Unknown SyntaxKind: {n}"),
         }
     }
@@ -187,7 +183,6 @@ impl SyntaxKind {
                 | String
                 | BlockString
                 | UnquotedString
-                | Ident
                 | LineComment
                 | HashComment
                 | BlockComment
@@ -253,7 +248,6 @@ mod tests {
             String,
             BlockString,
             UnquotedString,
-            Ident,
             LineComment,
             HashComment,
             BlockComment,
