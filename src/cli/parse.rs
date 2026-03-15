@@ -102,8 +102,8 @@ impl TreeViewBuilder {
         }
     }
 
-    fn connector(&self, is_last: bool) -> &'static str {
-        if self.config.pretty {
+    fn connector(&self, is_root: bool, is_last: bool) -> &'static str {
+        if self.config.pretty && !is_root {
             if is_last {
                 "└── "
             } else {
@@ -143,18 +143,20 @@ impl TreeViewBuilder {
 
     fn dump_node(&mut self, node: RedNode, is_last: bool) -> Result<()> {
         let kind = self.colorize(node.kind().to_string().as_str(), node.kind());
-
+        let is_root = node.kind() == SyntaxKind::Root;
         writeln!(
             self.buf,
             "{}{}{}",
             self.indent(),
-            self.connector(is_last),
+            self.connector(is_root, is_last),
             &kind
         )?;
 
-        self.push_indent(is_last);
-        let mut children = FilterPeekable::new(node.children_with_tokens(), self.show_trivia);
+        if !is_root {
+            self.push_indent(is_last);
+        }
 
+        let mut children = FilterPeekable::new(node.children_with_tokens(), self.show_trivia);
         while let Some(item) = children.next() {
             let is_last = children.peek().is_none();
             match item {
@@ -166,7 +168,10 @@ impl TreeViewBuilder {
                 }
             }
         }
-        self.pop_indent();
+
+        if !is_root {
+            self.pop_indent();
+        }
 
         Ok(())
     }
@@ -174,18 +179,13 @@ impl TreeViewBuilder {
     fn dump_token(&mut self, token: RedToken, is_last: bool) -> Result<()> {
         let kind = token.kind();
 
-        let token_str = format!(
-            "{:?} {:?}: {:?}",
-            if kind.is_trivia() { "Trivia" } else { "Token" },
-            kind,
-            token.text()
-        );
+        let token_str = format!("{:?}: {:?}", kind, token.text());
 
         writeln!(
             self.buf,
             "{}{}{}",
             self.indent(),
-            self.connector(is_last),
+            self.connector(false, is_last),
             self.colorize(&token_str, kind)
         )?;
 
