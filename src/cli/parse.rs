@@ -201,24 +201,33 @@ trait SyntaxKindDebugExt {
 impl SyntaxKindDebugExt for SyntaxKind {
     fn color(&self) -> i32 {
         match self {
-            SyntaxKind::Root
-            | SyntaxKind::Object
-            | SyntaxKind::Array
-            | SyntaxKind::Pair
-            | SyntaxKind::Key
-            | SyntaxKind::Value
-            | SyntaxKind::Error => 36,
-            SyntaxKind::String | SyntaxKind::BlockString | SyntaxKind::UnquotedString => 32,
-            SyntaxKind::Integer | SyntaxKind::Float => 35,
-            SyntaxKind::True | SyntaxKind::False | SyntaxKind::Null => 31,
+            // emphasize errors
+            SyntaxKind::Error => 91, // bright red
+
+            // distinguish key/value
+            SyntaxKind::Key => 93,   // bright yellow
+            SyntaxKind::Value => 36, // cyan
+
+            // literals
+            SyntaxKind::String | SyntaxKind::BlockString | SyntaxKind::UnquotedString => 32, // green
+            SyntaxKind::Integer | SyntaxKind::Float => 35, // magenta
+            SyntaxKind::True | SyntaxKind::False | SyntaxKind::Null => 34, // blue
+
+            // comments & whitespace
             SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => 90,
             SyntaxKind::Whitespace | SyntaxKind::Newline => 90,
+
+            // punctuation and structural nodes
             SyntaxKind::LBrace
             | SyntaxKind::RBrace
             | SyntaxKind::LBracket
             | SyntaxKind::RBracket
             | SyntaxKind::Colon
             | SyntaxKind::Comma
+            | SyntaxKind::Root
+            | SyntaxKind::Object
+            | SyntaxKind::Array
+            | SyntaxKind::Pair
             | _ => 37,
         }
     }
