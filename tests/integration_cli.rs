@@ -37,7 +37,7 @@ fn basic_commands() {
 
     let (stdout, _, success) = run_cli(&["parse", path.to_str().unwrap()]);
     assert!(success, "parse command should succeed");
-    assert!(stdout.contains("Parsed successfully"));
+    assert!(stdout.contains("Root") || stdout.contains("Object"));
 
     let (stdout, _, success) = run_cli(&["format", path.to_str().unwrap()]);
     assert!(success, "format command should succeed");

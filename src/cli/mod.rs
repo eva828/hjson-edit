@@ -1,9 +1,11 @@
 use clap::{Arg, ArgAction, ArgMatches, Command};
+use std::fmt::Write as FmtWrite;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use hjson_edit::{
-    AstDebugExt, CommentPath, CommentStyle, HjsonDocument, HjsonValue, RedNode, StringStyle,
+    CommentPath, CommentStyle, HjsonDocument, HjsonValue, RedNode, RedToken, StringStyle,
 };
 
 #[derive(Debug, Clone)]
@@ -74,6 +76,19 @@ impl CliApp {
                     .long("show-trivia")
                     .action(ArgAction::SetTrue)
                     .help("Show trivia tokens (whitespace, newlines, comments)"),
+            )
+            .arg(
+                Arg::new("color")
+                    .long("color")
+                    .value_parser(["always", "auto", "never"])
+                    .default_value("auto")
+                    .help("Color output: always, auto (default), never"),
+            )
+            .arg(
+                Arg::new("simple")
+                    .long("simple")
+                    .action(ArgAction::SetTrue)
+                    .help("Simple output without tree lines and colors"),
             )
     }
 
@@ -541,17 +556,37 @@ pub fn build_cli() -> Command {
 fn run_parse(matches: &ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
     let show_trivia = *matches.get_one::<bool>("show-trivia").unwrap_or(&false);
+    let color_mode = matches
+        .get_one::<String>("color")
+        .map(|s| s.as_str())
+        .unwrap_or("auto");
+    let simple = *matches.get_one::<bool>("simple").unwrap_or(&false);
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
             let red = RedNode::new_root(document.green_node().clone());
-            if show_trivia {
-                red.print_ast_with_trivia();
+
+            let no_color = std::env::var("NO_COLOR").is_ok();
+            let is_tty = std::io::stdout().is_terminal();
+
+            let colored = if simple {
+                false
+            } else if no_color {
+                false
             } else {
-                red.print_ast();
-            }
+                match color_mode {
+                    "always" => true,
+                    "never" => false,
+                    "auto" => is_tty,
+                    _ => is_tty,
+                }
+            };
+
+            let tree = !simple;
+
+            print!("{}", red.dump_ast(colored, tree, show_trivia));
             Ok(())
         }
         Err(errors) => anyhow::bail!(ParseReporter::render(&errors)),
@@ -660,4 +695,168 @@ fn run_edit(matches: &ArgMatches) -> Result<()> {
 
 fn collect_ops(matches: &ArgMatches) -> Result<Vec<EditOp>> {
     EditOpCollector::new(matches).collect()
+}
+
+trait AstDebugExt {
+    fn dump_ast(&self, colored: bool, tree: bool, show_trivia: bool) -> String;
+    fn dump_node(
+        &self,
+        indent: usize,
+        is_last: bool,
+        prefix: &str,
+        colored: bool,
+        tree: bool,
+        show_trivia: bool,
+        buf: &mut String,
+    );
+}
+
+impl AstDebugExt for RedNode {
+    fn dump_ast(&self, colored: bool, tree: bool, show_trivia: bool) -> String {
+        let mut buf = String::new();
+        self.dump_node(0, true, "", colored, tree, show_trivia, &mut buf);
+        buf
+    }
+
+    fn dump_node(
+        &self,
+        indent: usize,
+        is_last: bool,
+        prefix: &str,
+        colored: bool,
+        tree: bool,
+        show_trivia: bool,
+        buf: &mut String,
+    ) {
+        let kind = self.kind();
+        let kind_str = format!("{:?}", kind);
+        let kind_colored = if colored {
+            colorize_kind(kind, &kind_str)
+        } else {
+            kind_str
+        };
+
+        write_line(prefix, "", &kind_colored, tree, indent, false, buf);
+
+        let children: Vec<_> = self.children_with_tokens().collect();
+        for (i, child) in children.iter().enumerate() {
+            let is_last_child = i == children.len() - 1;
+            let new_prefix = if tree {
+                let branch = if is_last { "    " } else { "│   " };
+                format!("{}{}", prefix, branch)
+            } else {
+                String::new()
+            };
+
+            match child {
+                rowan::NodeOrToken::Node(n) => {
+                    n.dump_node(
+                        indent + 1,
+                        is_last_child,
+                        &new_prefix,
+                        colored,
+                        tree,
+                        show_trivia,
+                        buf,
+                    );
+                }
+                rowan::NodeOrToken::Token(t) => {
+                    let connector = if is_last_child {
+                        "└── "
+                    } else {
+                        "├── "
+                    };
+                    t.dump_token(
+                        colored,
+                        show_trivia,
+                        &new_prefix,
+                        connector,
+                        tree,
+                        indent + 1,
+                        buf,
+                    );
+                }
+            }
+        }
+    }
+}
+
+trait TokenDebugExt {
+    fn dump_token(
+        &self,
+        colored: bool,
+        show_trivia: bool,
+        prefix: &str,
+        connector: &str,
+        tree: bool,
+        indent: usize,
+        buf: &mut String,
+    );
+}
+
+impl TokenDebugExt for RedToken {
+    fn dump_token(
+        &self,
+        colored: bool,
+        show_trivia: bool,
+        prefix: &str,
+        connector: &str,
+        tree: bool,
+        indent: usize,
+        buf: &mut String,
+    ) {
+        let token_kind = self.kind();
+        let is_trivia = token_kind.is_trivia();
+        if is_trivia && !show_trivia {
+            return;
+        }
+
+        let token_str = format!(
+            "{:?} {:?}: {:?}",
+            if is_trivia { "Trivia" } else { "Token" },
+            token_kind,
+            self.text()
+        );
+        let token_colored = if colored {
+            colorize_kind(token_kind, &token_str)
+        } else {
+            token_str
+        };
+
+        write_line(prefix, connector, &token_colored, tree, indent, true, buf);
+    }
+}
+
+fn write_line(
+    prefix: &str,
+    connector: &str,
+    content: &str,
+    tree: bool,
+    indent: usize,
+    is_child: bool,
+    buf: &mut String,
+) {
+    if tree {
+        writeln!(buf, "{}{}{}", prefix, connector, content).ok();
+    } else {
+        let indent_str = "  ".repeat(indent);
+        let extra = if is_child { "  " } else { "" };
+        writeln!(buf, "{}{}{}", indent_str, extra, content).ok();
+    }
+}
+
+fn colorize_kind(kind: hjson_edit::SyntaxKind, text: &str) -> String {
+    use hjson_edit::SyntaxKind::*;
+    let color_code = match kind {
+        Root | Object | Array | Pair | Key | Value | Error => 36,
+        String | BlockString | UnquotedString => 32,
+        Integer | Float => 35,
+        True | False | Null => 31,
+        LineComment | HashComment | BlockComment => 90,
+        Whitespace | Newline => 90,
+        LBrace | RBrace | LBracket | RBracket | Colon | Comma => 37,
+        Ident => 33,
+        _ => 37,
+    };
+    format!("\x1b[{}m{}\x1b[0m", color_code, text)
 }
