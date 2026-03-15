@@ -1,4 +1,5 @@
 use rowan::Language;
+use std::fmt;
 
 /// HJSON構文要素の種別
 ///
@@ -60,6 +61,12 @@ pub enum SyntaxKind {
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {
         Self(kind as u16)
+    }
+}
+
+impl fmt::Display for SyntaxKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
