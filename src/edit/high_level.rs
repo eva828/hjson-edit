@@ -10,7 +10,6 @@ pub(crate) mod value;
 
 use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::edit::api::{EditError as LowLevelEditError, GreenNodeEdit};
-use crate::format::{normalize_targets, FormatTarget};
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::red::{RedNode, RedNodeCoreExt};
@@ -30,9 +29,26 @@ pub(crate) use structure::{
 };
 pub(crate) use value::{
     create_multiline_string_literal, create_pair_node, create_value_node, extract_key_text,
-    format_target_for_value, node_to_value, parse_multiline_string, replace_pair_value,
-    string_style_for_value_node, value_needs_contextual_formatting, value_to_green_node,
+    node_to_value, parse_multiline_string, replace_pair_value, string_style_for_value_node,
+    value_needs_contextual_formatting, value_to_green_node,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FormatTarget {
+    Document,
+    Path(String),
+    Node(Vec<usize>),
+}
+
+impl FormatTarget {
+    pub fn path(path: impl Into<String>) -> Self {
+        Self::Path(path.into())
+    }
+
+    pub fn node(path_from_root: Vec<usize>) -> Self {
+        Self::Node(path_from_root)
+    }
+}
 
 // =============================================================================
 // Error Types
@@ -88,10 +104,12 @@ pub struct EditResult {
 
 impl EditResult {
     fn new(document: HjsonDocument, dirty_targets: Vec<FormatTarget>) -> Self {
-        Self {
-            document,
-            dirty_targets: normalize_targets(&dirty_targets),
-        }
+        unimplemented!("formatting is not implemented yet");
+
+        // Self {
+        //     document,
+        //     dirty_targets: normalize_targets(&dirty_targets),
+        // }
     }
 
     pub fn document(&self) -> &HjsonDocument {
@@ -370,11 +388,12 @@ impl HjsonDocument {
     }
 
     pub fn format(&self, targets: Vec<FormatTarget>) -> Result<Self, FormatError> {
-        let normalized = normalize_targets(&targets);
-        if normalized.is_empty() {
-            return Ok(self.clone());
-        }
-        crate::format::engine::format_document(self, &normalized)
+        unimplemented!("formatting is not implemented yet");
+        // let normalized = normalize_targets(&targets);
+        // if normalized.is_empty() {
+        //     return Ok(self.clone());
+        // }
+        // format_document(self, &normalized)
     }
 
     /// GreenNodeへの参照を取得
@@ -456,11 +475,12 @@ impl HjsonDocument {
                 )?;
                 let updated = self.replace_green_node(&obj_node.path_from_root(), new_obj)?;
                 let dirty_target = if value_needs_contextual_formatting(value, string_style, None) {
-                    format_target_for_value(
-                        &updated,
-                        path,
-                        matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)),
-                    )
+                    unimplemented!("formatting is not implemented yet");
+                    // format_target_for_value(
+                    //     &updated,
+                    //     path,
+                    //     matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)),
+                    // )
                 } else {
                     None
                 };
@@ -530,11 +550,12 @@ impl HjsonDocument {
                     string_style,
                     replaced_existing_style,
                 ) {
-                    format_target_for_value(
-                        &updated,
-                        path,
-                        matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)),
-                    )
+                    unimplemented!("formatting is not implemented yet");
+                    // format_target_for_value(
+                    //     &updated,
+                    //     path,
+                    //     matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)),
+                    // )
                 } else {
                     None
                 };

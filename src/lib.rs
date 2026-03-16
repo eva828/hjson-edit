@@ -21,7 +21,7 @@ pub use edit::high_level::{
     CommentPath, CommentStyle, EditResult, FormatError, HjsonDocument, HjsonEditError, HjsonValue,
     IntoPath, PathSegment, StringStyle,
 };
-pub use format::FormatTarget;
+pub use format::{FormatConfig, Formatter};
 pub use parser::parser::ParseError;
 pub use syntax::green::GreenElement;
 pub use syntax::kind::SyntaxKind;

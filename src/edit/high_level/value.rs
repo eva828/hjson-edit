@@ -2,7 +2,6 @@ use crate::edit::high_level::navigation::RedNodeNavigateExt;
 use crate::edit::high_level::{
     clone_element, HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
 };
-use crate::format::FormatTarget;
 use crate::number::HjsonNumber;
 use crate::syntax::green::GreenElement;
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
@@ -29,22 +28,22 @@ impl ValueCodec {
         }
     }
 
-    pub(crate) fn format_target_for_value(
-        document: &HjsonDocument,
-        path: &[PathSegment],
-        prefer_container: bool,
-    ) -> Option<FormatTarget> {
-        let target_node = document.navigate_to_node_internal(path)?;
-        let target_node = if prefer_container {
-            target_node
-                .resolve_object_child()
-                .or_else(|| target_node.resolve_array_child())
-                .unwrap_or(target_node)
-        } else {
-            target_node
-        };
-        Some(FormatTarget::node(target_node.path_from_root()))
-    }
+    // pub(crate) fn format_target_for_value(
+    //     document: &HjsonDocument,
+    //     path: &[PathSegment],
+    //     prefer_container: bool,
+    // ) -> Option<FormatTargetUnit> {
+    //     let target_node = document.navigate_to_node_internal(path)?;
+    //     let target_node = if prefer_container {
+    //         target_node
+    //             .resolve_object_child()
+    //             .or_else(|| target_node.resolve_array_child())
+    //             .unwrap_or(target_node)
+    //     } else {
+    //         target_node
+    //     };
+    //     Some(FormatTargetUnit::node(target_node.path_from_root()))
+    // }
 
     pub(crate) fn node_to_value(node: &RedNode) -> Option<HjsonValue> {
         let target = Self::value_target(node)?;
@@ -776,13 +775,13 @@ pub(crate) fn value_needs_contextual_formatting(
     ValueCodec::needs_contextual_formatting(value, string_style, existing_style)
 }
 
-pub(crate) fn format_target_for_value(
-    document: &HjsonDocument,
-    path: &[PathSegment],
-    prefer_container: bool,
-) -> Option<FormatTarget> {
-    ValueCodec::format_target_for_value(document, path, prefer_container)
-}
+// pub(crate) fn format_target_for_value(
+//     document: &HjsonDocument,
+//     path: &[PathSegment],
+//     prefer_container: bool,
+// ) -> Option<FormatTargetUnit> {
+//     ValueCodec::format_target_for_value(document, path, prefer_container)
+// }
 
 pub(crate) fn node_to_value(node: &RedNode) -> Option<HjsonValue> {
     ValueCodec::node_to_value(node)

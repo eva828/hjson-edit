@@ -1,69 +1,49 @@
-use std::collections::BTreeSet;
+use rowan::{GreenNode, Language};
 
-pub(crate) mod array;
-pub(crate) mod core;
-pub(crate) mod engine;
-pub(crate) mod object;
+use crate::{
+    format::formatters::{
+        ArrayFormatter, ObjectFormatter, PairFormatter, RootFormatter, ValueFormatter,
+    },
+    syntax::kind::HjsonLanguage,
+    SyntaxKind,
+};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum FormatTarget {
-    Document,
-    Path(String),
-    Node(Vec<usize>),
+pub(crate) mod formatters;
+
+#[derive(Clone, Debug)]
+pub struct FormatConfig {
+    pub(crate) indent_unit: String,
+    pub(crate) newline: String,
 }
 
-impl FormatTarget {
-    pub fn path(path: impl Into<String>) -> Self {
-        Self::Path(path.into())
-    }
-
-    pub fn node(path_from_root: Vec<usize>) -> Self {
-        Self::Node(path_from_root)
+impl Default for FormatConfig {
+    fn default() -> Self {
+        Self {
+            indent_unit: "  ".to_string(),
+            newline: "\n".to_string(),
+        }
     }
 }
 
-pub(crate) fn normalize_targets(targets: &[FormatTarget]) -> Vec<FormatTarget> {
-    if targets
-        .iter()
-        .any(|target| matches!(target, FormatTarget::Document))
-    {
-        return vec![FormatTarget::Document];
+pub trait Format {
+    fn format(&self, node: GreenNode, depth: usize, config: FormatConfig) -> GreenNode;
+}
+
+pub struct Formatter;
+
+impl Formatter {
+    pub fn format(node: GreenNode, config: FormatConfig) -> GreenNode {
+        Self::format_with_depth(node, 0, config)
     }
 
-    let mut unique_nodes = BTreeSet::new();
-    let mut unique_paths = BTreeSet::new();
-    for target in targets {
-        match target {
-            FormatTarget::Node(path) => {
-                unique_nodes.insert(path.clone());
-            }
-            FormatTarget::Path(path) => {
-                unique_paths.insert(path.clone());
-            }
-            FormatTarget::Document => {}
+    pub fn format_with_depth(node: GreenNode, depth: usize, config: FormatConfig) -> GreenNode {
+        match HjsonLanguage::kind_from_raw(node.kind()) {
+            SyntaxKind::Object => ObjectFormatter.format(node, depth, config),
+            SyntaxKind::Array => ArrayFormatter.format(node, depth, config),
+            SyntaxKind::Pair => PairFormatter.format(node, depth, config),
+            SyntaxKind::Value => ValueFormatter.format(node, depth, config),
+            SyntaxKind::Root => RootFormatter.format(node, depth, config),
+            _ => node,
         }
     }
-
-    let mut result = Vec::new();
-    for path in unique_paths {
-        result.push(FormatTarget::Path(path));
-    }
-
-    'outer: for path in unique_nodes {
-        for existing in &result {
-            if let FormatTarget::Node(existing_path) = existing {
-                if path.starts_with(existing_path) {
-                    continue 'outer;
-                }
-            }
-        }
-
-        result.retain(|existing| match existing {
-            FormatTarget::Node(existing_path) => !existing_path.starts_with(&path),
-            FormatTarget::Document | FormatTarget::Path(_) => true,
-        });
-        result.push(FormatTarget::Node(path));
-    }
-
-    result
 }

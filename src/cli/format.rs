@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use hjson_edit::HjsonDocument;
+use hjson_edit::{FormatConfig, Formatter};
 
 pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
@@ -10,7 +11,9 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
-            let formatted = document.format_document()?;
+            let node = document.into_green_node();
+            let config = FormatConfig::default();
+            let formatted = Formatter::format_with_depth(node, 0, config);
             print!("{}", formatted);
             Ok(())
         }
