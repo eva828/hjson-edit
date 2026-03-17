@@ -211,9 +211,10 @@ impl Lexer {
     }
 
     fn emit(&mut self, kind: SyntaxKind, text: impl Into<String>, line: usize, column: usize) {
+        let text_s = text.into();
         self.tokens.push(Token {
             kind,
-            text: text.into(),
+            text: text_s.clone(),
             line,
             column,
         });
@@ -428,6 +429,67 @@ impl Lexer {
 
         let mut text = String::new();
         while let Some(c) = self.peek() {
+            // detect potential comment start sequences ('//', '/*', '#')
+            if c == '/' {
+                if let Some(&next_char) = self.input.get(self.position + 1) {
+                    if next_char == '/' || next_char == '*' {
+                        // If the text read so far classifies as a literal/number,
+                        // stop and emit it, then consume the comment separately.
+                        let kind = self.classify_word(&text);
+                        if !text.is_empty()
+                            && matches!(
+                                kind,
+                                SyntaxKind::Integer
+                                    | SyntaxKind::Float
+                                    | SyntaxKind::True
+                                    | SyntaxKind::False
+                                    | SyntaxKind::Null
+                            )
+                        {
+                            // emit the token we have so far
+                            self.emit(kind, text.clone(), start_line, start_col);
+
+                            // consume the comment prefix and delegate to the
+                            // existing comment reader which expects the prefix
+                            // already consumed.
+                            let comment_start_line = self.line;
+                            let comment_start_col = self.column;
+                            // consume '//' or '/*'
+                            self.advance();
+                            self.advance();
+                            if next_char == '/' {
+                                self.read_line_comment(comment_start_line, comment_start_col);
+                            } else {
+                                self.read_block_comment(comment_start_line, comment_start_col);
+                            }
+                            return;
+                        }
+                    }
+                }
+            } else if c == '#' {
+                // potential hash comment; treat similarly if the preceding
+                // text looks like a literal/number
+                let kind = self.classify_word(&text);
+                if !text.is_empty()
+                    && matches!(
+                        kind,
+                        SyntaxKind::Integer
+                            | SyntaxKind::Float
+                            | SyntaxKind::True
+                            | SyntaxKind::False
+                            | SyntaxKind::Null
+                    )
+                {
+                    self.emit(kind, text.clone(), start_line, start_col);
+                    let comment_start_line = self.line;
+                    let comment_start_col = self.column;
+                    // consume '#'
+                    self.advance();
+                    self.read_hash_comment(comment_start_line, comment_start_col);
+                    return;
+                }
+            }
+
             if c.is_whitespace()
                 || c == '{'
                 || c == '}'

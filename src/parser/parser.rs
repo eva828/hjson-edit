@@ -143,13 +143,15 @@ impl<'a> ScalarScanner<'a> {
             return true;
         }
 
+        // Treat all comment kinds the same way: if the text immediately
+        // preceding the comment looks like a literal (number, true/false/null),
+        // then the following comment token should be considered an inline
+        // comment terminator. Otherwise (e.g. an unquoted string), the
+        // comment token is treated as part of the scalar's text.
         match kind {
-            SyntaxKind::HashComment => {
+            SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
                 super::lexer::is_valid_number(trimmed)
                     || matches!(trimmed, "true" | "false" | "null")
-            }
-            SyntaxKind::LineComment | SyntaxKind::BlockComment => {
-                current_text.ends_with(' ') || current_text.ends_with('\t')
             }
             _ => false,
         }

@@ -240,10 +240,39 @@ impl ValueCodec {
         string_style: StringStyle,
         existing_style: Option<StringStyle>,
     ) -> Result<GreenNode, HjsonEditError> {
-        let key_token = if key
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-        {
+        // According to RFC, keynames may be any sequence of non-punctuator
+        // characters (i.e. excluding whitespace and the structural
+        // punctuators {},:[]). Allow a wider set of characters for
+        // unquoted keys while keeping a few conservative exclusions
+        // (control characters, quotes, and sequences that would be
+        // interpreted as comments by the lexer).
+        fn is_unquoted_key(key: &str) -> bool {
+            if key.is_empty() {
+                return false;
+            }
+            // disallow control or whitespace characters
+            if key.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
+                return false;
+            }
+            // disallow structural punctuators
+            if key
+                .chars()
+                .any(|ch| matches!(ch, ',' | ':' | '[' | ']' | '{' | '}'))
+            {
+                return false;
+            }
+            // disallow double quote inside unquoted key
+            if key.contains('"') {
+                return false;
+            }
+            // avoid keys that start with common comment starters
+            if key.starts_with('#') || key.starts_with("//") || key.starts_with("/*") {
+                return false;
+            }
+            true
+        }
+
+        let key_token = if is_unquoted_key(key) {
             SyntaxKind::UnquotedString.create_token(key)
         } else {
             SyntaxKind::String.create_token(format!(
@@ -444,18 +473,72 @@ impl StringStyleResolver {
         if HjsonNumber::is_valid(value) {
             return false;
         }
+        // disallow starting comment sequences
         if value.starts_with("//") || value.starts_with("/*") || value.starts_with('#') {
             return false;
         }
+        // disallow starting structural punctuators
         if matches!(
             value.chars().next(),
             Some('{') | Some('}') | Some('[') | Some(']') | Some(',') | Some(':')
         ) {
             return false;
         }
-        !value
+        // disallow control/newline chars anywhere
+        if value
             .chars()
             .any(|ch| matches!(ch, '\n' | '\r' | '\u{0000}'..='\u{001F}'))
+        {
+            return false;
+        }
+
+        // If a comment-start sequence appears inside the value and the
+        // fragment immediately before it (trimmed of trailing spaces/tabs)
+        // is empty or looks like a literal/number, then leaving the value
+        // unquoted would cause the lexer/parser to split it into a
+        // literal + comment. Treat that as unsafe.
+        let mut search_pos = 0usize;
+        while search_pos < value.len() {
+            // find next occurrence of any comment starter
+            let mut next_found: Option<(usize, usize)> = None; // (idx, len)
+
+            if let Some(i) = value[search_pos..].find("//") {
+                let idx = search_pos + i;
+                if next_found.is_none() || idx < next_found.unwrap().0 {
+                    next_found = Some((idx, 2));
+                }
+            }
+            if let Some(i) = value[search_pos..].find("/*") {
+                let idx = search_pos + i;
+                if next_found.is_none() || idx < next_found.unwrap().0 {
+                    next_found = Some((idx, 2));
+                }
+            }
+            if let Some(i) = value[search_pos..].find('#') {
+                let idx = search_pos + i;
+                if next_found.is_none() || idx < next_found.unwrap().0 {
+                    next_found = Some((idx, 1));
+                }
+            }
+
+            let (idx, pat_len) = match next_found {
+                Some(t) => t,
+                None => break,
+            };
+
+            let before = &value[..idx];
+            let trimmed_before = before.trim_end_matches([' ', '\t']);
+            if trimmed_before.is_empty()
+                || HjsonNumber::is_valid(trimmed_before)
+                || matches!(trimmed_before, "true" | "false" | "null")
+            {
+                return false;
+            }
+
+            search_pos = idx + pat_len;
+        }
+
+        true
     }
 }
 
