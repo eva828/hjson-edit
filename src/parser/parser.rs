@@ -387,10 +387,8 @@ impl Parser {
     fn parse_value(&mut self, context: ScalarContext) {
         self.builder.start_node(SyntaxKind::Value);
 
-        // 先頭のトリビアを消費（インデントなど）
-        self.eat_trivia();
-
-        // 終了チェック（トリビアのみの場合）
+        // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
+        // 終了チェック（ストリーム終端）
         if self.is_at_end() {
             self.builder.finish_node();
             return;
@@ -547,6 +545,8 @@ impl Parser {
                 break;
             }
 
+            // Consume leading trivia so they are siblings of the upcoming Value node
+            self.eat_trivia();
             self.parse_value(ScalarContext::ArrayItem);
 
             // 値の後のトリビア（改行・コメントなど）を消費
@@ -657,13 +657,14 @@ impl Parser {
         }
 
         // 値
+        // Consume trivia between ':' and the value so Value node stays trivia-free
+        self.eat_trivia();
         self.parse_value(ScalarContext::ObjectValue);
 
         self.builder.finish_node();
     }
 
     fn parse_scalar_value(&mut self, context: ScalarContext) {
-        self.eat_trivia();
         if let Some(token) = self.current() {
             match token.kind {
                 SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
