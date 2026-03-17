@@ -460,12 +460,14 @@ impl Parser {
                 break;
             }
 
-            // トリビア消費後に } が来たら終了、またはEOFの場合もループ先頭に戻って適切なエラーを出力
-            // parse_pair() 内でトリビアを消費するため、ここでは Peek 的に確認する
+            // トリビアがあっても at() はトリビアをスキップして確認するため、
+            // ここでは parse_pair の直前に先行するトリビアを消費しておく。
             if self.at(SyntaxKind::RBrace) || self.is_at_end() {
                 break;
             }
 
+            // consume trivia so it becomes sibling tokens of the upcoming Pair
+            self.eat_trivia();
             self.parse_pair();
 
             // Pairの後のトリビアを消費（コメントなど）
@@ -593,7 +595,7 @@ impl Parser {
     /// キー: 値 のペアを解析
     fn parse_pair(&mut self) {
         self.builder.start_node(SyntaxKind::Pair);
-        self.eat_trivia(); // Pair前のトリビアを消費（改行・インデントなど）
+        // Pairノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
         // キー
         self.builder.start_node(SyntaxKind::Key);
@@ -749,6 +751,8 @@ impl Parser {
                 break;
             }
 
+            // consume trivia so Pair does not absorb leading trivia
+            self.eat_trivia();
             self.parse_pair();
 
             let had_separator_newline = self.eat_trivia_and_report_newline();
