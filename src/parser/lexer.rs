@@ -435,8 +435,10 @@ impl Lexer {
                     if next_char == '/' || next_char == '*' {
                         // If the text read so far classifies as a literal/number,
                         // stop and emit it, then consume the comment separately.
-                        let kind = self.classify_word(&text);
-                        if !text.is_empty()
+                        // Trim trailing whitespace before classification
+                        let trimmed = text.trim_end();
+                        let kind = self.classify_word(trimmed);
+                        if !trimmed.is_empty()
                             && matches!(
                                 kind,
                                 SyntaxKind::Integer
@@ -446,8 +448,8 @@ impl Lexer {
                                     | SyntaxKind::Null
                             )
                         {
-                            // emit the token we have so far
-                            self.emit(kind, text.clone(), start_line, start_col);
+                            // emit the token we have so far (without trailing whitespace)
+                            self.emit(kind, trimmed.to_string(), start_line, start_col);
 
                             // consume the comment prefix and delegate to the
                             // existing comment reader which expects the prefix
@@ -469,8 +471,9 @@ impl Lexer {
             } else if c == '#' {
                 // potential hash comment; treat similarly if the preceding
                 // text looks like a literal/number
-                let kind = self.classify_word(&text);
-                if !text.is_empty()
+                let trimmed = text.trim_end();
+                let kind = self.classify_word(trimmed);
+                if !trimmed.is_empty()
                     && matches!(
                         kind,
                         SyntaxKind::Integer
@@ -480,7 +483,7 @@ impl Lexer {
                             | SyntaxKind::Null
                     )
                 {
-                    self.emit(kind, text.clone(), start_line, start_col);
+                    self.emit(kind, trimmed.to_string(), start_line, start_col);
                     let comment_start_line = self.line;
                     let comment_start_col = self.column;
                     // consume '#'
