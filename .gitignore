@@ -5,6 +5,7 @@
 # Nix
 result
 result-*
+.direnv
 
 # IDE/Editor
 .idea/
