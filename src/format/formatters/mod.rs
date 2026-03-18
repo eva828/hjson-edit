@@ -2,10 +2,10 @@ pub(crate) mod array;
 pub(crate) mod object;
 pub(crate) mod pair;
 pub(crate) mod root;
-pub(crate) mod value;
+pub(crate) mod transparent;
 
 pub(crate) use array::ArrayFormatter;
 pub(crate) use object::ObjectFormatter;
 pub(crate) use pair::PairFormatter;
 pub(crate) use root::RootFormatter;
-pub(crate) use value::ValueFormatter;
+pub(crate) use transparent::TransparentFormatter;

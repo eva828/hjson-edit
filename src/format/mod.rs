@@ -1,8 +1,8 @@
-use rowan::{GreenNode, Language};
+use rowan::{GreenNode, GreenToken, Language};
 
 use crate::{
     format::formatters::{
-        ArrayFormatter, ObjectFormatter, PairFormatter, RootFormatter, ValueFormatter,
+        ArrayFormatter, ObjectFormatter, PairFormatter, RootFormatter, TransparentFormatter,
     },
     syntax::kind::HjsonLanguage,
     SyntaxKind,
@@ -14,6 +14,7 @@ pub(crate) mod formatters;
 pub struct FormatConfig {
     pub(crate) indent_unit: String,
     pub(crate) newline: String,
+    pub(crate) space: String,
 }
 
 impl Default for FormatConfig {
@@ -21,7 +22,23 @@ impl Default for FormatConfig {
         Self {
             indent_unit: "  ".to_string(),
             newline: "\n".to_string(),
+            space: " ".to_string(),
         }
+    }
+}
+
+impl FormatConfig {
+    pub(crate) fn create_newline(&self) -> GreenToken {
+        HjsonLanguage::kind_from_raw(SyntaxKind::Newline.into()).create_token(&self.newline)
+    }
+
+    pub(crate) fn create_indent(&self, depth: usize) -> GreenToken {
+        HjsonLanguage::kind_from_raw(SyntaxKind::Whitespace.into())
+            .create_token(&self.indent_unit.repeat(depth))
+    }
+
+    pub(crate) fn create_space(&self) -> GreenToken {
+        HjsonLanguage::kind_from_raw(SyntaxKind::Whitespace.into()).create_token(&self.space)
     }
 }
 
@@ -41,9 +58,8 @@ impl Formatter {
             SyntaxKind::Object => ObjectFormatter.format(node, depth, config),
             SyntaxKind::Array => ArrayFormatter.format(node, depth, config),
             SyntaxKind::Pair => PairFormatter.format(node, depth, config),
-            SyntaxKind::Value => ValueFormatter.format(node, depth, config),
             SyntaxKind::Root => RootFormatter.format(node, depth, config),
-            _ => node,
+            _ => TransparentFormatter.format(node, depth, config),
         }
     }
 }
