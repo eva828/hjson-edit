@@ -59,14 +59,14 @@ impl ValueCodec {
             return Some(node.clone());
         }
 
-        node.children_nodes()
+        node.children()
             .next()
             .or_else(|| Self::token_to_value(node).map(|_| node.clone()))
     }
 
     fn object_to_value(node: &RedNode) -> Option<HjsonValue> {
         let mut pairs = Vec::new();
-        for child in node.children_nodes() {
+        for child in node.children() {
             if child.kind() != SyntaxKind::Pair {
                 continue;
             }
@@ -81,7 +81,7 @@ impl ValueCodec {
 
     fn array_to_value(node: &RedNode) -> Option<HjsonValue> {
         let mut items = Vec::new();
-        for child in node.children_nodes() {
+        for child in node.children() {
             if child.kind() != SyntaxKind::Value {
                 continue;
             }

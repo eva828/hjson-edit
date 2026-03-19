@@ -13,12 +13,6 @@ pub trait RedNodeCoreExt {
     /// 指定されたkindの子ノードを探す
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode>;
 
-    /// すべての子ノードを取得
-    fn children_nodes(&self) -> impl Iterator<Item = RedNode>;
-
-    /// テキスト表現（フォーマット保持）
-    fn text(&self) -> String;
-
     /// GreenNodeを再構築する
     fn to_green(&self) -> rowan::GreenNode;
 }
@@ -27,15 +21,6 @@ impl RedNodeCoreExt for RedNode {
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode> {
         // children() returns Iterator<Item = SyntaxNode>, not NodeOrToken
         self.children().find(|child| child.kind() == kind)
-    }
-
-    fn children_nodes(&self) -> impl Iterator<Item = RedNode> {
-        // children() already returns Iterator<Item = SyntaxNode>
-        self.children()
-    }
-
-    fn text(&self) -> String {
-        self.to_string()
     }
 
     fn to_green(&self) -> rowan::GreenNode {

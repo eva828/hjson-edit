@@ -752,7 +752,7 @@ impl HjsonDocument {
         };
 
         let mut keys = Vec::new();
-        for child in obj.children_nodes() {
+        for child in obj.children() {
             if child.kind() == SyntaxKind::Pair {
                 if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
                     if let Some(key_text) = extract_key_text(&key_node) {
@@ -772,7 +772,7 @@ impl HjsonDocument {
         if let Some(array) = node.child_by_kind(SyntaxKind::Array) {
             return Some(
                 array
-                    .children_nodes()
+                    .children()
                     .filter(|n| n.kind() == SyntaxKind::Value)
                     .count(),
             );
@@ -782,14 +782,14 @@ impl HjsonDocument {
             if let Some(array) = value.child_by_kind(SyntaxKind::Array) {
                 return Some(
                     array
-                        .children_nodes()
+                        .children()
                         .filter(|n| n.kind() == SyntaxKind::Value)
                         .count(),
                 );
             }
             if let Some(obj) = value.child_by_kind(SyntaxKind::Object) {
                 return Some(
-                    obj.children_nodes()
+                    obj.children()
                         .filter(|n| n.kind() == SyntaxKind::Pair)
                         .count(),
                 );
@@ -798,7 +798,7 @@ impl HjsonDocument {
 
         if let Some(obj) = node.child_by_kind(SyntaxKind::Object) {
             return Some(
-                obj.children_nodes()
+                obj.children()
                     .filter(|n| n.kind() == SyntaxKind::Pair)
                     .count(),
             );

@@ -36,7 +36,7 @@ impl RedNodeNavigateExt for RedNode {
     }
 
     fn find_pair_index(&self, key: &str) -> Option<usize> {
-        for (i, child) in self.children_nodes().enumerate() {
+        for (i, child) in self.children().enumerate() {
             if child.kind() == SyntaxKind::Pair {
                 if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
                     if let Some(key_text) = extract_key_text(&key_node) {
@@ -51,7 +51,7 @@ impl RedNodeNavigateExt for RedNode {
     }
 
     fn find_pair_node(&self, key: &str) -> Option<RedNode> {
-        for child in self.children_nodes() {
+        for child in self.children() {
             if child.kind() == SyntaxKind::Pair {
                 if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
                     if let Some(key_text) = extract_key_text(&key_node) {
@@ -202,7 +202,7 @@ pub(crate) fn navigate_from_node(start: &RedNode, path: &[PathSegment]) -> Optio
                 };
 
                 let mut found = None;
-                for child in obj.children_nodes() {
+                for child in obj.children() {
                     if child.kind() == SyntaxKind::Pair {
                         if let Some(key_node) = child.child_by_kind(SyntaxKind::Key) {
                             if let Some(key_text) = extract_key_text(&key_node) {
@@ -227,7 +227,7 @@ pub(crate) fn navigate_from_node(start: &RedNode, path: &[PathSegment]) -> Optio
                 };
 
                 let values: Vec<RedNode> = arr
-                    .children_nodes()
+                    .children()
                     .filter(|n| n.kind() == SyntaxKind::Value)
                     .collect();
 
