@@ -471,8 +471,3 @@ impl<'a> Lexer<'a> {
 fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
 }
-
-/// 公開API
-pub fn lex(input: &str) -> LexResult {
-    Lexer::new(input).lex()
-}

@@ -14,7 +14,7 @@ pub struct ParseError {
 }
 
 impl ParseError {
-    fn new(offset: usize, message: impl Into<String>) -> Self {
+    pub(crate) fn new(offset: usize, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             offset,
@@ -782,31 +782,5 @@ impl Parser {
         }
 
         self.builder.finish_node();
-    }
-}
-
-/// 公開API
-pub fn parse(input: &str) -> Result<ParseResult, Vec<ParseError>> {
-    let lex_result = super::lexer::lex(input);
-
-    // Lexerエラーがある場合、それをParseErrorに変換して即座に返す
-    if !lex_result.errors.is_empty() {
-        let parse_errors: Vec<ParseError> = lex_result
-            .errors
-            .into_iter() // into_iterで所有権ごと移動（高速）
-            .map(|e| ParseError::new(e.offset, e.message))
-            .collect();
-
-        return Err(parse_errors);
-    }
-
-    // LexerのトークンをそのままParserに渡す（ハッピーパスは計算コスト0！）
-    let parser = Parser::new(lex_result.tokens);
-    let result = parser.parse();
-
-    if result.errors.is_empty() {
-        Ok(result)
-    } else {
-        Err(result.errors)
     }
 }
