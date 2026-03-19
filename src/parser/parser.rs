@@ -2,24 +2,31 @@
 ///
 /// Lexerのトークン列をGreen Treeに変換
 use super::lexer::Token;
-use crate::syntax::green::GreenTreeBuilder;
 use crate::syntax::kind::SyntaxKind;
+use crate::{number::HjsonNumber, syntax::green::GreenTreeBuilder};
+use line_index::{LineIndex, TextSize};
 
-/// 構文解析エラー
+/// 構文解析エラー（オフセットのみ保持）
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub message: String,
-    pub line: usize,
-    pub column: usize,
+    pub offset: usize,
 }
 
 impl ParseError {
-    fn new(message: impl Into<String>, line: usize, column: usize) -> Self {
+    fn new(offset: usize, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            line,
-            column,
+            offset,
         }
+    }
+
+    pub fn format(&self, line_index: &LineIndex) -> String {
+        let lc = line_index.line_col(TextSize::from(self.offset as u32));
+        format!(
+            "Error at line {}, column {}: {}",
+            lc.line, lc.col, self.message
+        )
     }
 }
 
@@ -150,8 +157,7 @@ impl<'a> ScalarScanner<'a> {
         // comment token is treated as part of the scalar's text.
         match kind {
             SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
-                super::lexer::is_valid_number(trimmed)
-                    || matches!(trimmed, "true" | "false" | "null")
+                HjsonNumber::is_valid(trimmed) || matches!(trimmed, "true" | "false" | "null")
             }
             _ => false,
         }
@@ -216,6 +222,7 @@ impl<'a> ScalarScanner<'a> {
 }
 
 impl Parser {
+    // LineIndex を受け取る必要がなくなりました
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
@@ -225,14 +232,17 @@ impl Parser {
         }
     }
 
+    // エラーはオフセットだけを記録する
+    fn error(&mut self, offset: usize, message: impl Into<String>) {
+        self.errors.push(ParseError::new(offset, message));
+    }
+
     /// 構文解析実行
     pub fn parse(mut self) -> ParseResult {
         self.builder.start_node(SyntaxKind::Root);
 
-        // 先頭のトリビアを含めて値をパース
         if !self.is_at_end() {
             self.eat_trivia();
-            // ブレースレスルートオブジェクトのチェック
             if self.is_braceless_object_start() {
                 self.parse_braceless_object();
             } else {
@@ -242,15 +252,9 @@ impl Parser {
 
         self.eat_trivia();
 
-        // 残りのトークンがあればエラー
         if !self.is_at_end() {
             let token = self.current().unwrap();
-            self.error(
-                format!("Unexpected token: {:?}", token.kind),
-                token.line,
-                token.column,
-            );
-            // 残りをエラーノードとして回収（トリビアも含めて）
+            self.error(token.offset, format!("Unexpected token: {:?}", token.kind));
             self.start_error_node();
             while !self.is_at_end() {
                 self.bump();
@@ -260,6 +264,7 @@ impl Parser {
 
         self.builder.finish_node();
 
+        // 戻り値もスッキリ
         ParseResult {
             green: self.builder.finish(),
             errors: self.errors,
@@ -287,19 +292,15 @@ impl Parser {
     /// 特定の非トリビアトークンを期待して消費（前のトリビアも含めて）
     #[allow(dead_code)]
     fn expect(&mut self, kind: SyntaxKind, message: &str) -> bool {
-        // 先にトリビアを消費
         self.eat_trivia();
 
         if self.current().map(|t| t.kind == kind).unwrap_or(false) {
             self.bump();
             true
         } else {
-            let (line, col) = if let Some(t) = self.current() {
-                (t.line, t.column)
-            } else {
-                (0, 0)
-            };
-            self.error(message, line, col);
+            if let Some(t) = self.current() {
+                self.error(t.offset, message);
+            }
             false
         }
     }
@@ -314,11 +315,6 @@ impl Parser {
         self.current_kind()
             .map(|k| kinds.contains(&k))
             .unwrap_or(false)
-    }
-
-    /// エラーを記録
-    fn error(&mut self, message: impl Into<String>, line: usize, column: usize) {
-        self.errors.push(ParseError::new(message, line, column));
     }
 
     /// エラーノードを開始
@@ -414,14 +410,13 @@ impl Parser {
                 | SyntaxKind::False
                 | SyntaxKind::Null => self.parse_scalar_value(context),
                 _ => {
-                    // 予期しないトークン - エラーノードとして回収
-                    let (line, col) = if let Some(t) = self.current() {
-                        (t.line, t.column)
+                    let offset = if let Some(t) = self.current() {
+                        t.offset
                     } else {
-                        (0, 0)
+                        0
                     };
                     self.start_error_node();
-                    self.error(format!("Unexpected token: {:?}", token_kind), line, col);
+                    self.error(offset, format!("Unexpected token: {:?}", token_kind));
                     self.bump();
                     self.finish_error_node();
                 }
@@ -452,13 +447,13 @@ impl Parser {
             }
 
             if self.is_at_end() {
-                let (line, col) = if self.position > 0 {
+                let offset = if self.position > 0 {
                     let prev = &self.tokens[self.position - 1];
-                    (prev.line, prev.column + prev.text.len())
+                    prev.offset + prev.text.len()
                 } else {
-                    (1, 1)
+                    0
                 };
-                self.error("Unclosed object, expected '}'", line, col);
+                self.error(offset, "Unclosed object, expected '}'");
                 break;
             }
 
@@ -494,7 +489,7 @@ impl Parser {
                 }
                 // 改行もなくカンマもない → エラー
                 let token = self.current().unwrap();
-                self.error("Expected ',' or '}'", token.line, token.column);
+                self.error(token.offset, "Expected ',' or '}'");
                 // エラー回復：次のペアまたは}までスキップ（トリビア含めて保持）
                 self.start_error_node();
                 self.consume_until_recovery(&[
@@ -510,7 +505,7 @@ impl Parser {
         // }
         if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
             let token = self.current().unwrap();
-            self.error("Expected '}'", token.line, token.column);
+            self.error(token.offset, "Expected '}'");
         } else {
             self.bump();
         }
@@ -539,13 +534,13 @@ impl Parser {
             }
 
             if self.is_at_end() {
-                let (line, col) = if self.position > 0 {
+                let offset = if self.position > 0 {
                     let prev = &self.tokens[self.position - 1];
-                    (prev.line, prev.column + prev.text.len())
+                    prev.offset + prev.text.len()
                 } else {
-                    (1, 1)
+                    0
                 };
-                self.error("Unclosed array, expected ']'", line, col);
+                self.error(offset, "Unclosed array, expected ']'");
                 break;
             }
 
@@ -604,18 +599,16 @@ impl Parser {
                 }
                 // 改行もなくカンマもない → エラー
                 let token = self.current().unwrap();
-                self.error("Expected ',' or ']'", token.line, token.column);
-                // エラー回復（トリビア含めて保持）
+                self.error(token.offset, "Expected ',' or ']'");
                 self.start_error_node();
                 self.consume_until_recovery(&[SyntaxKind::Comma, SyntaxKind::RBracket]);
                 self.finish_error_node();
             }
         }
 
-        // ]
         if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
             let token = self.current().unwrap();
-            self.error("Expected ']'", token.line, token.column);
+            self.error(token.offset, "Expected ']'");
         } else {
             self.bump();
         }
@@ -638,17 +631,12 @@ impl Parser {
             }
             _ => {
                 if let Some(t) = token {
-                    self.error(
-                        format!("Expected key, found {:?}", t.kind),
-                        t.line,
-                        t.column,
-                    );
-                    // エラートークンを含めて回収
+                    self.error(t.offset, format!("Expected key, found {:?}", t.kind));
                     self.start_error_node();
                     self.bump();
                     self.finish_error_node();
                 } else {
-                    self.error("Expected key", 0, 0);
+                    self.error(0, "Expected key");
                 }
                 self.builder.finish_node();
                 self.builder.finish_node();
@@ -660,13 +648,12 @@ impl Parser {
 
         // :
         if !self.at(SyntaxKind::Colon) {
-            let (line, col) = if let Some(t) = self.current() {
-                (t.line, t.column)
+            let offset = if let Some(t) = self.current() {
+                t.offset
             } else {
-                (0, 0)
+                0
             };
-            self.error("Expected ':' after key", line, col);
-            // エラー回復：値が始まるまでをエラーノードとして回収
+            self.error(offset, "Expected ':' after key");
             self.start_error_node();
             self.consume_until_recovery(&[
                 SyntaxKind::LBrace,
@@ -684,9 +671,8 @@ impl Parser {
             ]);
             self.finish_error_node();
         } else {
-            // eat_trivia()はat()の中で既に呼ばれているので、ここでは直接bump()
-            self.eat_trivia(); // コロンの前のトリビアを消費
-            self.bump(); // コロンを消費
+            self.eat_trivia();
+            self.bump();
         }
 
         // 値
@@ -803,16 +789,18 @@ impl Parser {
 pub fn parse(input: &str) -> Result<ParseResult, Vec<ParseError>> {
     let lex_result = super::lexer::lex(input);
 
-    // 字句解析エラーがある場合
+    // Lexerエラーがある場合、それをParseErrorに変換して即座に返す
     if !lex_result.errors.is_empty() {
         let parse_errors: Vec<ParseError> = lex_result
             .errors
-            .iter()
-            .map(|e| ParseError::new(&e.message, e.line, e.column))
+            .into_iter() // into_iterで所有権ごと移動（高速）
+            .map(|e| ParseError::new(e.offset, e.message))
             .collect();
+
         return Err(parse_errors);
     }
 
+    // LexerのトークンをそのままParserに渡す（ハッピーパスは計算コスト0！）
     let parser = Parser::new(lex_result.tokens);
     let result = parser.parse();
 

@@ -4,31 +4,103 @@
 use crate::number::{HjsonNumber, NumberKind};
 use crate::syntax::kind::SyntaxKind;
 
-/// 字句解析エラー
+/// 字句解析エラー（発生したバイトオフセットのみを記録）
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexError {
     pub message: String,
-    pub line: usize,
-    pub column: usize,
+    pub offset: usize,
 }
 
 impl LexError {
-    fn new(message: impl Into<String>, line: usize, column: usize) -> Self {
+    fn new(offset: usize, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            line,
-            column,
+            offset,
         }
     }
 }
 
-/// トークン
+/// 純粋な物理ポインタとしての Cursor
+pub struct Cursor<'a> {
+    input: &'a str,
+    position: usize,
+}
+
+impl<'a> Cursor<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self { input, position: 0 }
+    }
+
+    fn remaining_str(&self) -> &'a str {
+        &self.input[self.position..]
+    }
+
+    pub fn peek(&self) -> Option<char> {
+        self.remaining_str().chars().next()
+    }
+
+    pub fn is_at_end(&self) -> bool {
+        self.position >= self.input.len()
+    }
+
+    pub fn advance(&mut self) -> Option<char> {
+        if let Some(c) = self.peek() {
+            self.position += c.len_utf8();
+            Some(c)
+        } else {
+            None
+        }
+    }
+
+    pub fn match_char(&mut self, expected: char) -> bool {
+        if self.peek() == Some(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn match_str(&mut self, expected: &str) -> bool {
+        if self.remaining_str().starts_with(expected) {
+            for _ in 0..expected.chars().count() {
+                self.advance();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 開始位置から現在の位置までをスライスとして一気に切り出す（ゼロアロケーション）
+    pub fn slice(&self, start: usize, end: usize) -> &'a str {
+        &self.input[start..end]
+    }
+
+    pub fn peek_n(&self, n: usize) -> Option<char> {
+        self.remaining_str().chars().nth(n)
+    }
+
+    pub fn peek_prev(&self) -> Option<char> {
+        if self.position == 0 {
+            None
+        } else {
+            let prev_str = &self.input[..self.position];
+            prev_str.chars().last()
+        }
+    }
+
+    pub fn pos(&self) -> usize {
+        self.position
+    }
+}
+
+/// トークン（メタデータを削ぎ落とした純粋なデータ）
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: SyntaxKind,
     pub text: String,
-    pub line: usize,
-    pub column: usize,
+    pub offset: usize,
 }
 
 /// 字句解析結果
@@ -38,23 +110,17 @@ pub struct LexResult {
     pub errors: Vec<LexError>,
 }
 
-/// 字句解析器
-pub struct Lexer {
-    input: Vec<char>,
-    position: usize,
-    line: usize,
-    column: usize,
+/// 字句解析器本体
+pub struct Lexer<'a> {
+    cursor: Cursor<'a>,
     tokens: Vec<Token>,
     errors: Vec<LexError>,
 }
 
-impl Lexer {
-    pub fn new(input: &str) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(input: &'a str) -> Self {
         Self {
-            input: input.chars().collect(),
-            position: 0,
-            line: 1,
-            column: 1,
+            cursor: Cursor::new(input),
             tokens: Vec::new(),
             errors: Vec::new(),
         }
@@ -69,63 +135,56 @@ impl Lexer {
                 break;
             }
 
-            let start_line = self.line;
-            let start_col = self.column;
+            let start_offset = self.cursor.pos();
 
             if self.match_char('\n') {
-                self.emit(SyntaxKind::Newline, "\n", start_line, start_col);
-                self.line += 1;
-                self.column = 1;
+                self.emit(SyntaxKind::Newline, "\n", start_offset);
                 continue;
             }
 
             if self.match_char('\r') {
-                if self.peek() == Some('\n') {
-                    self.advance(); // \n も消費
-                    self.emit(SyntaxKind::Newline, "\r\n", start_line, start_col);
-                    self.line += 1;
-                    self.column = 1;
-                    continue;
+                if self.match_char('\n') {
+                    self.emit(SyntaxKind::Newline, "\r\n", start_offset);
+                } else {
+                    self.emit(SyntaxKind::Whitespace, "\r", start_offset);
                 }
-                self.emit(SyntaxKind::Whitespace, "\r", start_line, start_col);
                 continue;
             }
 
             if self.match_str("//") {
-                self.read_line_comment(start_line, start_col);
+                self.read_line_comment(start_offset);
                 continue;
             }
 
             if self.peek() == Some('#') && self.is_hash_comment_start() {
                 self.advance();
-                self.read_hash_comment(start_line, start_col);
+                self.read_hash_comment(start_offset);
                 continue;
             }
 
             if self.match_str("/*") {
-                self.read_block_comment(start_line, start_col);
+                self.read_block_comment(start_offset);
                 continue;
             }
 
             if self.match_str("'''") {
-                self.read_block_string(start_line, start_col);
+                self.read_block_string(start_offset);
                 continue;
             }
 
             if self.match_char('"') {
-                self.read_double_quoted_string(start_line, start_col);
+                self.read_double_quoted_string(start_offset);
                 continue;
             }
 
             if let Some(kind) = self.match_punctuation() {
-                let text: String = self.input[self.position - 1..self.position]
-                    .iter()
-                    .collect();
-                self.emit(kind, &text, start_line, start_col);
+                let end_offset = self.cursor.pos();
+                let text = self.cursor.slice(start_offset, end_offset);
+                self.emit(kind, text, start_offset);
                 continue;
             }
 
-            self.read_quoteless_token(start_line, start_col);
+            self.read_quoteless_token(start_offset);
         }
 
         LexResult {
@@ -135,54 +194,27 @@ impl Lexer {
     }
 
     fn peek(&self) -> Option<char> {
-        self.input.get(self.position).copied()
+        self.cursor.peek()
     }
 
     fn is_at_end(&self) -> bool {
-        self.position >= self.input.len()
+        self.cursor.is_at_end()
     }
 
     fn advance(&mut self) -> Option<char> {
-        if let Some(&c) = self.input.get(self.position) {
-            self.position += 1;
-            self.column += 1;
-            Some(c)
-        } else {
-            None
-        }
+        self.cursor.advance()
     }
 
     fn match_char(&mut self, expected: char) -> bool {
-        if self.peek() == Some(expected) {
-            self.advance();
-            true
-        } else {
-            false
-        }
+        self.cursor.match_char(expected)
     }
 
     fn match_str(&mut self, expected: &str) -> bool {
-        let chars: Vec<char> = expected.chars().collect();
-        if self.position + chars.len() > self.input.len() {
-            return false;
-        }
-
-        for (i, &c) in chars.iter().enumerate() {
-            if self.input[self.position + i] != c {
-                return false;
-            }
-        }
-
-        for _ in 0..chars.len() {
-            self.advance();
-        }
-        true
+        self.cursor.match_str(expected)
     }
 
     fn skip_whitespace_no_newline(&mut self) {
-        let start = self.position;
-        let start_col = self.column;
-        let start_line = self.line;
+        let start_offset = self.cursor.pos();
 
         while let Some(c) = self.peek() {
             if c == ' ' || c == '\t' {
@@ -192,31 +224,28 @@ impl Lexer {
             }
         }
 
-        if self.position > start {
-            let text: String = self.input[start..self.position].iter().collect();
-            self.tokens.push(Token {
-                kind: SyntaxKind::Whitespace,
-                text,
-                line: start_line,
-                column: start_col,
-            });
+        let end_offset = self.cursor.pos();
+        if end_offset > start_offset {
+            let text = self.cursor.slice(start_offset, end_offset);
+            self.emit(SyntaxKind::Whitespace, text, start_offset);
         }
     }
 
     fn is_hash_comment_start(&self) -> bool {
-        if self.position == 0 {
+        if self.cursor.pos() == 0 {
             return true;
         }
-        matches!(self.input[self.position - 1], '\n' | '\r' | ' ' | '\t')
+        match self.cursor.peek_prev() {
+            Some(ch) => matches!(ch, '\n' | '\r' | ' ' | '\t'),
+            None => true,
+        }
     }
 
-    fn emit(&mut self, kind: SyntaxKind, text: impl Into<String>, line: usize, column: usize) {
-        let text_s = text.into();
+    fn emit(&mut self, kind: SyntaxKind, text: &str, offset: usize) {
         self.tokens.push(Token {
             kind,
-            text: text_s.clone(),
-            line,
-            column,
+            text: text.to_string(), // Tokenの保持型がStringのためここで変換
+            offset,
         });
     }
 
@@ -235,183 +264,146 @@ impl Lexer {
         Some(kind)
     }
 
-    fn read_line_comment(&mut self, start_line: usize, start_col: usize) {
-        let mut text = String::from("//");
+    // 以下のリーダー系メソッドは、Stringへの文字ずつのpushを廃止し、
+    // Cursorによるスライスの切り出し（ロスレス）に変更しました。
 
+    fn read_line_comment(&mut self, start_offset: usize) {
         while let Some(c) = self.peek() {
             if c == '\n' || c == '\r' {
                 break;
             }
-            text.push(c);
             self.advance();
         }
-
-        self.emit(SyntaxKind::LineComment, text, start_line, start_col);
+        let text = self.cursor.slice(start_offset, self.cursor.pos());
+        self.emit(SyntaxKind::LineComment, text, start_offset);
     }
 
-    fn read_hash_comment(&mut self, start_line: usize, start_col: usize) {
-        let mut text = String::from("#");
-
+    fn read_hash_comment(&mut self, start_offset: usize) {
         while let Some(c) = self.peek() {
             if c == '\n' || c == '\r' {
                 break;
             }
-            text.push(c);
             self.advance();
         }
-
-        self.emit(SyntaxKind::HashComment, text, start_line, start_col);
+        let text = self.cursor.slice(start_offset, self.cursor.pos());
+        self.emit(SyntaxKind::HashComment, text, start_offset);
     }
 
-    fn read_block_comment(&mut self, start_line: usize, start_col: usize) {
-        let mut text = String::from("/*");
-
+    fn read_block_comment(&mut self, start_offset: usize) {
+        let mut terminated = false;
         while !self.is_at_end() {
             if self.match_str("*/") {
-                text.push_str("*/");
-                self.emit(SyntaxKind::BlockComment, text, start_line, start_col);
-                return;
+                terminated = true;
+                break;
             }
-
-            self.push_multiline_text_char(&mut text);
+            self.advance();
         }
 
-        self.errors.push(LexError::new(
-            "Unterminated block comment",
-            start_line,
-            start_col,
-        ));
-        self.emit(SyntaxKind::BlockComment, text, start_line, start_col);
+        if !terminated {
+            self.errors
+                .push(LexError::new(start_offset, "Unterminated block comment"));
+        }
+
+        let text = self.cursor.slice(start_offset, self.cursor.pos());
+        self.emit(SyntaxKind::BlockComment, text, start_offset);
     }
 
-    fn read_block_string(&mut self, start_line: usize, start_col: usize) {
-        let mut text = String::from("'''");
-
+    fn read_block_string(&mut self, start_offset: usize) {
+        let mut terminated = false;
         while !self.is_at_end() {
             if self.match_str("'''") {
-                text.push_str("'''");
-                self.emit(SyntaxKind::BlockString, text, start_line, start_col);
-                return;
+                terminated = true;
+                break;
             }
-
-            self.push_multiline_text_char(&mut text);
+            // Lossless性を保つため、\r\n の正規化などは行わず、そのまま進める
+            self.advance();
         }
 
-        self.errors.push(LexError::new(
-            "Unterminated block string",
-            start_line,
-            start_col,
-        ));
-        self.emit(SyntaxKind::BlockString, text, start_line, start_col);
-    }
-
-    fn push_multiline_text_char(&mut self, text: &mut String) {
-        let c = self.advance().unwrap();
-        match c {
-            '\n' => {
-                text.push('\n');
-                self.line += 1;
-                self.column = 1;
-            }
-            '\r' => {
-                if self.peek() == Some('\n') {
-                    self.advance();
-                    text.push_str("\r\n");
-                    self.line += 1;
-                    self.column = 1;
-                } else {
-                    text.push('\r');
-                }
-            }
-            other => text.push(other),
+        if !terminated {
+            self.errors
+                .push(LexError::new(start_offset, "Unterminated block string"));
         }
+
+        let text = self.cursor.slice(start_offset, self.cursor.pos());
+        self.emit(SyntaxKind::BlockString, text, start_offset);
     }
 
-    fn read_double_quoted_string(&mut self, start_line: usize, start_col: usize) {
-        let mut text = String::from("\"");
+    fn read_double_quoted_string(&mut self, start_offset: usize) {
+        let mut terminated = false;
+        // 先頭の '"' を進める（メインループで advance していないため）
+        self.advance();
 
-        while !self.is_at_end() {
-            let c = self.peek().unwrap();
-
+        while let Some(c) = self.peek() {
             if c == '"' {
                 self.advance();
-                text.push('"');
-                self.emit(SyntaxKind::String, text, start_line, start_col);
-                return;
+                terminated = true;
+                break;
             }
 
             if c == '\\' {
-                self.advance();
-                text.push('\\');
+                self.advance(); // '\'を消費
                 match self.advance() {
-                    Some(escaped) => {
-                        text.push(escaped);
-                        if escaped == 'u' {
-                            for _ in 0..4 {
-                                match self.advance() {
-                                    Some(hex) if hex.is_ascii_hexdigit() => text.push(hex),
-                                    Some(other) => {
-                                        text.push(other);
-                                        self.errors.push(LexError::new(
-                                            format!("Invalid unicode escape: \\u...{}", other),
-                                            start_line,
-                                            start_col,
-                                        ));
-                                        break;
-                                    }
-                                    None => {
-                                        self.errors.push(LexError::new(
-                                            "Unterminated unicode escape",
-                                            start_line,
-                                            start_col,
-                                        ));
-                                        self.emit(SyntaxKind::String, text, start_line, start_col);
-                                        return;
-                                    }
+                    Some('u') => {
+                        for _ in 0..4 {
+                            match self.advance() {
+                                Some(hex) if hex.is_ascii_hexdigit() => {}
+                                Some(other) => {
+                                    self.errors.push(LexError::new(
+                                        start_offset,
+                                        format!("Invalid unicode escape: \\u...{}", other),
+                                    ));
+                                    break;
+                                }
+                                None => {
+                                    self.errors.push(LexError::new(
+                                        start_offset,
+                                        "Unterminated unicode escape",
+                                    ));
+                                    break;
                                 }
                             }
-                        } else if !matches!(escaped, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't')
-                        {
-                            self.errors.push(LexError::new(
-                                format!("Invalid escape sequence: \\{}", escaped),
-                                start_line,
-                                start_col,
-                            ));
                         }
                     }
-                    None => {
+                    Some(escaped)
+                        if matches!(escaped, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
+                    Some(escaped) => {
                         self.errors.push(LexError::new(
-                            "Unterminated string literal",
-                            start_line,
-                            start_col,
+                            start_offset,
+                            format!("Invalid escape sequence: \\{}", escaped),
                         ));
-                        self.emit(SyntaxKind::String, text, start_line, start_col);
-                        return;
+                    }
+                    None => {
+                        self.errors
+                            .push(LexError::new(start_offset, "Unterminated string literal"));
+                        break;
                     }
                 }
             } else if c == '\n' || c == '\r' {
-                self.errors.push(LexError::new(
-                    "Unterminated string literal",
-                    start_line,
-                    start_col,
-                ));
-                self.emit(SyntaxKind::String, text, start_line, start_col);
-                return;
+                self.errors
+                    .push(LexError::new(start_offset, "Unterminated string literal"));
+                break;
             } else {
                 self.advance();
-                text.push(c);
             }
         }
 
-        self.errors.push(LexError::new(
-            "Unterminated string literal",
-            start_line,
-            start_col,
-        ));
-        self.emit(SyntaxKind::String, text, start_line, start_col);
+        if !terminated
+            && self.is_at_end()
+            && !self
+                .errors
+                .iter()
+                .any(|e| e.message.contains("Unterminated"))
+        {
+            self.errors
+                .push(LexError::new(start_offset, "Unterminated string literal"));
+        }
+
+        let text = self.cursor.slice(start_offset, self.cursor.pos());
+        self.emit(SyntaxKind::String, text, start_offset);
     }
 
-    fn read_quoteless_token(&mut self, start_line: usize, start_col: usize) {
+    fn read_quoteless_token(&mut self, start_offset: usize) {
+        // 先頭が既に無効な文字でないかチェック
         let first = match self.peek() {
             Some(c) => c,
             None => return,
@@ -420,105 +412,46 @@ impl Lexer {
         if is_punctuator(first) {
             let c = self.advance().unwrap();
             self.errors.push(LexError::new(
+                start_offset,
                 format!("Unexpected character: {}", c),
-                start_line,
-                start_col,
             ));
             return;
         }
 
-        let mut text = String::new();
+        // HJSONの仕様に基づいて、トークンが終了する条件までひたすら進める
         while let Some(c) = self.peek() {
-            // detect potential comment start sequences ('//', '/*', '#')
+            // コメント開始でストップ
             if c == '/' {
-                if let Some(&next_char) = self.input.get(self.position + 1) {
+                if let Some(next_char) = self.cursor.peek_n(1) {
                     if next_char == '/' || next_char == '*' {
-                        // If the text read so far classifies as a literal/number,
-                        // stop and emit it, then consume the comment separately.
-                        // Trim trailing whitespace before classification
-                        let trimmed = text.trim_end();
-                        let kind = self.classify_word(trimmed);
-                        if !trimmed.is_empty()
-                            && matches!(
-                                kind,
-                                SyntaxKind::Integer
-                                    | SyntaxKind::Float
-                                    | SyntaxKind::True
-                                    | SyntaxKind::False
-                                    | SyntaxKind::Null
-                            )
-                        {
-                            // emit the token we have so far (without trailing whitespace)
-                            self.emit(kind, trimmed.to_string(), start_line, start_col);
-
-                            // consume the comment prefix and delegate to the
-                            // existing comment reader which expects the prefix
-                            // already consumed.
-                            let comment_start_line = self.line;
-                            let comment_start_col = self.column;
-                            // consume '//' or '/*'
-                            self.advance();
-                            self.advance();
-                            if next_char == '/' {
-                                self.read_line_comment(comment_start_line, comment_start_col);
-                            } else {
-                                self.read_block_comment(comment_start_line, comment_start_col);
-                            }
-                            return;
-                        }
+                        break;
                     }
                 }
-            } else if c == '#' {
-                // potential hash comment; treat similarly if the preceding
-                // text looks like a literal/number
-                let trimmed = text.trim_end();
-                let kind = self.classify_word(trimmed);
-                if !trimmed.is_empty()
-                    && matches!(
-                        kind,
-                        SyntaxKind::Integer
-                            | SyntaxKind::Float
-                            | SyntaxKind::True
-                            | SyntaxKind::False
-                            | SyntaxKind::Null
-                    )
-                {
-                    self.emit(kind, trimmed.to_string(), start_line, start_col);
-                    let comment_start_line = self.line;
-                    let comment_start_col = self.column;
-                    // consume '#'
-                    self.advance();
-                    self.read_hash_comment(comment_start_line, comment_start_col);
-                    return;
-                }
             }
-
-            if c.is_whitespace()
-                || c == '{'
-                || c == '}'
-                || c == '['
-                || c == ']'
-                || c == ':'
-                || c == ','
-            {
+            if c == '#' {
                 break;
             }
-            text.push(c);
+            // 空白やカンマ・括弧などの記号でストップ
+            if c.is_whitespace() || is_punctuator(c) {
+                break;
+            }
             self.advance();
         }
 
-        if text.is_empty() {
+        let end_offset = self.cursor.pos();
+        if start_offset == end_offset {
             let c = self.advance().unwrap();
             self.errors.push(LexError::new(
+                start_offset,
                 format!("Unexpected character: {}", c),
-                start_line,
-                start_col,
             ));
             return;
         }
 
-        let kind = self.classify_word(&text);
-        self.emit(kind, text, start_line, start_col);
+        let text = self.cursor.slice(start_offset, end_offset);
+        let kind = self.classify_word(text);
+
+        self.emit(kind, text, start_offset);
     }
 
     fn classify_word(&self, text: &str) -> SyntaxKind {
@@ -537,10 +470,6 @@ impl Lexer {
 
 fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
-}
-
-pub(crate) fn is_valid_number(text: &str) -> bool {
-    HjsonNumber::is_valid(text)
 }
 
 /// 公開API

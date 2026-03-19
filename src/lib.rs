@@ -22,6 +22,7 @@ pub use edit::high_level::{
     IntoPath, PathSegment, StringStyle,
 };
 pub use format::{FormatConfig, Formatter};
+pub use line_index::LineIndex;
 pub use parser::parser::ParseError;
 pub use syntax::green::GreenElement;
 pub use syntax::kind::SyntaxKind;

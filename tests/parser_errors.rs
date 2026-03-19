@@ -1,6 +1,7 @@
 //! Parser error handling tests - unified
 
 use hjson_edit::HjsonDocument;
+use line_index::{LineIndex, TextSize};
 
 /// Table-driven error test for common syntax errors
 #[test]
@@ -61,13 +62,16 @@ fn nested_error_line_numbers() {
   }
 }"#;
 
+    let line_index = LineIndex::new(input);
     let result = HjsonDocument::parse(input);
     if let Err(errors) = result {
         for error in errors {
+            let lc = line_index.line_col(TextSize::from(error.offset as u32));
+            let line = lc.line;
             assert!(
-                error.line >= 3 && error.line <= 5,
-                "Error should be on line ~4, got {}",
-                error.line
+                line >= 2 && line <= 4,
+                "Error should be on line ~3 (0-based), got {}",
+                line
             );
         }
     } else {
