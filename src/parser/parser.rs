@@ -166,11 +166,9 @@ impl<'a> ScalarScanner<'a> {
             return true;
         }
 
-        // Treat all comment kinds the same way: if the text immediately
-        // preceding the comment looks like a literal (number, true/false/null),
-        // then the following comment token should be considered an inline
-        // comment terminator. Otherwise (e.g. an unquoted string), the
-        // comment token is treated as part of the scalar's text.
+        // コメントの前のテキストがリテラル（数値、true/false/null）の場合、
+        // その後のコメントトークンはインラインコメント終了子として扱う。
+        // それ以外（例：アンクオート文字列）の場合、コメントトークンはスカラー値のテキストの一部として扱う。
         match kind {
             SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
                 HjsonNumber::is_valid(trimmed) || matches!(trimmed, "true" | "false" | "null")
@@ -567,12 +565,12 @@ impl Parser {
                 break;
             }
 
-            // Consume leading trivia so they are siblings of the upcoming Value node
+            // 値ノードの兄弟としてトリビアを消費する
             self.eat_trivia();
             self.parse_value(ScalarContext::ArrayItem);
 
-            // Handle multiple values on the same line (e.g., "a" "b" "c" in arrays)
-            // This is allowed in HJSON for quoted strings without commas
+            // 同一行に複数の値がある場合の処理（例："a" "b" "c"）
+            // HJSONではカンマなしの引用符付き文字列が許可されている
             self.parse_array_multiple_values();
 
             // 値の後のトリビア（改行・コメントなど）を消費
@@ -619,7 +617,7 @@ impl Parser {
             if self.is_at_end() || self.at(SyntaxKind::RBracket) || self.at(SyntaxKind::Comma) {
                 break;
             }
-            // Check if the next token starts a new value
+            // 次のトークンが新しい値の開始かチェック
             if let Some(kind) = self.current_kind() {
                 if matches!(
                     kind,
@@ -702,7 +700,7 @@ impl Parser {
         }
 
         // 値
-        // Consume trivia between ':' and the value so Value node stays trivia-free
+        // ':'と値の間のトリビアを消費して、Valueノードをトリビアフリーにする
         self.eat_trivia();
         self.parse_value(ScalarContext::ObjectValue);
 
@@ -785,7 +783,7 @@ impl Parser {
                 break;
             }
 
-            // consume trivia so Pair does not absorb leading trivia
+            // Pairが先行トリビアを吸収しないように、トリビアを消費する
             self.eat_trivia();
             self.parse_pair();
 
