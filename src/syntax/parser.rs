@@ -1,9 +1,9 @@
+use super::kind::SyntaxKind;
 /// HJSON構文解析器
 ///
 /// Lexerのトークン列をGreen Treeに変換
 use super::lexer::Token;
 use crate::number::HjsonNumber;
-use crate::syntax::kind::SyntaxKind;
 use line_index::{LineIndex, TextSize};
 
 /// 構文解析エラー（オフセットのみ保持）

@@ -10,11 +10,11 @@ pub(crate) mod value;
 
 use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::edit::api::{EditError as LowLevelEditError, GreenNodeEdit};
-use crate::parser::lexer::Lexer;
-use crate::parser::parser::Parser;
 use crate::syntax::ext::GreenElement;
 use crate::syntax::ext::{RedNode, RedNodeExt};
 use crate::syntax::kind::SyntaxKind;
+use crate::syntax::lexer::Lexer;
+use crate::syntax::parser::Parser;
 use crate::ParseError;
 
 use rowan::GreenNode;
@@ -374,7 +374,7 @@ pub struct HjsonDocument {
 
 impl HjsonDocument {
     /// HJSON文字列をパースしてドキュメントを作成
-    pub fn parse(input: &str) -> Result<Self, Vec<crate::parser::parser::ParseError>> {
+    pub fn parse(input: &str) -> Result<Self, Vec<crate::syntax::parser::ParseError>> {
         let lex_result = Lexer::new(input).lex();
 
         // Lexerエラーがある場合、それをParseErrorに変換して即座に返す

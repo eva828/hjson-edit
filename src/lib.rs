@@ -11,7 +11,6 @@ pub(crate) mod document_style;
 pub mod edit;
 pub(crate) mod format;
 pub(crate) mod number;
-pub(crate) mod parser;
 pub(crate) mod syntax;
 
 // 公開APIを再エクスポート
@@ -23,7 +22,7 @@ pub use edit::high_level::{
 };
 pub use format::{FormatConfig, Formatter};
 pub use line_index::LineIndex;
-pub use parser::parser::ParseError;
 pub use syntax::ext::GreenElement;
 pub use syntax::ext::{RedNode, RedNodeExt, RedToken};
 pub use syntax::kind::SyntaxKind;
+pub use syntax::parser::ParseError;

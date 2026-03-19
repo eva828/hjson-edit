@@ -1,8 +1,8 @@
+use super::kind::SyntaxKind;
 /// HJSON字句解析器
 ///
 /// エラー継続型：エラーがあっても解析を続行し、詳細なエラー情報を収集
 use crate::number::{HjsonNumber, NumberKind};
-use crate::syntax::kind::SyntaxKind;
 
 /// 字句解析エラー（発生したバイトオフセットのみを記録）
 #[derive(Debug, Clone, PartialEq)]
