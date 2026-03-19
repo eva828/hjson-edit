@@ -759,7 +759,7 @@ impl Parser {
     }
 
     /// ブレースレスルートオブジェクトの開始かチェック
-    /// 引用符なしキー（UnquotedString）のみで開始される
+    /// 引用符なしキー（UnquotedString）または引用符付きキー（String）で開始される
     fn is_braceless_object_start(&self) -> bool {
         matches!(
             self.current_kind(),
