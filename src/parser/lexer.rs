@@ -321,43 +321,7 @@ impl<'a> Lexer<'a> {
             }
 
             if c == '\\' {
-                self.cursor.advance(); // '\'を消費
-                match self.cursor.advance() {
-                    Some('u') => {
-                        for _ in 0..4 {
-                            match self.cursor.advance() {
-                                Some(hex) if hex.is_ascii_hexdigit() => {}
-                                Some(other) => {
-                                    self.errors.push(LexError::new(
-                                        start_offset,
-                                        format!("Invalid unicode escape: \\u...{}", other),
-                                    ));
-                                    break;
-                                }
-                                None => {
-                                    self.errors.push(LexError::new(
-                                        start_offset,
-                                        "Unterminated unicode escape",
-                                    ));
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Some(escaped)
-                        if matches!(escaped, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
-                    Some(escaped) => {
-                        self.errors.push(LexError::new(
-                            start_offset,
-                            format!("Invalid escape sequence: \\{}", escaped),
-                        ));
-                    }
-                    None => {
-                        self.errors
-                            .push(LexError::new(start_offset, "Unterminated string literal"));
-                        break;
-                    }
-                }
+                self.read_escape_sequence(start_offset);
             } else if c == '\n' || c == '\r' {
                 self.errors
                     .push(LexError::new(start_offset, "Unterminated string literal"));
@@ -380,6 +344,46 @@ impl<'a> Lexer<'a> {
 
         let text = self.cursor.slice(start_offset, self.cursor.pos());
         self.emit(SyntaxKind::String, text, start_offset);
+    }
+
+    fn read_escape_sequence(&mut self, start_offset: usize) {
+        self.cursor.advance(); // '\'を消費
+        match self.cursor.advance() {
+            Some('u') => {
+                self.validate_unicode_escape(start_offset);
+            }
+            Some(escaped) if matches!(escaped, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
+            Some(escaped) => {
+                self.errors.push(LexError::new(
+                    start_offset,
+                    format!("Invalid escape sequence: \\{}", escaped),
+                ));
+            }
+            None => {
+                self.errors
+                    .push(LexError::new(start_offset, "Unterminated string literal"));
+            }
+        }
+    }
+
+    fn validate_unicode_escape(&mut self, start_offset: usize) {
+        for _ in 0..4 {
+            match self.cursor.advance() {
+                Some(hex) if hex.is_ascii_hexdigit() => {}
+                Some(other) => {
+                    self.errors.push(LexError::new(
+                        start_offset,
+                        format!("Invalid unicode escape: \\u...{}", other),
+                    ));
+                    break;
+                }
+                None => {
+                    self.errors
+                        .push(LexError::new(start_offset, "Unterminated unicode escape"));
+                    break;
+                }
+            }
+        }
     }
 
     fn read_quoteless_token(&mut self, start_offset: usize) {
