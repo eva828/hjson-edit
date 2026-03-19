@@ -713,17 +713,8 @@ impl Parser {
         if let Some(token) = self.current() {
             match token.kind {
                 SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
-                SyntaxKind::UnquotedString => {
-                    let (text, consumed) =
-                        ScalarScanner::new(&self.tokens, self.position, context).collect();
-                    if consumed == 1 {
-                        self.bump();
-                    } else {
-                        self.builder.token(SyntaxKind::UnquotedString, &text);
-                        self.position += consumed;
-                    }
-                }
-                SyntaxKind::Integer
+                SyntaxKind::UnquotedString
+                | SyntaxKind::Integer
                 | SyntaxKind::Float
                 | SyntaxKind::True
                 | SyntaxKind::False
