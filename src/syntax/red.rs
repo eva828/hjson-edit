@@ -13,23 +13,11 @@ pub trait RedNodeCoreExt {
     /// 指定されたkindの子ノードを探す
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode>;
 
-    /// 指定されたkindの子トークンを探す
-    fn token_by_kind(&self, kind: SyntaxKind) -> Option<RedToken>;
-
     /// すべての子ノードを取得
     fn children_nodes(&self) -> impl Iterator<Item = RedNode>;
 
     /// テキスト表現（フォーマット保持）
     fn text(&self) -> String;
-
-    /// このノードに含まれる行番号範囲を取得（1始まり）
-    fn line_range(&self, source: &str) -> (usize, usize);
-
-    /// 子をインデックスで取得
-    fn child_at(&self, index: usize) -> Option<RedElement>;
-
-    /// 子の数を取得
-    fn child_count(&self) -> usize;
 
     /// GreenNodeを再構築する
     fn to_green(&self) -> rowan::GreenNode;
@@ -41,17 +29,6 @@ impl RedNodeCoreExt for RedNode {
         self.children().find(|child| child.kind() == kind)
     }
 
-    fn token_by_kind(&self, kind: SyntaxKind) -> Option<RedToken> {
-        self.children_with_tokens().find_map(|child| {
-            if let rowan::NodeOrToken::Token(token) = child {
-                if token.kind() == kind {
-                    return Some(token);
-                }
-            }
-            None
-        })
-    }
-
     fn children_nodes(&self) -> impl Iterator<Item = RedNode> {
         // children() already returns Iterator<Item = SyntaxNode>
         self.children()
@@ -59,36 +36,6 @@ impl RedNodeCoreExt for RedNode {
 
     fn text(&self) -> String {
         self.to_string()
-    }
-
-    fn line_range(&self, source: &str) -> (usize, usize) {
-        let raw_offset: usize = self.text_range().start().into();
-        let offset = raw_offset.min(source.len());
-        // Ensure we land on a valid char boundary for multi-byte UTF-8
-        let offset = {
-            let mut o = offset;
-            while o > 0 && !source.is_char_boundary(o) {
-                o -= 1;
-            }
-            o
-        };
-        let text_before = &source[..offset];
-        let start_line = text_before.chars().filter(|&c| c == '\n').count() + 1;
-
-        // Convert SyntaxText to String first, then count newlines
-        let node_text = self.to_string();
-        let newlines_in_node = node_text.chars().filter(|&c| c == '\n').count();
-        let end_line = start_line + newlines_in_node;
-
-        (start_line, end_line)
-    }
-
-    fn child_at(&self, index: usize) -> Option<RedElement> {
-        self.children_with_tokens().nth(index)
-    }
-
-    fn child_count(&self) -> usize {
-        self.children_with_tokens().count()
     }
 
     fn to_green(&self) -> rowan::GreenNode {
