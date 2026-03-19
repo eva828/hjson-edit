@@ -2,8 +2,8 @@
 ///
 /// Lexerのトークン列をGreen Treeに変換
 use super::lexer::Token;
+use crate::number::HjsonNumber;
 use crate::syntax::kind::SyntaxKind;
-use crate::{number::HjsonNumber, syntax::green::GreenTreeBuilder};
 use line_index::{LineIndex, TextSize};
 
 /// 構文解析エラー（オフセットのみ保持）
@@ -41,7 +41,7 @@ pub struct ParseResult {
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
-    builder: GreenTreeBuilder,
+    builder: rowan::GreenNodeBuilder<'static>,
     errors: Vec<ParseError>,
 }
 
@@ -240,7 +240,7 @@ impl Parser {
         Self {
             tokens,
             position: 0,
-            builder: GreenTreeBuilder::new(),
+            builder: rowan::GreenNodeBuilder::new(),
             errors: Vec::new(),
         }
     }
@@ -251,7 +251,7 @@ impl Parser {
 
     /// 構文解析実行
     pub fn parse(mut self) -> ParseResult {
-        self.builder.start_node(SyntaxKind::Root);
+        self.builder.start_node(SyntaxKind::Root.into());
 
         if !self.is_at_end() {
             self.eat_trivia();
@@ -295,7 +295,7 @@ impl Parser {
     /// 次のトークンを消費
     fn bump(&mut self) {
         if let Some(token) = self.tokens.get(self.position) {
-            self.builder.token(token.kind, &token.text);
+            self.builder.token(token.kind.into(), &token.text);
             self.position += 1;
         }
     }
@@ -314,7 +314,7 @@ impl Parser {
 
     /// エラーノードを開始
     fn start_error_node(&mut self) {
-        self.builder.start_node(SyntaxKind::Error);
+        self.builder.start_node(SyntaxKind::Error.into());
     }
 
     /// エラーノードを終了
@@ -372,7 +372,7 @@ impl Parser {
 
     /// 値を解析
     fn parse_value(&mut self, context: ScalarContext) {
-        self.builder.start_node(SyntaxKind::Value);
+        self.builder.start_node(SyntaxKind::Value.into());
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
         // 終了チェック（ストリーム終端）
@@ -417,7 +417,7 @@ impl Parser {
 
     /// オブジェクト { ... } を解析
     fn parse_object(&mut self) {
-        self.builder.start_node(SyntaxKind::Object);
+        self.builder.start_node(SyntaxKind::Object.into());
 
         // {
         self.bump();
@@ -511,7 +511,7 @@ impl Parser {
 
     /// 配列 [ ... ] を解析
     fn parse_array(&mut self) {
-        self.builder.start_node(SyntaxKind::Array);
+        self.builder.start_node(SyntaxKind::Array.into());
 
         // [
         self.bump();
@@ -617,11 +617,11 @@ impl Parser {
 
     /// キー: 値 のペアを解析
     fn parse_pair(&mut self) {
-        self.builder.start_node(SyntaxKind::Pair);
+        self.builder.start_node(SyntaxKind::Pair.into());
         // Pairノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
         // キー
-        self.builder.start_node(SyntaxKind::Key);
+        self.builder.start_node(SyntaxKind::Key.into());
 
         let token = self.current();
         match token.map(|t| t.kind) {
@@ -697,7 +697,7 @@ impl Parser {
                     if consumed == 1 {
                         self.bump();
                     } else {
-                        self.builder.token(SyntaxKind::UnquotedString, &text);
+                        self.builder.token(SyntaxKind::UnquotedString.into(), &text);
                         self.position += consumed;
                     }
                 }
@@ -742,7 +742,7 @@ impl Parser {
 
     /// ブレースレスルートオブジェクトを解析（中括弧なし）
     fn parse_braceless_object(&mut self) {
-        self.builder.start_node(SyntaxKind::Object);
+        self.builder.start_node(SyntaxKind::Object.into());
         loop {
             if self.is_at_end() {
                 break;

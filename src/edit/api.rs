@@ -218,14 +218,13 @@ fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::green::GreenTreeBuilder;
     use crate::syntax::kind::SyntaxKind;
 
     fn create_test_node() -> rowan::GreenNode {
-        let mut builder = GreenTreeBuilder::new();
-        builder.start_node(SyntaxKind::Object);
-        builder.token(SyntaxKind::LBrace, "{");
-        builder.token(SyntaxKind::RBrace, "}");
+        let mut builder = rowan::GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::Object.into());
+        builder.token(SyntaxKind::LBrace.into(), "{");
+        builder.token(SyntaxKind::RBrace.into(), "}");
         builder.finish_node();
         builder.finish()
     }
