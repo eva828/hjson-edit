@@ -74,17 +74,45 @@ impl<'a> ScalarScanner<'a> {
         let mut last_non_ws_pos = self.start;
 
         while let Some(token) = self.tokens.get(pos) {
-            match token.kind {
-                SyntaxKind::Newline => break,
-                SyntaxKind::RBrace if self.is_closing_rbrace(pos) => break,
-                SyntaxKind::RBracket if self.is_closing_rbracket(pos) => break,
-                SyntaxKind::Comma if self.is_separator_comma(pos) => break,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-                    if self.starts_inline_comment_after_scalar(&text, token.kind) =>
-                {
-                    break
+            if self.is_terminator(token.kind, pos, &text) {
+                break;
+            }
+
+            if self.is_collectable_token(token.kind) {
+                text.push_str(&token.text);
+                pos += 1;
+                if token.kind != SyntaxKind::Whitespace {
+                    last_non_ws_len = text.len();
+                    last_non_ws_pos = pos;
                 }
-                SyntaxKind::Whitespace
+            } else {
+                break;
+            }
+        }
+
+        text.truncate(last_non_ws_len);
+        (text, last_non_ws_pos - self.start)
+    }
+
+    fn is_terminator(&self, kind: SyntaxKind, pos: usize, text: &str) -> bool {
+        match kind {
+            SyntaxKind::Newline => true,
+            SyntaxKind::RBrace if self.is_closing_rbrace(pos) => true,
+            SyntaxKind::RBracket if self.is_closing_rbracket(pos) => true,
+            SyntaxKind::Comma if self.is_separator_comma(pos) => true,
+            SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
+                if self.starts_inline_comment_after_scalar(text, kind) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn is_collectable_token(&self, kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::Whitespace
                 | SyntaxKind::UnquotedString
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
@@ -99,20 +127,8 @@ impl<'a> ScalarScanner<'a> {
                 | SyntaxKind::Comma
                 | SyntaxKind::Colon
                 | SyntaxKind::LBrace
-                | SyntaxKind::LBracket => {
-                    text.push_str(&token.text);
-                    pos += 1;
-                    if token.kind != SyntaxKind::Whitespace {
-                        last_non_ws_len = text.len();
-                        last_non_ws_pos = pos;
-                    }
-                }
-                _ => break,
-            }
-        }
-
-        text.truncate(last_non_ws_len);
-        (text, last_non_ws_pos - self.start)
+                | SyntaxKind::LBracket
+        )
     }
 
     fn is_closing_rbrace(&self, pos: usize) -> bool {
