@@ -566,32 +566,7 @@ impl Parser {
 
             // Handle multiple values on the same line (e.g., "a" "b" "c" in arrays)
             // This is allowed in HJSON for quoted strings without commas
-            loop {
-                self.eat_trivia();
-                if self.is_at_end() || self.at(SyntaxKind::RBracket) || self.at(SyntaxKind::Comma) {
-                    break;
-                }
-                // Check if the next token starts a new value
-                if let Some(kind) = self.current_kind() {
-                    if matches!(
-                        kind,
-                        SyntaxKind::String
-                            | SyntaxKind::BlockString
-                            | SyntaxKind::UnquotedString
-                            | SyntaxKind::Integer
-                            | SyntaxKind::Float
-                            | SyntaxKind::True
-                            | SyntaxKind::False
-                            | SyntaxKind::Null
-                            | SyntaxKind::LBrace
-                            | SyntaxKind::LBracket
-                    ) {
-                        self.parse_value(ScalarContext::ArrayItem);
-                        continue;
-                    }
-                }
-                break;
-            }
+            self.parse_array_multiple_values();
 
             // 値の後のトリビア（改行・コメントなど）を消費
             let had_newline = self.eat_trivia_and_report_newline();
@@ -630,6 +605,35 @@ impl Parser {
         }
 
         self.builder.finish_node();
+    }
+
+    fn parse_array_multiple_values(&mut self) {
+        loop {
+            self.eat_trivia();
+            if self.is_at_end() || self.at(SyntaxKind::RBracket) || self.at(SyntaxKind::Comma) {
+                break;
+            }
+            // Check if the next token starts a new value
+            if let Some(kind) = self.current_kind() {
+                if matches!(
+                    kind,
+                    SyntaxKind::String
+                        | SyntaxKind::BlockString
+                        | SyntaxKind::UnquotedString
+                        | SyntaxKind::Integer
+                        | SyntaxKind::Float
+                        | SyntaxKind::True
+                        | SyntaxKind::False
+                        | SyntaxKind::Null
+                        | SyntaxKind::LBrace
+                        | SyntaxKind::LBracket
+                ) {
+                    self.parse_value(ScalarContext::ArrayItem);
+                    continue;
+                }
+            }
+            break;
+        }
     }
 
     /// キー: 値 のペアを解析
