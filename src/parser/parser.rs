@@ -236,7 +236,6 @@ impl<'a> ScalarScanner<'a> {
 }
 
 impl Parser {
-    // LineIndex を受け取る必要がなくなりました
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
@@ -246,7 +245,6 @@ impl Parser {
         }
     }
 
-    // エラーはオフセットだけを記録する
     fn error(&mut self, offset: usize, message: impl Into<String>) {
         self.errors.push(ParseError::new(offset, message));
     }
@@ -278,7 +276,6 @@ impl Parser {
 
         self.builder.finish_node();
 
-        // 戻り値もスッキリ
         ParseResult {
             green: self.builder.finish(),
             errors: self.errors,
@@ -300,22 +297,6 @@ impl Parser {
         if let Some(token) = self.tokens.get(self.position) {
             self.builder.token(token.kind, &token.text);
             self.position += 1;
-        }
-    }
-
-    /// 特定の非トリビアトークンを期待して消費（前のトリビアも含めて）
-    #[allow(dead_code)]
-    fn expect(&mut self, kind: SyntaxKind, message: &str) -> bool {
-        self.eat_trivia();
-
-        if self.current().map(|t| t.kind == kind).unwrap_or(false) {
-            self.bump();
-            true
-        } else {
-            if let Some(t) = self.current() {
-                self.error(t.offset, message);
-            }
-            false
         }
     }
 
@@ -344,7 +325,7 @@ impl Parser {
     /// 回復点までトークンを消費（トリビア含めてすべて保持）
     fn consume_until_recovery(&mut self, recovery_kinds: &[SyntaxKind]) {
         while !self.is_at_end() && !self.at_any(recovery_kinds) {
-            self.bump(); // トリビアも含めてすべて追加
+            self.bump();
         }
     }
 
@@ -387,12 +368,6 @@ impl Parser {
             }
         }
         None
-    }
-
-    /// 次の非トリビアトークンまでスキップ（eat_trivia()のエイリアス）
-    #[allow(dead_code)]
-    fn skip_trivia(&mut self) {
-        self.eat_trivia();
     }
 
     /// 値を解析

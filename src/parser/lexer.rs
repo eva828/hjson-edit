@@ -20,7 +20,6 @@ impl LexError {
     }
 }
 
-/// 純粋な物理ポインタとしての Cursor
 pub struct Cursor<'a> {
     input: &'a str,
     position: usize,
