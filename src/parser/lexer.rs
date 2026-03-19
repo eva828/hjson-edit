@@ -404,19 +404,7 @@ impl<'a> Lexer<'a> {
 
         // HJSONの仕様に基づいて、トークンが終了する条件までひたすら進める
         while let Some(c) = self.cursor.peek() {
-            // コメント開始でストップ
-            if c == '/' {
-                if let Some(next_char) = self.cursor.peek_n(1) {
-                    if next_char == '/' || next_char == '*' {
-                        break;
-                    }
-                }
-            }
-            if c == '#' {
-                break;
-            }
-            // 空白やカンマ・括弧などの記号でストップ
-            if c.is_whitespace() || is_punctuator(c) {
+            if self.is_quoteless_token_end(c) {
                 break;
             }
             self.cursor.advance();
@@ -436,6 +424,25 @@ impl<'a> Lexer<'a> {
         let kind = self.classify_word(text);
 
         self.emit(kind, text, start_offset);
+    }
+
+    fn is_quoteless_token_end(&self, c: char) -> bool {
+        // コメント開始でストップ
+        if c == '/' {
+            if let Some(next_char) = self.cursor.peek_n(1) {
+                if next_char == '/' || next_char == '*' {
+                    return true;
+                }
+            }
+        }
+        if c == '#' {
+            return true;
+        }
+        // 空白やカンマ・括弧などの記号でストップ
+        if c.is_whitespace() || is_punctuator(c) {
+            return true;
+        }
+        false
     }
 
     fn classify_word(&self, text: &str) -> SyntaxKind {
