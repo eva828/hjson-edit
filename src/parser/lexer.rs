@@ -72,7 +72,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    /// 開始位置から現在の位置までをスライスとして一気に切り出す（ゼロアロケーション）
+    /// 開始位置から現在の位置までをスライスとして切り出す（ゼロアロケーション）
     pub fn slice(&self, start: usize, end: usize) -> &'a str {
         &self.input[start..end]
     }
@@ -229,7 +229,7 @@ impl<'a> Lexer<'a> {
     fn emit(&mut self, kind: SyntaxKind, text: &str, offset: usize) {
         self.tokens.push(Token {
             kind,
-            text: text.to_string(), // Tokenの保持型がStringのためここで変換
+            text: text.to_string(),
             offset,
         });
     }
@@ -248,9 +248,6 @@ impl<'a> Lexer<'a> {
         self.cursor.advance();
         Some(kind)
     }
-
-    // 以下のリーダー系メソッドは、Stringへの文字ずつのpushを廃止し、
-    // Cursorによるスライスの切り出し（ロスレス）に変更しました。
 
     fn read_line_comment(&mut self, start_offset: usize) {
         while let Some(c) = self.cursor.peek() {
@@ -300,7 +297,7 @@ impl<'a> Lexer<'a> {
                 terminated = true;
                 break;
             }
-            // Lossless性を保つため、\r\n の正規化などは行わず、そのまま進める
+            // \r\n の正規化は行わず、そのまま進める（Lossless性を保持）
             self.cursor.advance();
         }
 
@@ -315,7 +312,7 @@ impl<'a> Lexer<'a> {
 
     fn read_double_quoted_string(&mut self, start_offset: usize) {
         let mut terminated = false;
-        // 先頭の '"' を進める（メインループで advance していないため）
+        // 先頭の '"' を消費
         self.cursor.advance();
 
         while let Some(c) = self.cursor.peek() {
@@ -352,7 +349,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_escape_sequence(&mut self, start_offset: usize) {
-        self.cursor.advance(); // '\'を消費
+        // '\'を消費
+        self.cursor.advance();
         match self.cursor.advance() {
             Some('u') => {
                 self.validate_unicode_escape(start_offset);
@@ -392,7 +390,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_quoteless_token(&mut self, start_offset: usize) {
-        // 先頭が既に無効な文字でないかチェック
+        // 先頭が無効な文字でないかチェック
         let first = match self.cursor.peek() {
             Some(c) => c,
             None => return,
@@ -407,7 +405,7 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        // HJSONの仕様に基づいて、トークンが終了する条件までひたすら進める
+        // HJSONの仕様に基づいて、トークンが終了する条件まで進める
         while let Some(c) = self.cursor.peek() {
             if self.is_quoteless_token_end(c) {
                 break;
