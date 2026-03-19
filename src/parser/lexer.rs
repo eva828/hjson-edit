@@ -128,22 +128,22 @@ impl<'a> Lexer<'a> {
 
     /// 字句解析実行
     pub fn lex(mut self) -> LexResult {
-        while !self.is_at_end() {
+        while !self.cursor.is_at_end() {
             self.skip_whitespace_no_newline();
 
-            if self.is_at_end() {
+            if self.cursor.is_at_end() {
                 break;
             }
 
             let start_offset = self.cursor.pos();
 
-            if self.match_char('\n') {
+            if self.cursor.match_char('\n') {
                 self.emit(SyntaxKind::Newline, "\n", start_offset);
                 continue;
             }
 
-            if self.match_char('\r') {
-                if self.match_char('\n') {
+            if self.cursor.match_char('\r') {
+                if self.cursor.match_char('\n') {
                     self.emit(SyntaxKind::Newline, "\r\n", start_offset);
                 } else {
                     self.emit(SyntaxKind::Whitespace, "\r", start_offset);
@@ -151,28 +151,28 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            if self.match_str("//") {
+            if self.cursor.match_str("//") {
                 self.read_line_comment(start_offset);
                 continue;
             }
 
-            if self.peek() == Some('#') && self.is_hash_comment_start() {
-                self.advance();
+            if self.cursor.peek() == Some('#') && self.is_hash_comment_start() {
+                self.cursor.advance();
                 self.read_hash_comment(start_offset);
                 continue;
             }
 
-            if self.match_str("/*") {
+            if self.cursor.match_str("/*") {
                 self.read_block_comment(start_offset);
                 continue;
             }
 
-            if self.match_str("'''") {
+            if self.cursor.match_str("'''") {
                 self.read_block_string(start_offset);
                 continue;
             }
 
-            if self.match_char('"') {
+            if self.cursor.match_char('"') {
                 self.read_double_quoted_string(start_offset);
                 continue;
             }
@@ -193,32 +193,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn peek(&self) -> Option<char> {
-        self.cursor.peek()
-    }
-
-    fn is_at_end(&self) -> bool {
-        self.cursor.is_at_end()
-    }
-
-    fn advance(&mut self) -> Option<char> {
-        self.cursor.advance()
-    }
-
-    fn match_char(&mut self, expected: char) -> bool {
-        self.cursor.match_char(expected)
-    }
-
-    fn match_str(&mut self, expected: &str) -> bool {
-        self.cursor.match_str(expected)
-    }
-
     fn skip_whitespace_no_newline(&mut self) {
         let start_offset = self.cursor.pos();
 
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.cursor.peek() {
             if c == ' ' || c == '\t' {
-                self.advance();
+                self.cursor.advance();
             } else {
                 break;
             }
@@ -250,7 +230,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn match_punctuation(&mut self) -> Option<SyntaxKind> {
-        let c = self.peek()?;
+        let c = self.cursor.peek()?;
         let kind = match c {
             '{' => SyntaxKind::LBrace,
             '}' => SyntaxKind::RBrace,
@@ -260,7 +240,7 @@ impl<'a> Lexer<'a> {
             ',' => SyntaxKind::Comma,
             _ => return None,
         };
-        self.advance();
+        self.cursor.advance();
         Some(kind)
     }
 
@@ -268,22 +248,22 @@ impl<'a> Lexer<'a> {
     // Cursorによるスライスの切り出し（ロスレス）に変更しました。
 
     fn read_line_comment(&mut self, start_offset: usize) {
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.cursor.peek() {
             if c == '\n' || c == '\r' {
                 break;
             }
-            self.advance();
+            self.cursor.advance();
         }
         let text = self.cursor.slice(start_offset, self.cursor.pos());
         self.emit(SyntaxKind::LineComment, text, start_offset);
     }
 
     fn read_hash_comment(&mut self, start_offset: usize) {
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.cursor.peek() {
             if c == '\n' || c == '\r' {
                 break;
             }
-            self.advance();
+            self.cursor.advance();
         }
         let text = self.cursor.slice(start_offset, self.cursor.pos());
         self.emit(SyntaxKind::HashComment, text, start_offset);
@@ -291,12 +271,12 @@ impl<'a> Lexer<'a> {
 
     fn read_block_comment(&mut self, start_offset: usize) {
         let mut terminated = false;
-        while !self.is_at_end() {
-            if self.match_str("*/") {
+        while !self.cursor.is_at_end() {
+            if self.cursor.match_str("*/") {
                 terminated = true;
                 break;
             }
-            self.advance();
+            self.cursor.advance();
         }
 
         if !terminated {
@@ -310,13 +290,13 @@ impl<'a> Lexer<'a> {
 
     fn read_block_string(&mut self, start_offset: usize) {
         let mut terminated = false;
-        while !self.is_at_end() {
-            if self.match_str("'''") {
+        while !self.cursor.is_at_end() {
+            if self.cursor.match_str("'''") {
                 terminated = true;
                 break;
             }
             // Lossless性を保つため、\r\n の正規化などは行わず、そのまま進める
-            self.advance();
+            self.cursor.advance();
         }
 
         if !terminated {
@@ -331,21 +311,21 @@ impl<'a> Lexer<'a> {
     fn read_double_quoted_string(&mut self, start_offset: usize) {
         let mut terminated = false;
         // 先頭の '"' を進める（メインループで advance していないため）
-        self.advance();
+        self.cursor.advance();
 
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.cursor.peek() {
             if c == '"' {
-                self.advance();
+                self.cursor.advance();
                 terminated = true;
                 break;
             }
 
             if c == '\\' {
-                self.advance(); // '\'を消費
-                match self.advance() {
+                self.cursor.advance(); // '\'を消費
+                match self.cursor.advance() {
                     Some('u') => {
                         for _ in 0..4 {
-                            match self.advance() {
+                            match self.cursor.advance() {
                                 Some(hex) if hex.is_ascii_hexdigit() => {}
                                 Some(other) => {
                                     self.errors.push(LexError::new(
@@ -383,12 +363,12 @@ impl<'a> Lexer<'a> {
                     .push(LexError::new(start_offset, "Unterminated string literal"));
                 break;
             } else {
-                self.advance();
+                self.cursor.advance();
             }
         }
 
         if !terminated
-            && self.is_at_end()
+            && self.cursor.is_at_end()
             && !self
                 .errors
                 .iter()
@@ -404,13 +384,13 @@ impl<'a> Lexer<'a> {
 
     fn read_quoteless_token(&mut self, start_offset: usize) {
         // 先頭が既に無効な文字でないかチェック
-        let first = match self.peek() {
+        let first = match self.cursor.peek() {
             Some(c) => c,
             None => return,
         };
 
         if is_punctuator(first) {
-            let c = self.advance().unwrap();
+            let c = self.cursor.advance().unwrap();
             self.errors.push(LexError::new(
                 start_offset,
                 format!("Unexpected character: {}", c),
@@ -419,7 +399,7 @@ impl<'a> Lexer<'a> {
         }
 
         // HJSONの仕様に基づいて、トークンが終了する条件までひたすら進める
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.cursor.peek() {
             // コメント開始でストップ
             if c == '/' {
                 if let Some(next_char) = self.cursor.peek_n(1) {
@@ -435,12 +415,12 @@ impl<'a> Lexer<'a> {
             if c.is_whitespace() || is_punctuator(c) {
                 break;
             }
-            self.advance();
+            self.cursor.advance();
         }
 
         let end_offset = self.cursor.pos();
         if start_offset == end_offset {
-            let c = self.advance().unwrap();
+            let c = self.cursor.advance().unwrap();
             self.errors.push(LexError::new(
                 start_offset,
                 format!("Unexpected character: {}", c),
