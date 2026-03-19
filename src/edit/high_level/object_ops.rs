@@ -6,9 +6,9 @@ use crate::edit::high_level::{
     rebuild_object_children_for_format, replace_pair_value, EntryTerminator, HjsonEditError,
     HjsonValue, ObjectEntry, ObjectItem, StringStyle,
 };
-use crate::syntax::green::GreenElement;
+use crate::syntax::ext::GreenElement;
+use crate::syntax::ext::{RedNode, RedNodeExt};
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) struct InsertFormat<'a> {

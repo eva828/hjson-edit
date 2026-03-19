@@ -118,11 +118,8 @@ impl SyntaxKind {
     }
 
     /// 新しいノードを作成
-    pub fn create_node(
-        self,
-        children: Vec<crate::syntax::green::GreenElement>,
-    ) -> rowan::GreenNode {
-        use crate::syntax::green::GreenElement;
+    pub fn create_node(self, children: Vec<crate::syntax::ext::GreenElement>) -> rowan::GreenNode {
+        use crate::syntax::ext::GreenElement;
         use rowan::GreenNodeBuilder;
 
         fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement) {

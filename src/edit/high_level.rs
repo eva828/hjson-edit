@@ -12,9 +12,9 @@ use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::edit::api::{EditError as LowLevelEditError, GreenNodeEdit};
 use crate::parser::lexer::Lexer;
 use crate::parser::parser::Parser;
-use crate::syntax::green::GreenElement;
+use crate::syntax::ext::GreenElement;
+use crate::syntax::ext::{RedNode, RedNodeExt};
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use crate::ParseError;
 
 use rowan::GreenNode;
@@ -1153,7 +1153,7 @@ impl HjsonDocument {
 
 impl std::fmt::Display for HjsonDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use crate::syntax::green::GreenNodeExt;
+        use crate::syntax::ext::GreenNodeExt;
         let text = self.green.text();
         f.write_str(&text)
     }

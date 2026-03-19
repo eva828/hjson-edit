@@ -2,7 +2,7 @@ use rowan::{GreenNode, Language, NodeOrToken};
 
 use crate::{
     format::{Format, FormatConfig, Formatter},
-    syntax::green::GreenElement,
+    syntax::ext::GreenElement,
     syntax::kind::{HjsonLanguage, SyntaxKind},
 };
 

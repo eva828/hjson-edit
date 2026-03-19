@@ -4,9 +4,9 @@ use crate::edit::high_level::{
     build_array_items, clone_element, create_value_node, is_token_of_kind, ArrayEntry, ArrayItem,
     EntryTerminator, HjsonDocument, HjsonEditError, HjsonValue, StringStyle,
 };
-use crate::syntax::green::GreenElement;
+use crate::syntax::ext::GreenElement;
+use crate::syntax::ext::{RedNode, RedNodeExt};
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) struct ArrayEditor;

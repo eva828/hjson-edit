@@ -1,4 +1,4 @@
-use crate::syntax::green::GreenElement;
+use crate::syntax::ext::GreenElement;
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
 use rowan::{Language, NodeOrToken};
 

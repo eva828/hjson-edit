@@ -4,9 +4,9 @@ use crate::edit::high_level::{
     clone_element, contextual_newline_kind, CommentPath, CommentStyle, HjsonDocument,
     HjsonEditError, PathSegment,
 };
-use crate::syntax::green::GreenElement;
+use crate::syntax::ext::GreenElement;
+use crate::syntax::ext::{RedNode, RedNodeExt};
 use crate::syntax::kind::SyntaxKind;
-use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
@@ -615,7 +615,7 @@ fn expect_terminal_key<'a>(path: &'a [PathSegment], raw: &str) -> Result<&'a str
 }
 
 fn clone_red_or_token(
-    elem: rowan::NodeOrToken<RedNode, crate::syntax::red::RedToken>,
+    elem: rowan::NodeOrToken<RedNode, crate::syntax::ext::RedToken>,
 ) -> GreenElement {
     match elem {
         NodeOrToken::Node(n) => NodeOrToken::Node(n.green().clone().into_owned()),

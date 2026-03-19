@@ -3,9 +3,9 @@ use crate::edit::high_level::{
     clone_element, HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
 };
 use crate::number::HjsonNumber;
-use crate::syntax::green::GreenElement;
+use crate::syntax::ext::GreenElement;
+use crate::syntax::ext::{RedNode, RedNodeExt};
 use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
-use crate::syntax::red::{RedNode, RedNodeCoreExt};
 use rowan::{GreenNode, Language, NodeOrToken};
 use std::iter::Peekable;
 use std::str::Chars;

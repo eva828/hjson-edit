@@ -1,6 +1,9 @@
 use super::kind::{HjsonLanguage, SyntaxKind};
 use rowan::{SyntaxNode, SyntaxToken};
 
+/// GreenElement型エイリアス（NodeまたはToken）
+pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
+
 /// RedNode型エイリアス
 pub type RedNode = SyntaxNode<HjsonLanguage>;
 /// RedToken型エイリアス
@@ -8,8 +11,38 @@ pub type RedToken = SyntaxToken<HjsonLanguage>;
 /// RedElement型エイリアス
 pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;
 
+/// GreenNodeユーティリティ拡張
+pub trait GreenNodeExt {
+    /// テキスト表現を取得（フォーマット保持）
+    fn text(&self) -> String;
+}
+
+impl GreenNodeExt for rowan::GreenNode {
+    fn text(&self) -> String {
+        fn node_text_recursive(node: &rowan::GreenNode) -> String {
+            let mut result = String::new();
+            for child in node.children() {
+                match child {
+                    rowan::NodeOrToken::Node(n) => {
+                        // n は &GreenNodeData
+                        // cloneでArcを取得してGreenNodeを作成
+                        let green_node: rowan::GreenNode =
+                            rowan::GreenNode::from(std::borrow::Cow::Borrowed(n));
+                        result.push_str(&node_text_recursive(&green_node));
+                    }
+                    rowan::NodeOrToken::Token(t) => {
+                        result.push_str(t.text());
+                    }
+                }
+            }
+            result
+        }
+        node_text_recursive(self)
+    }
+}
+
 /// RedNodeの基本ユーティリティ拡張
-pub trait RedNodeCoreExt {
+pub trait RedNodeExt {
     /// 指定されたkindの子ノードを探す
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode>;
 
@@ -17,7 +50,7 @@ pub trait RedNodeCoreExt {
     fn to_green(&self) -> rowan::GreenNode;
 }
 
-impl RedNodeCoreExt for RedNode {
+impl RedNodeExt for RedNode {
     fn child_by_kind(&self, kind: SyntaxKind) -> Option<RedNode> {
         // children() returns Iterator<Item = SyntaxNode>, not NodeOrToken
         self.children().find(|child| child.kind() == kind)
