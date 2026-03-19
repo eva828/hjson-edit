@@ -90,6 +90,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// 前の文字を取得（peek_prevのエイリアス）
+    pub fn prev(&self) -> Option<char> {
+        self.peek_prev()
+    }
+
     pub fn pos(&self) -> usize {
         self.position
     }
@@ -215,7 +220,7 @@ impl<'a> Lexer<'a> {
         if self.cursor.pos() == 0 {
             return true;
         }
-        match self.cursor.peek_prev() {
+        match self.cursor.prev() {
             Some(ch) => matches!(ch, '\n' | '\r' | ' ' | '\t'),
             None => true,
         }
