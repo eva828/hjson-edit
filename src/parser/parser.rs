@@ -504,17 +504,15 @@ impl Parser {
                     continue;
                 }
                 // 改行もなくカンマもない → エラー
-                let token = self.current().unwrap();
-                self.error(token.offset, "Expected ',' or '}'");
-                // エラー回復：次のペアまたは}までスキップ（トリビア含めて保持）
-                self.start_error_node();
-                self.consume_until_recovery(&[
-                    SyntaxKind::Comma,
-                    SyntaxKind::RBrace,
-                    SyntaxKind::String,
-                    SyntaxKind::UnquotedString,
-                ]);
-                self.finish_error_node();
+                self.recover_from_separator_error(
+                    "Expected ',' or '}'",
+                    &[
+                        SyntaxKind::Comma,
+                        SyntaxKind::RBrace,
+                        SyntaxKind::String,
+                        SyntaxKind::UnquotedString,
+                    ],
+                );
             }
         }
 
@@ -527,6 +525,15 @@ impl Parser {
         }
 
         self.builder.finish_node();
+    }
+
+    /// セパレーターエラーからの回復
+    fn recover_from_separator_error(&mut self, message: &str, recovery_kinds: &[SyntaxKind]) {
+        let token = self.current().unwrap();
+        self.error(token.offset, message);
+        self.start_error_node();
+        self.consume_until_recovery(recovery_kinds);
+        self.finish_error_node();
     }
 
     /// 配列 [ ... ] を解析
@@ -589,11 +596,10 @@ impl Parser {
                     continue;
                 }
                 // 改行もなくカンマもない → エラー
-                let token = self.current().unwrap();
-                self.error(token.offset, "Expected ',' or ']'");
-                self.start_error_node();
-                self.consume_until_recovery(&[SyntaxKind::Comma, SyntaxKind::RBracket]);
-                self.finish_error_node();
+                self.recover_from_separator_error(
+                    "Expected ',' or ']'",
+                    &[SyntaxKind::Comma, SyntaxKind::RBracket],
+                );
             }
         }
 
