@@ -6,7 +6,7 @@ use crate::edit::high_level::{
 };
 use crate::syntax::ext::GreenElement;
 use crate::syntax::ext::{RedNode, RedNodeExt};
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::SyntaxKind;
 use rowan::{GreenNode, NodeOrToken};
 
 pub(crate) struct ArrayEditor;

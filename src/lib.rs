@@ -24,5 +24,5 @@ pub use format::{FormatConfig, Formatter};
 pub use line_index::LineIndex;
 pub use syntax::ext::GreenElement;
 pub use syntax::ext::{RedNode, RedNodeExt, RedToken};
-pub use syntax::kind::SyntaxKind;
 pub use syntax::parser::ParseError;
+pub use syntax::SyntaxKind;

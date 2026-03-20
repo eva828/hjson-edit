@@ -5,7 +5,7 @@ use crate::edit::high_level::{
 use crate::number::HjsonNumber;
 use crate::syntax::ext::GreenElement;
 use crate::syntax::ext::{RedNode, RedNodeExt};
-use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
+use crate::syntax::{HjsonLanguage, SyntaxKind};
 use rowan::{GreenNode, Language, NodeOrToken};
 use std::iter::Peekable;
 use std::str::Chars;

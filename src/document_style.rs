@@ -1,5 +1,5 @@
 use crate::syntax::ext::GreenElement;
-use crate::syntax::kind::{HjsonLanguage, SyntaxKind};
+use crate::syntax::{HjsonLanguage, SyntaxKind};
 use rowan::{Language, NodeOrToken};
 
 /// 改行コードの種類

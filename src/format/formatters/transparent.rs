@@ -3,7 +3,7 @@ use rowan::{GreenNode, NodeOrToken};
 use crate::{
     format::{Format, FormatConfig, Formatter},
     syntax::ext::GreenElement,
-    syntax::kind::SyntaxKind,
+    syntax::SyntaxKind,
 };
 
 pub(crate) struct TransparentFormatter;

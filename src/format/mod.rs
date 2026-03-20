@@ -4,7 +4,7 @@ use crate::{
     format::formatters::{
         ArrayFormatter, ObjectFormatter, PairFormatter, RootFormatter, TransparentFormatter,
     },
-    syntax::kind::HjsonLanguage,
+    syntax::HjsonLanguage,
     SyntaxKind,
 };
 

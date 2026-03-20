@@ -1,4 +1,4 @@
-use super::kind::SyntaxKind;
+use super::SyntaxKind;
 /// HJSON字句解析器
 ///
 /// エラー継続型：エラーがあっても解析を続行し、詳細なエラー情報を収集

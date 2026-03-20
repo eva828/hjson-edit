@@ -6,7 +6,7 @@ use crate::edit::high_level::{
 };
 use crate::syntax::ext::GreenElement;
 use crate::syntax::ext::{RedNode, RedNodeExt};
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::SyntaxKind;
 use rowan::Language;
 use rowan::{GreenNode, NodeOrToken};
 
@@ -223,7 +223,7 @@ impl PairCommentEditor {
         let mut pair_idx_in_obj = 0;
         for (i, child) in obj_green.children().enumerate() {
             if let NodeOrToken::Node(n) = child {
-                if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair
+                if crate::syntax::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair
                     && *n == *pair_node.green()
                 {
                     pair_idx_in_obj = i;
@@ -240,7 +240,7 @@ impl PairCommentEditor {
         let mut temp_indent = Vec::new();
         loop {
             if let Some(NodeOrToken::Token(t)) = obj_green.children().nth(idx) {
-                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
                 if kind == SyntaxKind::Whitespace {
                     temp_indent.push(NodeOrToken::Token(kind.create_token(t.text())));
                 } else if kind == SyntaxKind::Newline {
@@ -263,7 +263,7 @@ impl PairCommentEditor {
         matches!(
             pair_green.children().next(),
             Some(NodeOrToken::Token(t))
-                if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Whitespace
+                if crate::syntax::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Whitespace
         )
     }
 
@@ -464,7 +464,7 @@ fn set_footer_comment(
         let elem = &children[footer_start - 1];
         match elem {
             NodeOrToken::Token(t) => {
-                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
                 if matches!(
                     kind,
                     SyntaxKind::Whitespace
@@ -488,7 +488,7 @@ fn set_footer_comment(
         && !matches!(
             children.last(),
             Some(NodeOrToken::Token(t))
-                if crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Newline
+                if crate::syntax::HjsonLanguage::kind_from_raw(t.kind()) == SyntaxKind::Newline
         )
     {
         children.push(NodeOrToken::Token(
@@ -564,7 +564,7 @@ fn remove_footer_comment(document: &HjsonDocument) -> Result<HjsonDocument, Hjso
     while i > 0 {
         i -= 1;
         if let NodeOrToken::Token(t) = &new_children[i] {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
             if matches!(
                 kind,
                 SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
@@ -691,7 +691,7 @@ fn is_leading_comment_trivia(elem: &GreenElement) -> bool {
         elem,
         NodeOrToken::Token(t)
             if matches!(
-                crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()),
+                crate::syntax::HjsonLanguage::kind_from_raw(t.kind()),
                 SyntaxKind::Whitespace
                     | SyntaxKind::Newline
                     | SyntaxKind::LineComment
@@ -711,7 +711,7 @@ fn determine_comment_style(
 
     for child in pair_green.children() {
         if let NodeOrToken::Token(t) = child {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
             match kind {
                 SyntaxKind::LineComment => return Ok(CommentStyle::Line),
                 SyntaxKind::HashComment => return Ok(CommentStyle::Hash),
@@ -735,7 +735,7 @@ fn insert_comment_before_pair(
 
     for child in pair_green.children() {
         if let NodeOrToken::Token(t) = child {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
             if kind == SyntaxKind::Whitespace || kind == SyntaxKind::Newline {
                 let elem = NodeOrToken::Token(kind.create_token(t.text()));
                 prefix_trivia.push(elem.clone());
@@ -762,7 +762,7 @@ fn insert_comment_before_pair(
     ));
     // If prefix_trivia had no newline, it means it's just indentation.
     // We should use it for both the comment and the key.
-    if !prefix_trivia.is_empty() && prefix_trivia.iter().all(|t| matches!(t.as_token(), Some(tok) if crate::syntax::kind::HjsonLanguage::kind_from_raw(tok.kind()) == SyntaxKind::Whitespace)) {
+    if !prefix_trivia.is_empty() && prefix_trivia.iter().all(|t| matches!(t.as_token(), Some(tok) if crate::syntax::HjsonLanguage::kind_from_raw(tok.kind()) == SyntaxKind::Whitespace)) {
         // Current children: [indent, comment, newline]
         // We want: [indent, comment, newline, indent, key...]
         children.extend(prefix_trivia);
@@ -773,7 +773,7 @@ fn insert_comment_before_pair(
     let mut found_non_trivia = false;
     for child in pair_green.children() {
         if let NodeOrToken::Token(t) = child {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
             if !found_non_trivia {
                 if kind == SyntaxKind::Whitespace
                     || kind == SyntaxKind::Newline
@@ -803,7 +803,7 @@ fn remove_comments_from_pair(pair_green: &GreenNode) -> Result<GreenNode, HjsonE
 
     for child in pair_green.children() {
         if let NodeOrToken::Token(t) = child {
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
             if !found_non_trivia
                 && matches!(
                     kind,
@@ -838,7 +838,7 @@ fn set_inline_comment(
 
     for (i, child) in children.iter().enumerate() {
         if let NodeOrToken::Node(n) = child {
-            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
+            if crate::syntax::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
                 if pair_count == pair_idx {
                     pair_end_pos = Some(i);
                 }
@@ -847,7 +847,7 @@ fn set_inline_comment(
         }
         if pair_count == pair_idx + 1 {
             if let NodeOrToken::Token(t) = child {
-                let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
                 if kind == SyntaxKind::Comma {
                     comma_pos = Some(i);
                     break;
@@ -870,7 +870,7 @@ fn set_inline_comment(
         while end < children.len() {
             match &children[end] {
                 NodeOrToken::Token(t) => {
-                    let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                    let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
                     if matches!(
                         kind,
                         SyntaxKind::Whitespace
@@ -1046,15 +1046,14 @@ fn remove_inline_comment(
 
     for (i, child) in children.iter().enumerate() {
         if let NodeOrToken::Node(n) = child {
-            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
+            if crate::syntax::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
                 if pair_count == pair_idx {
                     let start = i + 1;
                     let mut end = start;
                     for (j, child) in children.iter().enumerate().skip(start) {
                         match child {
                             NodeOrToken::Token(t) => {
-                                let kind =
-                                    crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                                let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
                                 if matches!(
                                     kind,
                                     SyntaxKind::LineComment
@@ -1095,13 +1094,12 @@ fn extract_inline_comments(obj_green: &GreenNode, pair_idx: usize) -> Vec<String
 
     for (i, child) in children.iter().enumerate() {
         if let NodeOrToken::Node(n) = child {
-            if crate::syntax::kind::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
+            if crate::syntax::HjsonLanguage::kind_from_raw(n.kind()) == SyntaxKind::Pair {
                 if pair_count == pair_idx {
                     for next in children.iter().skip(i + 1) {
                         match next {
                             NodeOrToken::Token(t) => {
-                                let kind =
-                                    crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+                                let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
                                 if matches!(
                                     kind,
                                     SyntaxKind::LineComment

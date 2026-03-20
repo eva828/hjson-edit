@@ -3,7 +3,7 @@ use rowan::{GreenNode, Language, NodeOrToken};
 use crate::{
     format::{Format, FormatConfig, Formatter},
     syntax::ext::GreenElement,
-    syntax::kind::{HjsonLanguage, SyntaxKind},
+    syntax::{HjsonLanguage, SyntaxKind},
 };
 
 pub(crate) struct ObjectFormatter;

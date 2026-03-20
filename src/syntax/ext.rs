@@ -1,4 +1,4 @@
-use super::kind::{HjsonLanguage, SyntaxKind};
+use super::{HjsonLanguage, SyntaxKind};
 use rowan::{SyntaxNode, SyntaxToken};
 
 /// GreenElement型エイリアス（NodeまたはToken）

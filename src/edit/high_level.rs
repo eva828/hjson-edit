@@ -12,9 +12,9 @@ use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::edit::api::{EditError as LowLevelEditError, GreenNodeEdit};
 use crate::syntax::ext::GreenElement;
 use crate::syntax::ext::{RedNode, RedNodeExt};
-use crate::syntax::kind::SyntaxKind;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
+use crate::syntax::SyntaxKind;
 use crate::ParseError;
 
 use rowan::GreenNode;
@@ -352,7 +352,7 @@ impl ArrayValueLocator {
             .rev()
             .find_map(|(index, child)| match child {
                 NodeOrToken::Node(node)
-                    if crate::syntax::kind::HjsonLanguage::kind_from_raw(node.kind())
+                    if crate::syntax::HjsonLanguage::kind_from_raw(node.kind())
                         == SyntaxKind::Value =>
                 {
                     Some(index)
@@ -1195,7 +1195,7 @@ pub(crate) fn clone_element(
         NodeOrToken::Token(t) => {
             // GreenTokenを新しく作成
             let text = t.text().to_string();
-            let kind = crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind());
+            let kind = crate::syntax::HjsonLanguage::kind_from_raw(t.kind());
             let token = rowan::GreenToken::new(kind.into(), &text);
             NodeOrToken::Token(token)
         }
@@ -1204,7 +1204,7 @@ pub(crate) fn clone_element(
 
 pub(crate) fn is_token_of_kind(elem: &GreenElement, kind: SyntaxKind) -> bool {
     if let NodeOrToken::Token(t) = elem {
-        crate::syntax::kind::HjsonLanguage::kind_from_raw(t.kind()) == kind
+        crate::syntax::HjsonLanguage::kind_from_raw(t.kind()) == kind
     } else {
         false
     }

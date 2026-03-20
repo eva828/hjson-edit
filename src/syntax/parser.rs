@@ -1,8 +1,8 @@
-use super::kind::SyntaxKind;
 /// HJSON構文解析器
 ///
 /// Lexerのトークン列をGreen Treeに変換
 use super::lexer::Token;
+use super::SyntaxKind;
 use crate::number::HjsonNumber;
 use line_index::{LineIndex, TextSize};
 

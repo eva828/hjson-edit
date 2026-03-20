@@ -2,7 +2,7 @@
 ///
 /// Green/Red Treeを操作するための基本的な編集機能
 use crate::syntax::ext::GreenElement;
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::SyntaxKind;
 
 use rowan::GreenNodeBuilder;
 
@@ -218,7 +218,7 @@ fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::kind::SyntaxKind;
+    use crate::syntax::SyntaxKind;
 
     fn create_test_node() -> rowan::GreenNode {
         let mut builder = rowan::GreenNodeBuilder::new();
