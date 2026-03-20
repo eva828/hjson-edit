@@ -2,7 +2,7 @@ use rowan::{GreenNode, NodeOrToken};
 
 use crate::{
     format::{Format, FormatConfig, Formatter},
-    syntax::ext::GreenElement,
+    syntax::GreenElement,
     syntax::SyntaxKind,
 };
 

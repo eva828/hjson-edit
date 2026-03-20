@@ -1,7 +1,7 @@
 /// 低レベル編集API
 ///
 /// Green/Red Treeを操作するための基本的な編集機能
-use crate::syntax::ext::GreenElement;
+use crate::syntax::GreenElement;
 use crate::syntax::SyntaxKind;
 
 use rowan::GreenNodeBuilder;

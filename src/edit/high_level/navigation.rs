@@ -1,5 +1,6 @@
 use crate::edit::high_level::{extract_key_text, HjsonEditError, PathSegment};
-use crate::syntax::ext::{RedNode, RedNodeExt};
+use crate::syntax::ext::RedNodeExt;
+use crate::syntax::RedNode;
 use crate::syntax::SyntaxKind;
 
 /// RedNodeのナビゲーション機能拡張

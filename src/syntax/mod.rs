@@ -3,6 +3,7 @@ pub mod lexer;
 pub mod parser;
 
 use rowan::Language;
+use rowan::{SyntaxNode, SyntaxToken};
 use std::fmt;
 
 /// HJSON構文要素の種別
@@ -122,8 +123,8 @@ impl SyntaxKind {
     }
 
     /// 新しいノードを作成
-    pub fn create_node(self, children: Vec<crate::syntax::ext::GreenElement>) -> rowan::GreenNode {
-        use crate::syntax::ext::GreenElement;
+    pub fn create_node(self, children: Vec<crate::syntax::GreenElement>) -> rowan::GreenNode {
+        use crate::syntax::GreenElement;
         use rowan::GreenNodeBuilder;
 
         fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement) {
@@ -269,3 +270,13 @@ mod tests {
         }
     }
 }
+
+/// GreenElement型エイリアス（NodeまたはToken）
+pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
+
+/// RedNode型エイリアス
+pub type RedNode = SyntaxNode<HjsonLanguage>;
+/// RedToken型エイリアス
+pub type RedToken = SyntaxToken<HjsonLanguage>;
+/// RedElement型エイリアス
+pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;

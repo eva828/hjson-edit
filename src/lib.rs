@@ -22,7 +22,8 @@ pub use edit::high_level::{
 };
 pub use format::{FormatConfig, Formatter};
 pub use line_index::LineIndex;
-pub use syntax::ext::GreenElement;
-pub use syntax::ext::{RedNode, RedNodeExt, RedToken};
+pub use syntax::ext::RedNodeExt;
 pub use syntax::parser::ParseError;
+pub use syntax::GreenElement;
 pub use syntax::SyntaxKind;
+pub use syntax::{RedNode, RedToken};

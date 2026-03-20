@@ -1,15 +1,4 @@
-use super::{HjsonLanguage, SyntaxKind};
-use rowan::{SyntaxNode, SyntaxToken};
-
-/// GreenElement型エイリアス（NodeまたはToken）
-pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
-
-/// RedNode型エイリアス
-pub type RedNode = SyntaxNode<HjsonLanguage>;
-/// RedToken型エイリアス
-pub type RedToken = SyntaxToken<HjsonLanguage>;
-/// RedElement型エイリアス
-pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;
+use super::{RedElement, RedNode, SyntaxKind};
 
 /// GreenNodeユーティリティ拡張
 pub trait GreenNodeExt {

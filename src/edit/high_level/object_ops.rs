@@ -6,8 +6,9 @@ use crate::edit::high_level::{
     rebuild_object_children_for_format, replace_pair_value, EntryTerminator, HjsonEditError,
     HjsonValue, ObjectEntry, ObjectItem, StringStyle,
 };
-use crate::syntax::ext::GreenElement;
-use crate::syntax::ext::{RedNode, RedNodeExt};
+use crate::syntax::ext::RedNodeExt;
+use crate::syntax::GreenElement;
+use crate::syntax::RedNode;
 use crate::syntax::SyntaxKind;
 use rowan::{GreenNode, NodeOrToken};
 

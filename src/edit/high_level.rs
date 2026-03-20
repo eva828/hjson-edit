@@ -10,10 +10,11 @@ pub(crate) mod value;
 
 use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::edit::api::{EditError as LowLevelEditError, GreenNodeEdit};
-use crate::syntax::ext::GreenElement;
-use crate::syntax::ext::{RedNode, RedNodeExt};
+use crate::syntax::ext::RedNodeExt;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
+use crate::syntax::GreenElement;
+use crate::syntax::RedNode;
 use crate::syntax::SyntaxKind;
 use crate::ParseError;
 
