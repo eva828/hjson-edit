@@ -1,3 +1,6 @@
+use line_index::LineIndex;
+use rowan::TextSize;
+
 use super::SyntaxKind;
 /// HJSON字句解析器
 ///
@@ -18,7 +21,23 @@ impl LexError {
             offset,
         }
     }
+
+    pub fn format(&self, line_index: &LineIndex) -> String {
+        let lc = line_index.line_col(TextSize::from(self.offset as u32));
+        format!(
+            "Error at line {}, column {}: {}",
+            lc.line, lc.col, self.message
+        )
+    }
 }
+
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LexError at offset {}: {}", self.offset, self.message)
+    }
+}
+
+impl std::error::Error for LexError {}
 
 pub struct Cursor<'a> {
     input: &'a str,

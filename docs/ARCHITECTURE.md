@@ -30,10 +30,10 @@
 - `src/syntax`
   - `SyntaxKind`
   - Green Tree / Red Tree ヘルパ
-- `src/edit`
-  - 低レベル編集 API (`api.rs`)
-  - 高レベル編集 API (`high_level.rs`)
-  - コメント編集 (`comments.rs`)
+- `src/high_level`
+  - 高レベル編集 API (`HjsonDocument` + trait群)
+  - コメント編集
+  - パス解決
 - `src/format`
   - 整形ターゲット定義
   - 整形エンジン (`engine.rs`)
@@ -69,7 +69,7 @@ Green Tree
   ↓
 Red Tree view
   ↓
-high-level edit / low-level edit
+high-level edit
   ↓
 EditResult(dirty targets)
   ↓
@@ -174,23 +174,9 @@ Red Tree は Green Tree の上に構築される **参照ビュー** です。
 
 ## 編集層
 
-編集層は **低レベル** と **高レベル** に分かれます。
+編集層は **高レベル API** を中心に構成されています。
 
-### 低レベル編集 API (`src/edit/api.rs`)
-
-責務:
-
-- Green Node に対する直接編集
-  - `replace_child`
-  - `insert_child`
-  - `remove_child`
-  - `apply_edits`
-- 編集操作の最小単位を提供する
-
-この層は構造をよく理解した内部実装向けです。  
-インデックスベースで動作するため柔軟ですが、利用者にはやや扱いづらいです。
-
-### 高レベル編集 API (`src/edit/high_level.rs`)
+### 高レベル編集 API (`src/high_level`)
 
 責務:
 

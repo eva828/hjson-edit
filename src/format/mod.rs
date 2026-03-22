@@ -48,12 +48,8 @@ pub trait Format {
 
 pub struct Formatter;
 
-impl Formatter {
-    pub fn format(node: GreenNode, config: FormatConfig) -> GreenNode {
-        Self::format_with_depth(node, 0, config)
-    }
-
-    pub fn format_with_depth(node: GreenNode, depth: usize, config: FormatConfig) -> GreenNode {
+impl Format for Formatter {
+    fn format(&self, node: GreenNode, depth: usize, config: FormatConfig) -> GreenNode {
         match HjsonLanguage::kind_from_raw(node.kind()) {
             SyntaxKind::Object => ObjectFormatter.format(node, depth, config),
             SyntaxKind::Array => ArrayFormatter.format(node, depth, config),
@@ -61,5 +57,15 @@ impl Formatter {
             SyntaxKind::Root => RootFormatter.format(node, depth, config),
             _ => TransparentFormatter.format(node, depth, config),
         }
+    }
+}
+
+impl Formatter {
+    pub fn format(node: GreenNode, config: FormatConfig) -> GreenNode {
+        Format::format(&Self, node, 0, config)
+    }
+
+    pub fn format_with_depth(node: GreenNode, depth: usize, config: FormatConfig) -> GreenNode {
+        Format::format(&Self, node, depth, config)
     }
 }

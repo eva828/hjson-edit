@@ -1,7 +1,7 @@
-use crate::edit::high_level::structure::{
+use crate::high_level::structure::{
     indentation_from_standalone_block, whitespace_after_last_newline,
 };
-use crate::edit::high_level::{
+use crate::high_level::{
     build_object_items, clone_element, create_pair_node, extract_key_text, is_token_of_kind,
     rebuild_object_children_for_format, replace_pair_value, EntryTerminator, HjsonEditError,
     HjsonValue, ObjectEntry, ObjectItem, StringStyle,
@@ -318,33 +318,6 @@ impl PendingTerminator {
         }
         modified_entry
     }
-}
-
-pub(crate) fn remove_object_entry(
-    obj_node: &RedNode,
-    key: &str,
-) -> Result<GreenNode, HjsonEditError> {
-    ObjectEditor::remove_entry(obj_node, key)
-}
-
-pub(crate) fn set_object_entry(
-    obj_node: &RedNode,
-    key: &str,
-    value: &HjsonValue,
-    string_style: StringStyle,
-    base_indent: &str,
-    indent_unit: &str,
-    newline: &str,
-) -> Result<GreenNode, HjsonEditError> {
-    ObjectEditor::set_entry(
-        obj_node,
-        key,
-        value,
-        string_style,
-        base_indent,
-        indent_unit,
-        newline,
-    )
 }
 
 pub(crate) fn detect_object_entry_indent(items: &[ObjectItem]) -> Option<String> {

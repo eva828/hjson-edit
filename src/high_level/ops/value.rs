@@ -1,7 +1,4 @@
-use crate::edit::high_level::navigation::RedNodeNavigateExt;
-use crate::edit::high_level::{
-    clone_element, HjsonDocument, HjsonEditError, HjsonValue, PathSegment, StringStyle,
-};
+use crate::high_level::{clone_element, HjsonDocument, HjsonEditError, HjsonValue, StringStyle};
 use crate::number::HjsonNumber;
 use crate::syntax::ext::RedNodeExt;
 use crate::syntax::GreenElement;
@@ -10,6 +7,74 @@ use crate::syntax::{HjsonLanguage, SyntaxKind};
 use rowan::{GreenNode, Language, NodeOrToken};
 use std::iter::Peekable;
 use std::str::Chars;
+
+/// 文字列の出力スタイル
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringStyle {
+    Preserve,
+    Auto,
+    DoubleQuoted,
+    Block,
+    Unquoted,
+}
+
+pub trait DocumentValueEdit: Sized {
+    fn set(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError>;
+    fn set_with_style(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+        string_style: StringStyle,
+    ) -> Result<Self, HjsonEditError>;
+    fn get(&self, path: impl crate::high_level::IntoPath) -> Option<HjsonValue>;
+    fn remove(&self, path: impl crate::high_level::IntoPath) -> Result<Self, HjsonEditError>;
+    fn contains(&self, path: impl crate::high_level::IntoPath) -> bool;
+    fn keys(&self, path: impl crate::high_level::IntoPath) -> Option<Vec<String>>;
+    fn len(&self, path: impl crate::high_level::IntoPath) -> Option<usize>;
+}
+
+impl DocumentValueEdit for HjsonDocument {
+    fn set(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::set(self, path, value)
+    }
+
+    fn set_with_style(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+        string_style: StringStyle,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::set_with_style(self, path, value, string_style)
+    }
+
+    fn get(&self, path: impl crate::high_level::IntoPath) -> Option<HjsonValue> {
+        HjsonDocument::get(self, path)
+    }
+
+    fn remove(&self, path: impl crate::high_level::IntoPath) -> Result<Self, HjsonEditError> {
+        HjsonDocument::remove(self, path)
+    }
+
+    fn contains(&self, path: impl crate::high_level::IntoPath) -> bool {
+        HjsonDocument::contains(self, path)
+    }
+
+    fn keys(&self, path: impl crate::high_level::IntoPath) -> Option<Vec<String>> {
+        HjsonDocument::keys(self, path)
+    }
+
+    fn len(&self, path: impl crate::high_level::IntoPath) -> Option<usize> {
+        HjsonDocument::len(self, path)
+    }
+}
 
 pub(crate) struct ValueCodec;
 
@@ -43,7 +108,7 @@ impl ValueCodec {
     //     } else {
     //         target_node
     //     };
-    //     Some(FormatTargetUnit::node(target_node.path_from_root()))
+    //     format target selection for node-level formatting
     // }
 
     pub(crate) fn node_to_value(node: &RedNode) -> Option<HjsonValue> {

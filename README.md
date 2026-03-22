@@ -26,7 +26,7 @@ hjson-edit edit config.hjson --set server.host localhost --array-append items ne
 ### ライブラリ
 
 ```rust
-use hjson_edit::{FormatTarget, HjsonDocument};
+use hjson_edit::{DocumentValueEdit, HjsonDocument};
 
 let input = r#"{
     // Configuration
@@ -36,12 +36,8 @@ let input = r#"{
 
 let document = HjsonDocument::parse(input)?;
 
-let edited = document
-    .edit_set("name", "api")?
-    .format()?;
-
-let fully_formatted = edited.format(vec![FormatTarget::Document])?;
-assert!(fully_formatted.to_string().contains("name: api"));
+let edited = document.set("name", "api")?;
+assert!(edited.to_string().contains("name: api"));
 ```
 
 ## 設計
@@ -49,9 +45,9 @@ assert!(fully_formatted.to_string().contains("name: api"));
 詳細な設計・アーキテクチャは `docs/ARCHITECTURE.md` を参照してください。
 
 - `parse`: lossless tree を作る
-- `edit_*`: 構造だけ変更し、整形対象を `EditResult` として返す
+- `set` / `push` / `insert_at` などの高レベルAPIで構造編集する
+- `comment_set` / `comment_append` / `comment_get` でコメントを操作する
 - `format`: 全体整形または部分整形を独立実行できる
-- `set` / `push` / `insert_at` などの convenience API は内部で `edit -> format` を実行する
 
 ### 設計改善の現状
 

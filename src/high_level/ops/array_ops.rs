@@ -1,6 +1,6 @@
 use crate::document_style::DetectNewline;
 
-use crate::edit::high_level::{
+use crate::high_level::{
     build_array_items, clone_element, create_value_node, is_token_of_kind, ArrayEntry, ArrayItem,
     EntryTerminator, HjsonDocument, HjsonEditError, HjsonValue, StringStyle,
 };
@@ -9,6 +9,89 @@ use crate::syntax::GreenElement;
 use crate::syntax::RedNode;
 use crate::syntax::SyntaxKind;
 use rowan::{GreenNode, NodeOrToken};
+
+pub trait DocumentArrayEdit: Sized {
+    fn push(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError>;
+    fn push_with_style(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+        string_style: StringStyle,
+    ) -> Result<Self, HjsonEditError>;
+    fn pop(&self, path: impl crate::high_level::IntoPath) -> Result<Self, HjsonEditError>;
+    fn insert_at(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        index: usize,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError>;
+    fn insert_at_with_style(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        index: usize,
+        value: impl Into<HjsonValue>,
+        string_style: StringStyle,
+    ) -> Result<Self, HjsonEditError>;
+    fn remove_at(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        index: usize,
+    ) -> Result<Self, HjsonEditError>;
+}
+
+impl DocumentArrayEdit for HjsonDocument {
+    fn push(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::push(self, path, value)
+    }
+
+    fn push_with_style(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        value: impl Into<HjsonValue>,
+        string_style: StringStyle,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::push_with_style(self, path, value, string_style)
+    }
+
+    fn pop(&self, path: impl crate::high_level::IntoPath) -> Result<Self, HjsonEditError> {
+        HjsonDocument::pop(self, path)
+    }
+
+    fn insert_at(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        index: usize,
+        value: impl Into<HjsonValue>,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::insert_at(self, path, index, value)
+    }
+
+    fn insert_at_with_style(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        index: usize,
+        value: impl Into<HjsonValue>,
+        string_style: StringStyle,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::insert_at_with_style(self, path, index, value, string_style)
+    }
+
+    fn remove_at(
+        &self,
+        path: impl crate::high_level::IntoPath,
+        index: usize,
+    ) -> Result<Self, HjsonEditError> {
+        HjsonDocument::remove_at(self, path, index)
+    }
+}
 
 pub(crate) struct ArrayEditor;
 
@@ -118,7 +201,7 @@ impl ArrayLayoutContext {
     }
 
     fn rebuild(self, items: Vec<ArrayItem>) -> GreenNode {
-        SyntaxKind::Array.create_node(crate::edit::high_level::rebuild_array_children_for_format(
+        SyntaxKind::Array.create_node(crate::high_level::rebuild_array_children_for_format(
             self.lbracket,
             items,
             self.rbracket,
@@ -193,7 +276,7 @@ impl ArrayInsertPlanner {
     fn route_standalone(
         &mut self,
         new_items: &mut Vec<ArrayItem>,
-        block: crate::edit::high_level::StandaloneTriviaBlock,
+        block: crate::high_level::StandaloneTriviaBlock,
     ) {
         if self.is_append {
             self.trailing_standalone.push(ArrayItem::Standalone(block));
@@ -259,21 +342,4 @@ impl ArrayInsertPlanner {
             terminator,
         }))
     }
-}
-
-pub(crate) fn remove_array_entry(
-    arr_node: &RedNode,
-    index: usize,
-) -> Result<GreenNode, HjsonEditError> {
-    ArrayEditor::remove_entry(arr_node, index)
-}
-
-pub(crate) fn insert_array_entry_structural(
-    document: &HjsonDocument,
-    arr_node: &RedNode,
-    index: usize,
-    value: &HjsonValue,
-    string_style: StringStyle,
-) -> Result<GreenNode, HjsonEditError> {
-    ArrayEditor::insert_entry(document, arr_node, index, value, string_style)
 }

@@ -1,5 +1,6 @@
 use crate::syntax::GreenElement;
 use crate::syntax::{HjsonLanguage, SyntaxKind};
+use crate::{HjsonDocument, RedNode, RedNodeExt};
 use rowan::{Language, NodeOrToken};
 
 /// 改行コードの種類
@@ -89,6 +90,27 @@ impl DetectNewline for String {
 impl DetectNewline for Vec<GreenElement> {
     fn try_detect_newline(&self) -> Option<NewlineKind> {
         self.as_slice().try_detect_newline()
+    }
+}
+
+impl DetectNewline for HjsonDocument {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        let root_green = self.green_node();
+        let elements: Vec<GreenElement> = root_green.children().map(clone_element).collect();
+
+        // まず構造要素から検出を試みる
+        elements
+            .try_detect_newline()
+            // フォールバック: テキスト全体から検出
+            .or_else(|| self.to_string().try_detect_newline())
+    }
+}
+
+impl DetectNewline for RedNode {
+    fn try_detect_newline(&self) -> Option<NewlineKind> {
+        let green = self.to_green();
+        let elements: Vec<GreenElement> = green.children().map(clone_element).collect();
+        elements.try_detect_newline()
     }
 }
 

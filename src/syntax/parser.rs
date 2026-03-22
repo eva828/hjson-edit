@@ -30,6 +30,14 @@ impl ParseError {
     }
 }
 
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Parse error at offset {}: {}", self.offset, self.message)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 /// 構文解析結果
 #[derive(Debug)]
 pub struct ParseResult {
