@@ -20,8 +20,9 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StringStyle {
+    #[default]
     Preserve,
     Auto,
     DoubleQuoted,

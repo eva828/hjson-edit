@@ -20,8 +20,11 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum CommentStyle {
+    #[default]
+    Preserve,
+    Auto,
     Line,
     Hash,
     Block,

@@ -1,52 +1,32 @@
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 use anyhow::{Context, Result};
-use hjson_edit::{
-    high_level::{
-        ops::{
-            comment::{CommentPath, CommentStyle},
-            object::StringStyle,
-        },
-        value::HjsonValue,
-        HjsonDocument,
+use hjson_edit::high_level::{
+    ops::{
+        comment::{CommentPath, CommentStyle, HjsonDocumentCommentEdit},
+        object::{HjsonDocumentObjectEdit, StringStyle},
     },
-    LineIndex,
+    value::HjsonValue,
+    HjsonDocument,
 };
 
 #[derive(Debug, Clone)]
 enum EditOp {
-    ObjectSet {
+    Set {
         path: String,
         value: HjsonValue,
         string_style: Option<StringStyle>,
     },
-    ObjectRemove {
+    Remove {
         path: String,
-    },
-    ArrayAppend {
-        path: String,
-        value: HjsonValue,
-        string_style: Option<StringStyle>,
-    },
-    ArrayInsert {
-        path: String,
-        index: usize,
-        value: HjsonValue,
-        string_style: Option<StringStyle>,
-    },
-    ArrayRemove {
-        path: String,
-        index: usize,
     },
     CommentSet {
         path: CommentPath,
         text: String,
-        style: Option<CommentStyle>,
     },
     CommentAppend {
         path: CommentPath,
         text: String,
-        style: Option<CommentStyle>,
     },
     CommentRemove {
         path: CommentPath,
@@ -64,74 +44,60 @@ pub fn edit_command() -> Command {
                 .value_parser(clap::value_parser!(std::path::PathBuf)),
         )
         .arg(
-            Arg::new("object-set")
-                .long("object-set")
-                .aliases(["set"])
+            Arg::new("set")
+                .long("set")
+                .short('s')
                 .action(ArgAction::Append)
                 .num_args(2)
-                .value_names(["PATH", "VALUE"]),
+                .value_names(["PATH", "VALUE"])
+                .help("Set a value at the given path (e.g., 'key', 'items[0]', 'items[-]')"),
         )
         .arg(
-            Arg::new("object-remove")
-                .long("object-remove")
-                .aliases(["remove"])
+            Arg::new("remove")
+                .long("remove")
+                .short('r')
                 .action(ArgAction::Append)
-                .value_name("PATH"),
-        )
-        .arg(
-            Arg::new("array-append")
-                .long("array-append")
-                .action(ArgAction::Append)
-                .num_args(2)
-                .value_names(["PATH", "VALUE"]),
-        )
-        .arg(
-            Arg::new("array-insert")
-                .long("array-insert")
-                .action(ArgAction::Append)
-                .num_args(3)
-                .value_names(["PATH", "INDEX", "VALUE"]),
-        )
-        .arg(
-            Arg::new("array-remove")
-                .long("array-remove")
-                .action(ArgAction::Append)
-                .num_args(2)
-                .value_names(["PATH", "INDEX"]),
+                .value_name("PATH")
+                .help("Remove a value at the given path"),
         )
         .arg(
             Arg::new("comment-set")
                 .long("comment-set")
                 .action(ArgAction::Append)
                 .num_args(2)
-                .value_names(["PATH", "TEXT"]),
+                .value_names(["PATH", "TEXT"])
+                .help("Set a comment at the given path"),
         )
         .arg(
             Arg::new("comment-append")
                 .long("comment-append")
                 .action(ArgAction::Append)
                 .num_args(2)
-                .value_names(["PATH", "TEXT"]),
+                .value_names(["PATH", "TEXT"])
+                .help("Append a comment at the given path"),
         )
         .arg(
             Arg::new("comment-remove")
                 .long("comment-remove")
                 .action(ArgAction::Append)
-                .value_name("PATH"),
+                .value_name("PATH")
+                .help("Remove a comment at the given path"),
         )
         .arg(
             Arg::new("comment-style")
                 .long("comment-style")
                 .action(ArgAction::Append)
                 .value_name("STYLE")
-                .value_parser(["line", "hash", "block"]),
+                .value_parser(["line", "hash", "block"])
+                .help("Set comment style for subsequent comment operations"),
         )
         .arg(
             Arg::new("string-style")
                 .long("string-style")
                 .action(ArgAction::Append)
                 .value_name("STYLE")
-                .value_parser(["preserve", "auto", "double", "block", "unquoted"]),
+                .value_parser(["preserve", "auto", "double", "block", "unquoted"])
+                .help("Set string style for subsequent set operations"),
         )
         .arg(
             Arg::new("in-place")
@@ -150,36 +116,6 @@ pub fn edit_command() -> Command {
 struct CliValueParser;
 
 impl CliValueParser {
-    fn parse_set_arg(path: &str, value_str: &str) -> Result<(String, HjsonValue)> {
-        if let Some(colon_pos) = path.rfind(':') {
-            let hint = &path[colon_pos + 1..];
-            let base_path = path[..colon_pos].to_string();
-
-            let value = match hint {
-                "int" => value_str
-                    .parse::<i64>()
-                    .map(HjsonValue::Integer)
-                    .map_err(|_| anyhow::anyhow!("Invalid integer: {}", value_str))?,
-                "float" => value_str
-                    .parse::<f64>()
-                    .map(HjsonValue::Float)
-                    .map_err(|_| anyhow::anyhow!("Invalid float: {}", value_str))?,
-                "bool" => match value_str {
-                    "true" => HjsonValue::Bool(true),
-                    "false" => HjsonValue::Bool(false),
-                    _ => anyhow::bail!("Invalid bool: {}", value_str),
-                },
-                "str" => HjsonValue::String(value_str.to_string()),
-                "null" => HjsonValue::Null,
-                _ => return Ok((path.to_string(), Self::parse_value(value_str))),
-            };
-
-            return Ok((base_path, value));
-        }
-
-        Ok((path.to_string(), Self::parse_value(value_str)))
-    }
-
     fn parse_value(raw: &str) -> HjsonValue {
         match raw {
             "null" => return HjsonValue::Null,
@@ -247,8 +183,8 @@ impl<'a> EditOpCollector<'a> {
     }
 
     fn collect(mut self) -> Result<Vec<EditOp>> {
-        self.collect_object_ops()?;
-        self.collect_array_ops()?;
+        self.collect_set_ops()?;
+        self.collect_remove_ops();
         self.collect_comment_ops()?;
         self.collect_style_ops()?;
         self.ops_with_indices.sort_by_key(|(idx, _)| *idx);
@@ -259,10 +195,10 @@ impl<'a> EditOpCollector<'a> {
             .collect())
     }
 
-    fn collect_object_ops(&mut self) -> Result<()> {
-        if let Some(sets) = self.matches.get_raw("object-set") {
+    fn collect_set_ops(&mut self) -> Result<()> {
+        if let Some(sets) = self.matches.get_raw("set") {
             let vals: Vec<_> = sets.collect();
-            let indices = self.collect_indices("object-set");
+            let indices = self.collect_indices("set");
 
             for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
                 if chunk.len() != 2 {
@@ -270,25 +206,13 @@ impl<'a> EditOpCollector<'a> {
                 }
                 let path = chunk[0].to_string_lossy().to_string();
                 let value_str = chunk[1].to_string_lossy().to_string();
-                let (parsed_path, value) = CliValueParser::parse_set_arg(&path, &value_str)?;
+                let value = CliValueParser::parse_value(&value_str);
                 self.ops_with_indices.push((
                     idx_chunk[0],
-                    EditOp::ObjectSet {
-                        path: parsed_path,
+                    EditOp::Set {
+                        path,
                         value,
                         string_style: CliValueParser::detect_inline_string_style(&value_str),
-                    },
-                ));
-            }
-        }
-
-        if let Some(removes) = self.matches.get_raw("object-remove") {
-            let indices = self.collect_indices("object-remove");
-            for (idx, val) in indices.iter().zip(removes) {
-                self.ops_with_indices.push((
-                    *idx,
-                    EditOp::ObjectRemove {
-                        path: val.to_string_lossy().to_string(),
                     },
                 ));
             }
@@ -297,68 +221,18 @@ impl<'a> EditOpCollector<'a> {
         Ok(())
     }
 
-    fn collect_array_ops(&mut self) -> Result<()> {
-        if let Some(appends) = self.matches.get_raw("array-append") {
-            let vals: Vec<_> = appends.collect();
-            let indices = self.collect_indices("array-append");
-
-            for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
-                if chunk.len() != 2 {
-                    continue;
-                }
-                let path = chunk[0].to_string_lossy().to_string();
-                let raw_value = chunk[1].to_string_lossy();
+    fn collect_remove_ops(&mut self) {
+        if let Some(removes) = self.matches.get_raw("remove") {
+            let indices = self.collect_indices("remove");
+            for (idx, val) in indices.iter().zip(removes) {
                 self.ops_with_indices.push((
-                    idx_chunk[0],
-                    EditOp::ArrayAppend {
-                        path,
-                        value: CliValueParser::parse_value(&raw_value),
-                        string_style: CliValueParser::detect_inline_string_style(&raw_value),
+                    *idx,
+                    EditOp::Remove {
+                        path: val.to_string_lossy().to_string(),
                     },
                 ));
             }
         }
-
-        if let Some(inserts) = self.matches.get_raw("array-insert") {
-            let vals: Vec<_> = inserts.collect();
-            let indices = self.collect_indices("array-insert");
-
-            for (chunk, idx_chunk) in vals.chunks(3).zip(indices.chunks(3)) {
-                if chunk.len() != 3 {
-                    continue;
-                }
-                let path = chunk[0].to_string_lossy().to_string();
-                let index = Self::parse_index(&chunk[1].to_string_lossy())?;
-                let raw_value = chunk[2].to_string_lossy();
-
-                self.ops_with_indices.push((
-                    idx_chunk[0],
-                    EditOp::ArrayInsert {
-                        path,
-                        index,
-                        value: CliValueParser::parse_value(&raw_value),
-                        string_style: CliValueParser::detect_inline_string_style(&raw_value),
-                    },
-                ));
-            }
-        }
-
-        if let Some(removes) = self.matches.get_raw("array-remove") {
-            let vals: Vec<_> = removes.collect();
-            let indices = self.collect_indices("array-remove");
-
-            for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
-                if chunk.len() != 2 {
-                    continue;
-                }
-                let path = chunk[0].to_string_lossy().to_string();
-                let index = Self::parse_index(&chunk[1].to_string_lossy())?;
-                self.ops_with_indices
-                    .push((idx_chunk[0], EditOp::ArrayRemove { path, index }));
-            }
-        }
-
-        Ok(())
     }
 
     fn collect_comment_ops(&mut self) -> Result<()> {
@@ -381,7 +255,6 @@ impl<'a> EditOpCollector<'a> {
                     EditOp::CommentSet {
                         path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy()),
                         text: chunk[1].to_string_lossy().to_string(),
-                        style: None,
                     },
                 ));
             }
@@ -401,7 +274,6 @@ impl<'a> EditOpCollector<'a> {
                     EditOp::CommentAppend {
                         path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy()),
                         text: chunk[1].to_string_lossy().to_string(),
-                        style: None,
                     },
                 ));
             }
@@ -467,11 +339,6 @@ impl<'a> EditOpCollector<'a> {
     fn collect_indices(&self, name: &str) -> Vec<usize> {
         self.matches.indices_of(name).unwrap_or_default().collect()
     }
-
-    fn parse_index(raw: &str) -> Result<usize> {
-        raw.parse::<usize>()
-            .map_err(|_| anyhow::anyhow!("Invalid array index: {}", raw))
-    }
 }
 
 pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
@@ -487,63 +354,59 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     };
 
     let ops = collect_ops(matches)?;
-    let mut current_comment_style: Option<CommentStyle> = None;
-    let mut current_string_style: Option<StringStyle> = None;
 
     for op in ops {
         match op {
-            EditOp::SetCommentStyle(style) => current_comment_style = Some(style),
-            EditOp::SetStringStyle(style) => current_string_style = Some(style),
-            EditOp::ObjectSet {
+            EditOp::SetCommentStyle(style) => {
+                doc = doc.comment_style(style);
+            }
+            EditOp::SetStringStyle(style) => {
+                doc = doc.string_style(style);
+            }
+            EditOp::Set {
                 path,
                 value,
                 string_style,
             } => {
-                doc = doc.set_with_style(
-                    path.as_str(),
-                    value,
-                    string_style
-                        .or(current_string_style)
-                        .unwrap_or(StringStyle::Preserve),
-                )?;
+                let style = string_style.unwrap_or(StringStyle::Preserve);
+                doc = HjsonDocumentObjectEdit::set(doc.string_style(style), path.as_str(), value);
             }
-            EditOp::ObjectRemove { path } => doc = doc.remove(path.as_str())?,
-            EditOp::ArrayAppend {
-                path,
-                value,
-                string_style,
-            } => {
-                doc = doc.push_with_style(
-                    path.as_str(),
-                    value,
-                    string_style
-                        .or(current_string_style)
-                        .unwrap_or(StringStyle::Auto),
-                )?;
+            EditOp::Remove { path } => {
+                doc = HjsonDocumentObjectEdit::remove(doc, path.as_str());
             }
-            EditOp::ArrayInsert {
-                path,
-                index,
-                value,
-                string_style,
-            } => {
-                doc = doc.insert_at_with_style(
-                    path.as_str(),
-                    index,
-                    value,
-                    string_style
-                        .or(current_string_style)
-                        .unwrap_or(StringStyle::Auto),
-                )?;
+            EditOp::CommentSet { path, text } => {
+                let dot_path = match &path {
+                    CommentPath::Key { dot_path } => dot_path.as_str(),
+                    CommentPath::Inline { dot_path } => dot_path.as_str(),
+                    CommentPath::Header => ":header",
+                    CommentPath::Footer => ":footer",
+                };
+                doc = HjsonDocumentCommentEdit::set(doc, dot_path, text);
             }
-            EditOp::ArrayRemove { path, index } => doc = doc.remove_at(path.as_str(), index)?,
-            EditOp::CommentSet { path, text, style } => {
-                doc = doc.comment_set(&path, &text, style.or(current_comment_style))?;
+            EditOp::CommentAppend { path, text } => {
+                let dot_path = match &path {
+                    CommentPath::Key { dot_path } => dot_path.as_str(),
+                    CommentPath::Inline { dot_path } => dot_path.as_str(),
+                    CommentPath::Header => ":header",
+                    CommentPath::Footer => ":footer",
+                };
+                // getとsetを使ってappendを実装
+                let existing = HjsonDocumentCommentEdit::get(&doc, dot_path);
+                let new_comment = match existing {
+                    Some(existing) => format!("{}\n{}", existing, text),
+                    None => text,
+                };
+                doc = HjsonDocumentCommentEdit::set(doc, dot_path, new_comment);
             }
-            EditOp::CommentAppend { path, text, style } => {
-                doc = doc.comment_append(&path, &text, style.or(current_comment_style))?;
+            EditOp::CommentRemove { path } => {
+                let dot_path = match &path {
+                    CommentPath::Key { dot_path } => dot_path.as_str(),
+                    CommentPath::Inline { dot_path } => dot_path.as_str(),
+                    CommentPath::Header => ":header",
+                    CommentPath::Footer => ":footer",
+                };
+                doc = HjsonDocumentCommentEdit::remove(doc, dot_path);
             }
-            EditOp::CommentRemove { path } => doc = doc.comment_remove(&path)?,
         }
     }
 

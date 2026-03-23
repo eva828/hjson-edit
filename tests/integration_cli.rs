@@ -73,13 +73,8 @@ fn edit_array_operations() {
     let path = temp_path("array");
     fs::write(&path, r#"{"items": [1, 2]}"#).unwrap();
 
-    let (stdout, _, success) = run_cli(&[
-        "edit",
-        path.to_str().unwrap(),
-        "--array-append",
-        "items",
-        "3",
-    ]);
+    // array-append → set with items[-] path
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--set", "items[-]", "3"]);
     assert!(success);
     let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
     assert_eq!(
@@ -87,13 +82,8 @@ fn edit_array_operations() {
         Some(hjson_edit::HjsonValue::Integer(3))
     );
 
-    let (stdout, _, success) = run_cli(&[
-        "edit",
-        path.to_str().unwrap(),
-        "--array-remove",
-        "items",
-        "0",
-    ]);
+    // array-remove → remove with items[0] path
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--remove", "items[0]"]);
     assert!(success);
     let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
     assert_eq!(

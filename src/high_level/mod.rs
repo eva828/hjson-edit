@@ -9,6 +9,8 @@ pub mod style;
 pub mod value;
 
 use crate::high_level::error::HjsonEditError;
+use crate::high_level::ops::comment::CommentStyle;
+use crate::high_level::ops::object::StringStyle;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
 use line_index::LineIndex;
@@ -18,6 +20,8 @@ use rowan::GreenNode;
 #[derive(Debug, Clone)]
 pub struct HjsonDocument {
     green: GreenNode,
+    string_style: StringStyle,
+    commnt_style: CommentStyle,
 }
 
 impl HjsonDocument {
@@ -45,7 +49,19 @@ impl HjsonDocument {
 
         Ok(Self {
             green: result.green,
+            string_style: StringStyle::default(),
+            commnt_style: CommentStyle::default(),
         })
+    }
+
+    pub fn string_style(mut self, style: StringStyle) -> Self {
+        self.string_style = style;
+        self
+    }
+
+    pub fn comment_style(mut self, style: CommentStyle) -> Self {
+        self.commnt_style = style;
+        self
     }
 
     pub fn green_node(&self) -> &GreenNode {
@@ -54,5 +70,9 @@ impl HjsonDocument {
 
     pub fn into_green_node(self) -> GreenNode {
         self.green
+    }
+
+    pub fn to_string(&self) -> String {
+        self.green_node().to_string()
     }
 }
