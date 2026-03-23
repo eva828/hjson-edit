@@ -21,7 +21,7 @@ impl ParseError {
         }
     }
 
-    pub fn format(&self, line_index: &LineIndex) -> String {
+    pub fn format_with_line_index(&self, line_index: &LineIndex) -> String {
         let lc = line_index.line_col(TextSize::from(self.offset as u32));
         format!(
             "Error at line {}, column {}: {}",

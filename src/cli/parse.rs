@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use hjson_edit::{HjsonDocument, LineIndex, RedNode, RedToken, SyntaxKind};
+use hjson_edit::{high_level::HjsonDocument, RedNode, RedToken, SyntaxKind};
 
 pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
@@ -27,18 +27,7 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
             print!("{}", tree_view.buf);
             Ok(())
         }
-        Err(errors) => anyhow::bail!({
-            let line_index = LineIndex::new(&content);
-            let message = format!(
-                "Parse errors:\n  {}",
-                errors
-                    .iter()
-                    .map(|err| err.format(&line_index))
-                    .collect::<Vec<String>>()
-                    .join("\n  ")
-            );
-            message
-        }),
+        Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
     }
 }
 

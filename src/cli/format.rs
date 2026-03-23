@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
+use hjson_edit::high_level::HjsonDocument;
 use std::path::PathBuf;
 
 use hjson_edit::{FormatConfig, Formatter};
-use hjson_edit::{HjsonDocument, LineIndex};
 
 pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
@@ -17,17 +17,6 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
             print!("{}", formatted);
             Ok(())
         }
-        Err(errors) => anyhow::bail!({
-            let line_index = LineIndex::new(&content);
-            let message = format!(
-                "Parse errors:\n  {}",
-                errors
-                    .iter()
-                    .map(|err| err.format(&line_index))
-                    .collect::<Vec<String>>()
-                    .join("\n  ")
-            );
-            message
-        }),
+        Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
     }
 }

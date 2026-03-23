@@ -1,7 +1,17 @@
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 use anyhow::{Context, Result};
-use hjson_edit::{CommentPath, CommentStyle, HjsonDocument, HjsonValue, LineIndex, StringStyle};
+use hjson_edit::{
+    high_level::{
+        ops::{
+            comment::{CommentPath, CommentStyle},
+            object::StringStyle,
+        },
+        value::HjsonValue,
+        HjsonDocument,
+    },
+    LineIndex,
+};
 
 #[derive(Debug, Clone)]
 enum EditOp {
@@ -473,18 +483,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
 
     let mut doc = match HjsonDocument::parse(&content) {
         Ok(document) => document,
-        Err(errors) => {
-            let line_index = LineIndex::new(&content);
-            let message = format!(
-                "Parse errors:\n  {}",
-                errors
-                    .iter()
-                    .map(|err| err.format(&line_index))
-                    .collect::<Vec<String>>()
-                    .join("\n  ")
-            );
-            anyhow::bail!(message)
-        }
+        Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
     };
 
     let ops = collect_ops(matches)?;

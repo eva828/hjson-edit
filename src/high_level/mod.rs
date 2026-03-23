@@ -2,17 +2,15 @@
 //!
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
-pub(crate) mod error;
-pub(crate) mod ops;
-pub(crate) mod path;
-pub(crate) mod style;
-pub(crate) mod value;
+pub mod error;
+pub mod ops;
+pub mod path;
+pub mod style;
+pub mod value;
 
-use crate::document_style::{DetectNewline, DocumentStyle, NewlineKind};
 use crate::high_level::error::HjsonEditError;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
-use crate::ParseError;
 use line_index::LineIndex;
 use rowan::GreenNode;
 

@@ -30,7 +30,7 @@ pub enum HjsonEditError {
 fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex) -> String {
     errors
         .iter()
-        .map(|e| e.format(line_index))
+        .map(|e| e.format_with_line_index(line_index))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -38,7 +38,7 @@ fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex) -> String 
 fn format_lex_errors(errors: &[LexError], line_index: &LineIndex) -> String {
     errors
         .iter()
-        .map(|e| e.format(line_index))
+        .map(|e| e.format_with_line_index(line_index))
         .collect::<Vec<_>>()
         .join("\n")
 }
