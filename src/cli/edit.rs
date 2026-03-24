@@ -369,10 +369,10 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 string_style,
             } => {
                 let style = string_style.unwrap_or(StringStyle::Preserve);
-                doc = HjsonDocumentObjectEdit::set(doc.string_style(style), path.as_str(), value);
+                doc = HjsonDocumentObjectEdit::set(doc.string_style(style), path.as_str(), value)?;
             }
             EditOp::Remove { path } => {
-                doc = HjsonDocumentObjectEdit::remove(doc, path.as_str());
+                doc = HjsonDocumentObjectEdit::remove(doc, path.as_str())?;
             }
             EditOp::CommentSet { path, text } => {
                 let dot_path = match &path {

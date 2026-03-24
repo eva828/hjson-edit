@@ -1,5 +1,6 @@
 //! CLI integration tests
 
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 use std::fs;
 use std::path::PathBuf;
 
@@ -78,8 +79,8 @@ fn edit_array_operations() {
     assert!(success);
     let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
     assert_eq!(
-        doc.get("items[2]"),
-        Some(hjson_edit::HjsonValue::Integer(3))
+        doc.get("items[2]").unwrap(),
+        hjson_edit::HjsonValue::Integer(3)
     );
 
     // array-remove → remove with items[0] path
@@ -87,8 +88,8 @@ fn edit_array_operations() {
     assert!(success);
     let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
     assert_eq!(
-        doc.get("items[0]"),
-        Some(hjson_edit::HjsonValue::Integer(2))
+        doc.get("items[0]").unwrap(),
+        hjson_edit::HjsonValue::Integer(2)
     );
 
     fs::remove_file(&path).ok();
@@ -139,13 +140,10 @@ fn edit_type_inference() {
     fs::write(&path, "{}").unwrap();
 
     let test_cases = [
-        ("42", hjson_edit::HjsonValue::Integer(42)),
-        (
-            "3.14",
-            hjson_edit::HjsonValue::Float("3.14".parse().unwrap()),
-        ),
-        ("true", hjson_edit::HjsonValue::Bool(true)),
-        ("null", hjson_edit::HjsonValue::Null),
+        ("42", HjsonValue::Integer(42)),
+        ("3.14", HjsonValue::Float("3.14".parse().unwrap())),
+        ("true", HjsonValue::Bool(true)),
+        ("null", HjsonValue::Null),
     ];
 
     for (input, expected) in test_cases {
@@ -153,10 +151,10 @@ fn edit_type_inference() {
             run_cli(&["edit", path.to_str().unwrap(), "--set", "key", input]);
         assert!(success, "Type inference should work for: {}", input);
 
-        let doc = hjson_edit::HjsonDocument::parse(&stdout).unwrap();
+        let doc = HjsonDocument::parse(&stdout).unwrap();
         assert_eq!(
-            doc.get("key"),
-            Some(expected),
+            doc.get("key").unwrap(),
+            expected,
             "Type mismatch for: {}",
             input
         );

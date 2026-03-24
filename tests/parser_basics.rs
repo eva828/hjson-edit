@@ -1,6 +1,6 @@
 //! Parser basic tests - unified table-driven tests
 
-use hjson_edit::HjsonDocument;
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 
 /// Table-driven test for all root types
 #[test]
@@ -54,8 +54,8 @@ fn block_strings() {
     let doc = HjsonDocument::parse(input).unwrap();
 
     assert_eq!(
-        doc.get("text"),
-        Some(hjson_edit::HjsonValue::String("line1\n  line2".to_string()))
+        doc.get("text").unwrap(),
+        hjson_edit::HjsonValue::String("line1\n  line2".to_string())
     );
 
     let output = doc.to_string();
@@ -69,15 +69,15 @@ fn block_strings_with_crlf() {
     let doc = HjsonDocument::parse(input).unwrap();
 
     assert_eq!(
-        doc.get("text"),
-        Some(hjson_edit::HjsonValue::String("line1\n  line2".to_string()))
+        doc.get("text").unwrap(),
+        hjson_edit::HjsonValue::String("line1\n  line2".to_string())
     );
 
     let output = doc.to_string();
     assert_eq!(output, input);
 
     let reparsed = HjsonDocument::parse(&output).unwrap();
-    assert_eq!(reparsed.get("text"), doc.get("text"));
+    assert_eq!(reparsed.get("text").unwrap(), doc.get("text").unwrap());
 }
 
 #[test]
@@ -119,12 +119,12 @@ fn array_of_objects() {
 
     let doc = HjsonDocument::parse(input).unwrap();
     assert_eq!(
-        doc.get("[0].name"),
-        Some(hjson_edit::HjsonValue::String("first".to_string()))
+        doc.get("[0].name").unwrap(),
+        hjson_edit::HjsonValue::String("first".to_string())
     );
     assert_eq!(
-        doc.get("[1].value"),
-        Some(hjson_edit::HjsonValue::Integer(2))
+        doc.get("[1].value").unwrap(),
+        hjson_edit::HjsonValue::Integer(2)
     );
 }
 
@@ -138,49 +138,43 @@ fn json_string_escapes() {
     // 引用符のエスケープ
     let doc = HjsonDocument::parse(r#"{"key": "say \"hello\""}"#).unwrap();
     assert_eq!(
-        doc.get("key"),
-        Some(hjson_edit::HjsonValue::String("say \"hello\"".to_string()))
+        doc.get("key").unwrap(),
+        hjson_edit::HjsonValue::String("say \"hello\"".to_string())
     );
 
     // 改行とタブ
     let doc = HjsonDocument::parse(r#"{"text": "line1\nline2\ttabbed"}"#).unwrap();
     assert_eq!(
-        doc.get("text"),
-        Some(hjson_edit::HjsonValue::String(
-            "line1\nline2\ttabbed".to_string()
-        ))
+        doc.get("text").unwrap(),
+        hjson_edit::HjsonValue::String("line1\nline2\ttabbed".to_string())
     );
 
     // バックスラッシュ
     let doc = HjsonDocument::parse(r#"{"path": "C:\\Users\\test"}"#).unwrap();
     assert_eq!(
-        doc.get("path"),
-        Some(hjson_edit::HjsonValue::String(
-            "C:\\Users\\test".to_string()
-        ))
+        doc.get("path").unwrap(),
+        hjson_edit::HjsonValue::String("C:\\Users\\test".to_string())
     );
 
     // Unicodeエスケープ \u0041 = 'A', \u0042 = 'B'
     let doc = HjsonDocument::parse(r#"{"unicode": "\u0041\u0042\u0043"}"#).unwrap();
     assert_eq!(
-        doc.get("unicode"),
-        Some(hjson_edit::HjsonValue::String("ABC".to_string()))
+        doc.get("unicode").unwrap(),
+        hjson_edit::HjsonValue::String("ABC".to_string())
     );
 
     // Unicodeエスケープ（絵文字）\u1F600 = 😀
     let doc = HjsonDocument::parse(r#"{"emoji": "\uD83D\uDE00"}"#).unwrap();
     assert_eq!(
-        doc.get("emoji"),
-        Some(hjson_edit::HjsonValue::String("😀".to_string()))
+        doc.get("emoji").unwrap(),
+        hjson_edit::HjsonValue::String("😀".to_string())
     );
 
     // 複合エスケープ
     let doc = HjsonDocument::parse(r#"{"mixed": "Tab:\there\\Newline:\nQuote:\"End"}"#).unwrap();
     assert_eq!(
-        doc.get("mixed"),
-        Some(hjson_edit::HjsonValue::String(
-            "Tab:\there\\Newline:\nQuote:\"End".to_string()
-        ))
+        doc.get("mixed").unwrap(),
+        hjson_edit::HjsonValue::String("Tab:\there\\Newline:\nQuote:\"End".to_string())
     );
 }
 
@@ -197,7 +191,7 @@ fn number_exponent_notation() {
 
     for (name, input, expected) in cases {
         let doc = HjsonDocument::parse(&format!("{{ value: {} }}", input)).unwrap();
-        if let Some(hjson_edit::HjsonValue::Float(v)) = doc.get("value") {
+        if let Ok(hjson_edit::HjsonValue::Float(v)) = doc.get("value") {
             assert!(
                 (v - expected).abs() < f64::EPSILON,
                 "{}: expected {}, got {}",
@@ -226,8 +220,8 @@ fn literal_and_number_end_checking() {
     for (name, input, expected) in cases {
         let doc = HjsonDocument::parse(input).expect(name);
         assert_eq!(
-            doc.get("key"),
-            Some(hjson_edit::HjsonValue::String(expected.to_string())),
+            doc.get("key").unwrap(),
+            hjson_edit::HjsonValue::String(expected.to_string()),
             "{}: should be parsed as string, not literal/number",
             name
         );

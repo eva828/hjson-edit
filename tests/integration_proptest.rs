@@ -1,5 +1,6 @@
 //! Property-based roundtrip tests
 
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 use proptest::prelude::*;
 
 proptest! {
@@ -24,9 +25,9 @@ proptest! {
             s
         };
 
-        let doc = hjson_edit::HjsonDocument::parse(&obj).unwrap();
+        let doc = HjsonDocument::parse(&obj).unwrap();
         let output = doc.to_string();
-        let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+        let reparsed = HjsonDocument::parse(&output).unwrap();
         prop_assert_eq!(output, reparsed.to_string());
     }
 
@@ -36,9 +37,9 @@ proptest! {
     ) {
         let arr = format!("[{}]", items.join(", "));
 
-        let doc = hjson_edit::HjsonDocument::parse(&arr).unwrap();
+        let doc = HjsonDocument::parse(&arr).unwrap();
         let output = doc.to_string();
-        let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+        let reparsed = HjsonDocument::parse(&output).unwrap();
         prop_assert_eq!(output, reparsed.to_string());
     }
 
@@ -48,8 +49,8 @@ proptest! {
         s in "[a-zA-Z_][a-zA-Z0-9_]{0,20}"
     ) {
         let input = format!("key: {}\n", s);
-        let doc = hjson_edit::HjsonDocument::parse(&input).unwrap();
-        prop_assert!(doc.get("key").is_some());
+        let doc = HjsonDocument::parse(&input).unwrap();
+        prop_assert!(doc.get("key").is_ok());
     }
 }
 
@@ -64,9 +65,9 @@ fn deep_nesting_roundtrip() {
         input.push_str(" }");
     }
 
-    let doc = hjson_edit::HjsonDocument::parse(&input).unwrap();
+    let doc = HjsonDocument::parse(&input).unwrap();
     let output = doc.to_string();
-    let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+    let reparsed = HjsonDocument::parse(&output).unwrap();
     assert_eq!(output, reparsed.to_string());
 }
 
@@ -81,9 +82,9 @@ fn unicode_roundtrip() {
     ];
 
     for input in cases {
-        let doc = hjson_edit::HjsonDocument::parse(input).unwrap();
+        let doc = HjsonDocument::parse(input).unwrap();
         let output = doc.to_string();
-        let reparsed = hjson_edit::HjsonDocument::parse(&output).unwrap();
+        let reparsed = HjsonDocument::parse(&output).unwrap();
         assert_eq!(
             output,
             reparsed.to_string(),

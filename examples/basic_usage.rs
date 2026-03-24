@@ -1,4 +1,4 @@
-use hjson_edit::HjsonDocument;
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -16,19 +16,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     let doc = HjsonDocument::parse(input).map_err(|e| format!("Parse errors: {:?}", e))?;
 
     // Read values using dot notation or array indexing
-    if let Some(val) = doc.get("dependencies.clap") {
-        println!("clap version: {:?}", val);
+    match doc.get("dependencies.clap") {
+        Ok(val) => println!("clap version: {:?}", val),
+        Err(e) => println!("Error getting value: {:?}", e),
     }
 
-    // Modify the document
+    // Modify the document - each operation returns a Result
     let updated = doc
         .set("version", "0.1.0")? // Adds a new key
         .set("dependencies.clap", "4.6")? // Updates an existing key
-        .push("features", "extra")? // Adds to an array
+        .set("features[-]", "extra")? // Adds to an array using push syntax
         .remove("name")?; // Removes a key
 
     println!("\n=== Modified ===");
-    println!("{}", updated);
+    println!("{}", updated.to_string());
 
     Ok(())
 }

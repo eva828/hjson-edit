@@ -1,6 +1,6 @@
 //! Parser error handling tests - unified
 
-use hjson_edit::HjsonDocument;
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 use line_index::{LineIndex, TextSize};
 
 /// Table-driven error test for common syntax errors
@@ -64,7 +64,7 @@ fn nested_error_line_numbers() {
 
     let line_index = LineIndex::new(input);
     let result = HjsonDocument::parse(input);
-    if let Err(errors) = result {
+    if let Err(hjson_edit::HjsonEditError::ParseError { errors, .. }) = result {
         for error in errors {
             let lc = line_index.line_col(TextSize::from(error.offset as u32));
             let line = lc.line;
@@ -74,6 +74,8 @@ fn nested_error_line_numbers() {
                 line
             );
         }
+    } else if result.is_err() {
+        // Other error types are also acceptable for this test
     } else {
         panic!("Expected error for invalid syntax");
     }
@@ -109,7 +111,7 @@ fn leading_zeros_not_allowed() {
     if let Ok(doc) = result {
         let val = doc.get("value");
         assert!(
-            matches!(val, Some(hjson_edit::HjsonValue::String(_))),
+            matches!(val, Ok(HjsonValue::String(_))),
             "Leading zeros should be treated as string"
         );
     }

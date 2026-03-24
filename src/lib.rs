@@ -14,6 +14,14 @@ pub(crate) mod syntax;
 
 // 公開APIを再エクスポート
 pub use format::{FormatConfig, Formatter};
+pub use high_level::{
+    error::HjsonEditError,
+    ops::comment::{CommentPath, CommentStyle},
+    ops::object::{HjsonDocumentObjectEdit, StringStyle},
+    path::{ArrayPathSegment, HjsonPath, ObjectPathSegment, PathSegment},
+    value::HjsonValue,
+    HjsonDocument,
+};
 pub use line_index::LineIndex;
 pub use syntax::ext::RedNodeExt;
 pub use syntax::parser::ParseError;

@@ -1,4 +1,6 @@
 use super::{RedElement, RedNode, SyntaxKind};
+use crate::high_level::error::HjsonEditError;
+use crate::high_level::path::ArrayPathSegment;
 
 /// GreenNodeユーティリティ拡張
 pub trait GreenNodeExt {
@@ -37,6 +39,12 @@ pub trait RedNodeExt {
 
     /// GreenNodeを再構築する
     fn to_green(&self) -> rowan::GreenNode;
+
+    /// Object内でキー検索
+    fn find_pair_by_key(&self, key: &str) -> Option<RedNode>;
+
+    /// Array内で要素取得
+    fn get_array_element(&self, op: &ArrayPathSegment) -> Result<Option<RedNode>, HjsonEditError>;
 }
 
 impl RedNodeExt for RedNode {
@@ -66,5 +74,72 @@ impl RedNodeExt for RedNode {
         let mut builder = GreenNodeBuilder::new();
         build_recursive(&mut builder, &rowan::NodeOrToken::Node(self.clone()));
         builder.finish()
+    }
+
+    fn find_pair_by_key(&self, key: &str) -> Option<RedNode> {
+        if self.kind() != SyntaxKind::Object {
+            return None;
+        }
+
+        self.children()
+            .filter(|child| child.kind() == SyntaxKind::Pair)
+            .find(|pair| {
+                pair.children()
+                    .find(|child| child.kind() == SyntaxKind::Key)
+                    .and_then(|key_node| {
+                        key_node.children_with_tokens().find_map(|elem| {
+                            if let rowan::NodeOrToken::Token(token) = elem {
+                                if matches!(
+                                    token.kind(),
+                                    SyntaxKind::String
+                                        | SyntaxKind::UnquotedString
+                                        | SyntaxKind::BlockString
+                                ) {
+                                    return Some(token.text().trim_matches('"').to_string());
+                                }
+                            }
+                            None
+                        })
+                    })
+                    .map(|k| k == key)
+                    .unwrap_or(false)
+            })
+    }
+
+    fn get_array_element(&self, op: &ArrayPathSegment) -> Result<Option<RedNode>, HjsonEditError> {
+        if self.kind() != SyntaxKind::Array {
+            return Ok(None);
+        }
+
+        let elements: Vec<RedNode> = self
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::Value)
+            .collect();
+
+        match op {
+            ArrayPathSegment::Index(idx) => {
+                if *idx >= elements.len() {
+                    Err(HjsonEditError::ChildNotFound(vec![]))
+                } else {
+                    Ok(elements.into_iter().nth(*idx))
+                }
+            }
+            ArrayPathSegment::InsertAt(idx) => {
+                // Return position info for insertion
+                if *idx > elements.len() {
+                    Err(HjsonEditError::ChildNotFound(vec![]))
+                } else if *idx == elements.len() {
+                    // Insert at end (push)
+                    Ok(None)
+                } else {
+                    // Return the element at this index (will insert before it)
+                    Ok(elements.into_iter().nth(*idx))
+                }
+            }
+            ArrayPathSegment::Push => {
+                // Always insert at end
+                Ok(None)
+            }
+        }
     }
 }

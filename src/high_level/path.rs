@@ -1,39 +1,103 @@
+use crate::high_level::error::HjsonEditError;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ObjectPathSegment {
+    Key(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrayPathSegment {
+    Index(usize),    // [n]
+    InsertAt(usize), // [+n]
+    Push,            // [-]
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathSegment {
-    Key(String),
-    Index(usize),
+    Object(ObjectPathSegment),
+    Array(ArrayPathSegment),
 }
 
 pub struct HjsonPath {
-    segments: Vec<PathSegment>,
+    pub segments: Vec<PathSegment>,
 }
 
 impl HjsonPath {
     pub fn new(path: impl Into<HjsonPath>) -> Self {
         path.into()
     }
+
+    pub fn parse_dot_path(s: &str) -> Result<Self, HjsonEditError> {
+        let mut segments = Vec::new();
+        let mut chars = s.chars().peekable();
+
+        while chars.peek().is_some() {
+            // Parse key part
+            let mut key = String::new();
+            let mut in_brackets = false;
+
+            while let Some(&c) = chars.peek() {
+                if c == '.' {
+                    chars.next();
+                    break;
+                } else if c == '[' {
+                    in_brackets = true;
+                    break;
+                } else {
+                    key.push(c);
+                    chars.next();
+                }
+            }
+
+            if !key.is_empty() {
+                segments.push(PathSegment::Object(ObjectPathSegment::Key(key)));
+            }
+
+            // Parse array index if present
+            if in_brackets {
+                chars.next(); // consume '['
+
+                // Check for special operators
+                let mut op_str = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c == ']' {
+                        break;
+                    } else {
+                        op_str.push(c);
+                        chars.next();
+                    }
+                }
+
+                // Expect closing bracket
+                if chars.peek() != Some(&']') {
+                    return Err(HjsonEditError::ChildNotFound(vec![]));
+                }
+                chars.next(); // consume ']'
+
+                // Parse the operation
+                if op_str == "-" {
+                    segments.push(PathSegment::Array(ArrayPathSegment::Push));
+                } else if op_str.starts_with('+') {
+                    let idx: usize = op_str[1..]
+                        .parse()
+                        .map_err(|_| HjsonEditError::ChildNotFound(vec![]))?;
+                    segments.push(PathSegment::Array(ArrayPathSegment::InsertAt(idx)));
+                } else {
+                    let idx: usize = op_str
+                        .parse()
+                        .map_err(|_| HjsonEditError::ChildNotFound(vec![]))?;
+                    segments.push(PathSegment::Array(ArrayPathSegment::Index(idx)));
+                }
+            }
+        }
+
+        Ok(HjsonPath { segments })
+    }
 }
 
 impl Into<HjsonPath> for &str {
     fn into(self) -> HjsonPath {
-        unimplemented!("Initialize path from a single string is not supported. Use a vector of strings or PathSegments instead.");
-    }
-}
-
-impl Into<HjsonPath> for &[&str] {
-    fn into(self) -> HjsonPath {
-        HjsonPath {
-            segments: self
-                .iter()
-                .map(|s| PathSegment::Key(s.to_string()))
-                .collect(),
-        }
-    }
-}
-
-impl Into<HjsonPath> for Vec<PathSegment> {
-    fn into(self) -> HjsonPath {
-        HjsonPath { segments: self }
+        HjsonPath::parse_dot_path(self).unwrap_or_else(|_| HjsonPath { segments: vec![] })
     }
 }
 
@@ -42,5 +106,11 @@ impl Into<HjsonPath> for &[PathSegment] {
         HjsonPath {
             segments: self.to_vec(),
         }
+    }
+}
+
+impl Into<HjsonPath> for Vec<PathSegment> {
+    fn into(self) -> HjsonPath {
+        HjsonPath { segments: self }
     }
 }
