@@ -3,13 +3,15 @@ use line_index::LineIndex;
 use crate::{
     high_level::{path::PathSegment, value::HjsonValue},
     syntax::lexer::LexError,
-    ParseError,
+    HjsonPath, ParseError,
 };
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum HjsonEditError {
     #[error("Path not found: {0:?}")]
-    ChildNotFound(Vec<PathSegment>),
+    PathNotFound(HjsonPath),
+    #[error("Invalid path: {0:?}")]
+    InvalidPath(String),
     #[error("Type mismatch: expected {expected:?}, found {found:?}")]
     TypeMismatch {
         expected: HjsonValue,

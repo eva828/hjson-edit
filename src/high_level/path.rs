@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::high_level::error::HjsonEditError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +20,7 @@ pub enum PathSegment {
     Array(ArrayPathSegment),
 }
 
+#[derive(Debug, Clone)]
 pub struct HjsonPath {
     pub segments: Vec<PathSegment>,
 }
@@ -70,7 +73,7 @@ impl HjsonPath {
 
                 // Expect closing bracket
                 if chars.peek() != Some(&']') {
-                    return Err(HjsonEditError::ChildNotFound(vec![]));
+                    return Err(HjsonEditError::InvalidPath(s.to_string()));
                 }
                 chars.next(); // consume ']'
 
@@ -80,12 +83,12 @@ impl HjsonPath {
                 } else if op_str.starts_with('+') {
                     let idx: usize = op_str[1..]
                         .parse()
-                        .map_err(|_| HjsonEditError::ChildNotFound(vec![]))?;
+                        .map_err(|_| HjsonEditError::InvalidPath(s.to_string()))?;
                     segments.push(PathSegment::Array(ArrayPathSegment::InsertAt(idx)));
                 } else {
                     let idx: usize = op_str
                         .parse()
-                        .map_err(|_| HjsonEditError::ChildNotFound(vec![]))?;
+                        .map_err(|_| HjsonEditError::InvalidPath(s.to_string()))?;
                     segments.push(PathSegment::Array(ArrayPathSegment::Index(idx)));
                 }
             }

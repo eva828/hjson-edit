@@ -1,3 +1,7 @@
+use rowan::Language;
+
+use crate::{syntax::HjsonLanguage, RedNode, SyntaxKind};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum HjsonValue {
     String(String),
@@ -60,5 +64,65 @@ impl From<Vec<HjsonValue>> for HjsonValue {
 impl From<Vec<(String, HjsonValue)>> for HjsonValue {
     fn from(v: Vec<(String, HjsonValue)>) -> Self {
         HjsonValue::Object(v)
+    }
+}
+
+impl From<RedNode> for HjsonValue {
+    fn from(v: RedNode) -> Self {
+        match v.kind() {
+            SyntaxKind::Value => v
+                .children()
+                .next()
+                .map(|child| child.into())
+                .unwrap_or(HjsonValue::Null),
+            SyntaxKind::Integer => {
+                HjsonValue::from(v.text().to_string().parse::<i64>().unwrap_or_default())
+            }
+            SyntaxKind::Float => {
+                HjsonValue::from(v.text().to_string().parse::<f64>().unwrap_or_default())
+            }
+            SyntaxKind::True => HjsonValue::Bool(true),
+            SyntaxKind::False => HjsonValue::Bool(false),
+            SyntaxKind::String => HjsonValue::String(v.text().to_string()),
+            SyntaxKind::UnquotedString => HjsonValue::String(v.text().to_string()),
+            SyntaxKind::BlockString => HjsonValue::String(v.text().to_string()),
+            SyntaxKind::Object => {
+                let pairs = v
+                    .children()
+                    .filter(|child| {
+                        HjsonLanguage::kind_from_raw(child.kind().into()) == SyntaxKind::Pair
+                    })
+                    .map(|child| {
+                        let key = child
+                            .children()
+                            .find(|child| {
+                                HjsonLanguage::kind_from_raw(child.kind().into()) == SyntaxKind::Key
+                            })
+                            .map(|child| child.text().to_string())
+                            .unwrap_or_default();
+                        let value = child
+                            .children()
+                            .find(|child| {
+                                HjsonLanguage::kind_from_raw(child.kind().into())
+                                    == SyntaxKind::Value
+                            })
+                            .map(|child| child.into())
+                            .unwrap_or(HjsonValue::Null);
+                        (key, value)
+                    });
+                HjsonValue::Object(pairs.collect())
+            }
+            SyntaxKind::Array => HjsonValue::Array(
+                v.children()
+                    .filter(|child| {
+                        HjsonLanguage::kind_from_raw(child.kind().into()) == SyntaxKind::Value
+                    })
+                    .map(|child| child.into())
+                    .collect(),
+            ),
+            _ => {
+                unimplemented!("Unsupported syntax kind: {:?}", v.kind())
+            }
+        }
     }
 }
