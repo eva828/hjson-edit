@@ -19,7 +19,7 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
-            let red = RedNode::new_root(document.green_node().clone());
+            let red = document.root();
 
             let console_config = ConsoleConfig::new(simple, color_mode);
             let mut tree_view = TreeViewBuilder::new(console_config, show_trivia);
@@ -132,15 +132,16 @@ impl TreeViewBuilder {
             .collect()
     }
 
-    fn dump_node(&mut self, node: RedNode, is_last: bool) -> Result<()> {
+    fn dump_node(&mut self, node: &RedNode, is_last: bool) -> Result<()> {
         let kind = self.colorize(node.kind().to_string().as_str(), node.kind());
         let is_root = node.kind() == SyntaxKind::Root;
         writeln!(
             self.buf,
-            "{}{}{}",
+            "{}{}{}{:?}",
             self.indent(),
             self.connector(is_root, is_last),
-            &kind
+            &kind,
+            node.text_range()
         )?;
 
         if !is_root {
@@ -152,10 +153,10 @@ impl TreeViewBuilder {
             let is_last = children.peek().is_none();
             match item {
                 rowan::NodeOrToken::Node(n) => {
-                    self.dump_node(n, is_last)?;
+                    self.dump_node(&n, is_last)?;
                 }
                 rowan::NodeOrToken::Token(t) => {
-                    self.dump_token(t, is_last)?;
+                    self.dump_token(&t, is_last)?;
                 }
             }
         }
@@ -167,17 +168,18 @@ impl TreeViewBuilder {
         Ok(())
     }
 
-    fn dump_token(&mut self, token: RedToken, is_last: bool) -> Result<()> {
+    fn dump_token(&mut self, token: &RedToken, is_last: bool) -> Result<()> {
         let kind = token.kind();
 
         let token_str = format!("{:?}: {:?}", kind, token.text());
 
         writeln!(
             self.buf,
-            "{}{}{}",
+            "{}{}{}{:?}",
             self.indent(),
             self.connector(false, is_last),
-            self.colorize(&token_str, kind)
+            self.colorize(&token_str, kind),
+            token.text_range()
         )?;
 
         Ok(())

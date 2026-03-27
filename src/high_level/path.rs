@@ -96,6 +96,25 @@ impl HjsonPath {
 
         Ok(HjsonPath { segments })
     }
+
+    pub fn split_first(&self) -> Option<(PathSegment, Self)> {
+        let first = self.segments.first()?.clone();
+        let rest = self.segments[1..].to_vec();
+        Some((first, Self { segments: rest }))
+    }
+
+    pub fn split_last(&self) -> Option<(Self, PathSegment)> {
+        if self.segments.is_empty() {
+            return None;
+        }
+        let mut parent = self.segments.clone();
+        let last = parent.pop()?;
+        Some((Self { segments: parent }, last))
+    }
+
+    pub fn depth(&self) -> usize {
+        self.segments.len()
+    }
 }
 
 impl Into<HjsonPath> for &str {
@@ -115,5 +134,13 @@ impl Into<HjsonPath> for &[PathSegment] {
 impl Into<HjsonPath> for Vec<PathSegment> {
     fn into(self) -> HjsonPath {
         HjsonPath { segments: self }
+    }
+}
+
+impl ObjectPathSegment {
+    pub fn match_key(&self, key: &str) -> bool {
+        match self {
+            ObjectPathSegment::Key(k) => k == key,
+        }
     }
 }

@@ -381,7 +381,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                     CommentPath::Header => ":header",
                     CommentPath::Footer => ":footer",
                 };
-                doc = HjsonDocumentCommentEdit::set(doc, dot_path, text);
+                doc = HjsonDocumentCommentEdit::set(doc, dot_path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
                 let dot_path = match &path {
@@ -391,12 +391,12 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                     CommentPath::Footer => ":footer",
                 };
                 // getとsetを使ってappendを実装
-                let existing = HjsonDocumentCommentEdit::get(&doc, dot_path);
+                let existing = HjsonDocumentCommentEdit::get(&doc, dot_path)?;
                 let new_comment = match existing {
                     Some(existing) => format!("{}\n{}", existing, text),
                     None => text,
                 };
-                doc = HjsonDocumentCommentEdit::set(doc, dot_path, new_comment);
+                doc = HjsonDocumentCommentEdit::set(doc, dot_path, new_comment)?;
             }
             EditOp::CommentRemove { path } => {
                 let dot_path = match &path {
@@ -405,7 +405,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                     CommentPath::Header => ":header",
                     CommentPath::Footer => ":footer",
                 };
-                doc = HjsonDocumentCommentEdit::remove(doc, dot_path);
+                doc = HjsonDocumentCommentEdit::remove(doc, dot_path)?;
             }
         }
     }

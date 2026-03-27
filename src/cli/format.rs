@@ -11,9 +11,9 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
-            let node = document.into_green_node();
+            let node = document.root().green();
             let config = FormatConfig::default();
-            let formatted = Formatter::format_with_depth(node, 0, config);
+            let formatted = Formatter::format_with_depth(node.into(), 0, config);
             print!("{}", formatted);
             Ok(())
         }

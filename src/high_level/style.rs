@@ -1,7 +1,5 @@
-use crate::high_level::HjsonDocument;
 use crate::syntax::GreenElement;
 use crate::syntax::{HjsonLanguage, SyntaxKind};
-use crate::{RedNode, RedNodeExt};
 use rowan::{Language, NodeOrToken};
 
 /// 改行コードの種類

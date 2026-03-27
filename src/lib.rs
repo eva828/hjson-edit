@@ -23,7 +23,6 @@ pub use high_level::{
     HjsonDocument,
 };
 pub use line_index::LineIndex;
-pub use syntax::ext::RedNodeExt;
 pub use syntax::parser::ParseError;
 pub use syntax::GreenElement;
 pub use syntax::SyntaxKind;
