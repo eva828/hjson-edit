@@ -22,6 +22,7 @@ impl HjsonDocument {
         walker
             .last()
             .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))
+            .flatten()
     }
 
     pub fn set_internal(

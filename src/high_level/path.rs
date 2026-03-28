@@ -98,18 +98,26 @@ impl HjsonPath {
     }
 
     pub fn split_first(&self) -> Option<(PathSegment, Self)> {
-        let first = self.segments.first()?.clone();
-        let rest = self.segments[1..].to_vec();
-        Some((first, Self { segments: rest }))
+        let (left, right) = self.split_at(1)?;
+        let first = left.segments.into_iter().next()?;
+        Some((first, right))
     }
 
     pub fn split_last(&self) -> Option<(Self, PathSegment)> {
         if self.segments.is_empty() {
             return None;
         }
-        let mut parent = self.segments.clone();
-        let last = parent.pop()?;
-        Some((Self { segments: parent }, last))
+        let (left, mut right) = self.split_at(self.segments.len() - 1)?;
+        let last = right.segments.pop()?;
+        Some((left, last))
+    }
+
+    pub fn split_at(&self, index: usize) -> Option<(Self, Self)> {
+        if index > self.segments.len() {
+            return None;
+        }
+        let (left, right) = self.segments.split_at(index);
+        Some((Self::new(left.to_vec()), Self::new(right.to_vec())))
     }
 
     pub fn depth(&self) -> usize {
