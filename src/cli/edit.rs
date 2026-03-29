@@ -96,7 +96,7 @@ pub fn edit_command() -> Command {
                 .long("string-style")
                 .action(ArgAction::Append)
                 .value_name("STYLE")
-                .value_parser(["preserve", "auto", "double", "block", "unquoted"])
+                .value_parser(["preserve", "double", "block", "unquoted"])
                 .help("Set string style for subsequent set operations"),
         )
         .arg(
@@ -323,7 +323,6 @@ impl<'a> EditOpCollector<'a> {
             for (idx, val) in indices.iter().zip(styles) {
                 let style = match val.to_string_lossy().as_ref() {
                     "preserve" => StringStyle::Preserve,
-                    "auto" => StringStyle::Auto,
                     "double" => StringStyle::DoubleQuoted,
                     "block" => StringStyle::Block,
                     "unquoted" => StringStyle::Unquoted,
@@ -375,13 +374,27 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 doc = HjsonDocumentObjectEdit::remove(doc, path.as_str())?;
             }
             EditOp::CommentSet { path, text } => {
-                let dot_path = match &path {
-                    CommentPath::Key { dot_path } => dot_path.as_str(),
-                    CommentPath::Inline { dot_path } => dot_path.as_str(),
-                    CommentPath::Header => ":header",
-                    CommentPath::Footer => ":footer",
+                doc = match path {
+                    CommentPath::Header => {
+                        let newline = if content.contains("\r\n") {
+                            "\r\n"
+                        } else {
+                            "\n"
+                        };
+                        HjsonDocument::parse(&format!("// {}{}{}", text, newline, doc.to_string()))?
+                    }
+                    CommentPath::Footer => {
+                        let newline = if content.contains("\r\n") {
+                            "\r\n"
+                        } else {
+                            "\n"
+                        };
+                        HjsonDocument::parse(&format!("{}{}// {}", doc.to_string(), newline, text))?
+                    }
+                    CommentPath::Key { dot_path } | CommentPath::Inline { dot_path } => {
+                        HjsonDocumentCommentEdit::set(doc, dot_path.as_str(), text)?
+                    }
                 };
-                doc = HjsonDocumentCommentEdit::set(doc, dot_path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
                 let dot_path = match &path {
@@ -411,6 +424,13 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     }
 
     let result = doc.to_string();
+    let result = if content.ends_with("\r\n") && !result.ends_with("\r\n") {
+        format!("{}\r\n", result)
+    } else if content.ends_with('\n') && !result.ends_with('\n') {
+        format!("{}\n", result)
+    } else {
+        result
+    };
     if matches.get_flag("in-place") {
         std::fs::write(path, &result)
             .with_context(|| format!("Failed to write file: {}", path.display()))?;

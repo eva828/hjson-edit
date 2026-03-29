@@ -78,7 +78,6 @@ impl Pair {
                 .children_with_tokens()
                 .nth(i)
                 .ok_or_else(|| HjsonEditError::ParentNotFound)?;
-            println!("Sibling kind: {:?}", sibling.kind());
             if !sibling.kind().is_trivia() && sibling.kind() != SyntaxKind::Comma {
                 break;
             }

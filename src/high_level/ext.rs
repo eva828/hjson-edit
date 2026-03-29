@@ -12,12 +12,22 @@ impl RedNodeExt for RedNode {
     }
 
     fn child(&self, segment: &PathSegment) -> Option<RedNode> {
+        if self.kind() == SyntaxKind::Value {
+            return self
+                .children()
+                .next()
+                .and_then(|child| child.child(segment));
+        }
+
         match segment {
             PathSegment::Object(segment) if self.kind() == SyntaxKind::Object => self
                 .children_by_kind(SyntaxKind::Pair)
                 .filter(|pair| {
                     pair.children_by_kind(SyntaxKind::Key)
-                        .map(|key| key.text().to_string())
+                        .map(|key| {
+                            let text = key.text().to_string();
+                            text.trim_matches('"').to_string()
+                        })
                         .any(|key| segment.match_key(&key))
                 })
                 .flat_map(|pair| pair.children_by_kind(SyntaxKind::Value).next())

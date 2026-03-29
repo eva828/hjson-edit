@@ -68,6 +68,14 @@ impl HjsonDocument {
         self
     }
 
+    pub fn current_string_style(&self) -> StringStyle {
+        self.string_style
+    }
+
+    pub fn current_comment_style(&self) -> CommentStyle {
+        self.commnt_style
+    }
+
     pub fn root(&self) -> &RedNode {
         &self.root
     }

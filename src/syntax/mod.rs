@@ -277,5 +277,3 @@ pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
 pub type RedNode = SyntaxNode<HjsonLanguage>;
 /// RedToken型エイリアス
 pub type RedToken = SyntaxToken<HjsonLanguage>;
-/// RedElement型エイリアス
-pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;

@@ -1,8 +1,6 @@
 use std::ops::Range;
 
-use crate::{
-    high_level::ext::RedNodeExt, HjsonDocument, HjsonEditError, HjsonPath, PathSegment, RedNode,
-};
+use crate::{high_level::ext::RedNodeExt, HjsonEditError, HjsonPath, RedNode};
 
 pub struct PathWalker<'a> {
     current: RedNode,
@@ -25,15 +23,20 @@ impl<'a> Iterator for PathWalker<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.index_iter.next()?;
-        let (path_part, _) = self.path.split_at(index).unwrap();
-        println!("path_part: {:?}", path_part);
-        let (_, path_last) = path_part.split_last().unwrap();
+        let segment = &self.path.segments[index];
+        let (path_part, _) = self.path.split_at(index + 1).unwrap();
 
         let child = self
             .current
-            .child(&path_last)
+            .child(segment)
             .ok_or_else(|| HjsonEditError::PathNotFound(path_part));
 
-        Some(child)
+        match child {
+            Ok(ref node) => {
+                self.current = node.clone();
+                Some(child)
+            }
+            Err(_) => Some(child),
+        }
     }
 }

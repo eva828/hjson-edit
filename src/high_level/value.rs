@@ -1,5 +1,6 @@
-use rowan::{GreenNode, GreenToken, Language, NodeOrToken};
+use rowan::{GreenNode, Language, NodeOrToken};
 
+use crate::high_level::ops::object::StringStyle;
 use crate::{syntax::HjsonLanguage, RedNode, SyntaxKind};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,12 +69,235 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
+    pub fn to_hjson_string(&self) -> String {
+        match self {
+            HjsonValue::String(s) => render_hjson_string(s),
+            HjsonValue::Integer(n) => n.to_string(),
+            HjsonValue::Float(f) => f.to_string(),
+            HjsonValue::Bool(b) => b.to_string(),
+            HjsonValue::Null => "null".to_string(),
+            HjsonValue::Array(items) => {
+                let items = items
+                    .iter()
+                    .map(|v| v.to_hjson_string())
+                    .collect::<Vec<_>>();
+                format!("[{}]", items.join(", "))
+            }
+            HjsonValue::Object(entries) => {
+                let entries = entries
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", render_hjson_key(k), v.to_hjson_string()))
+                    .collect::<Vec<_>>();
+                format!("{{{}}}", entries.join(", "))
+            }
+        }
+    }
+
+    pub fn to_pretty_hjson_string(&self, indent_unit: &str, newline: &str, depth: usize) -> String {
+        match self {
+            HjsonValue::String(s) => render_hjson_string(s),
+            HjsonValue::Integer(n) => n.to_string(),
+            HjsonValue::Float(f) => f.to_string(),
+            HjsonValue::Bool(b) => b.to_string(),
+            HjsonValue::Null => "null".to_string(),
+            HjsonValue::Array(items) => {
+                if items.is_empty() {
+                    return "[]".to_string();
+                }
+
+                let child_indent = indent_unit.repeat(depth + 1);
+                let end_indent = indent_unit.repeat(depth);
+                let mut out = String::from("[");
+                out.push_str(newline);
+                for item in items {
+                    out.push_str(&child_indent);
+                    out.push_str(&item.to_pretty_hjson_string(indent_unit, newline, depth + 1));
+                    out.push_str(newline);
+                }
+                out.push_str(&end_indent);
+                out.push(']');
+                out
+            }
+            HjsonValue::Object(entries) => {
+                if entries.is_empty() {
+                    return "{}".to_string();
+                }
+
+                let child_indent = indent_unit.repeat(depth + 1);
+                let end_indent = indent_unit.repeat(depth);
+                let mut out = String::from("{");
+                out.push_str(newline);
+                for (key, value) in entries {
+                    out.push_str(&child_indent);
+                    out.push_str(&render_hjson_key(key));
+                    out.push_str(": ");
+                    out.push_str(&value.to_pretty_hjson_string(indent_unit, newline, depth + 1));
+                    out.push_str(newline);
+                }
+                out.push_str(&end_indent);
+                out.push('}');
+                out
+            }
+        }
+    }
+
+    pub fn to_pretty_hjson_string_with_style(
+        &self,
+        indent_unit: &str,
+        newline: &str,
+        depth: usize,
+        string_style: StringStyle,
+    ) -> String {
+        match self {
+            HjsonValue::String(s) => render_hjson_string_with_style(s, string_style, None),
+            HjsonValue::Integer(n) => n.to_string(),
+            HjsonValue::Float(f) => f.to_string(),
+            HjsonValue::Bool(b) => b.to_string(),
+            HjsonValue::Null => "null".to_string(),
+            HjsonValue::Array(items) => {
+                if items.is_empty() {
+                    return "[]".to_string();
+                }
+
+                let child_indent = indent_unit.repeat(depth + 1);
+                let end_indent = indent_unit.repeat(depth);
+                let mut out = String::from("[");
+                out.push_str(newline);
+                for item in items {
+                    out.push_str(&child_indent);
+                    out.push_str(&item.to_pretty_hjson_string_with_style(
+                        indent_unit,
+                        newline,
+                        depth + 1,
+                        string_style,
+                    ));
+                    out.push_str(newline);
+                }
+                out.push_str(&end_indent);
+                out.push(']');
+                out
+            }
+            HjsonValue::Object(entries) => {
+                if entries.is_empty() {
+                    return "{}".to_string();
+                }
+
+                let child_indent = indent_unit.repeat(depth + 1);
+                let end_indent = indent_unit.repeat(depth);
+                let mut out = String::from("{");
+                out.push_str(newline);
+                for (key, value) in entries {
+                    out.push_str(&child_indent);
+                    out.push_str(&render_hjson_key(key));
+                    out.push_str(": ");
+                    out.push_str(&value.to_pretty_hjson_string_with_style(
+                        indent_unit,
+                        newline,
+                        depth + 1,
+                        string_style,
+                    ));
+                    out.push_str(newline);
+                }
+                out.push_str(&end_indent);
+                out.push('}');
+                out
+            }
+        }
+    }
+
+    pub fn to_pretty_hjson_string_with_style_from_existing(
+        &self,
+        indent_unit: &str,
+        newline: &str,
+        depth: usize,
+        string_style: StringStyle,
+        existing_style: Option<StringStyle>,
+    ) -> String {
+        match self {
+            HjsonValue::String(s) => {
+                render_hjson_string_with_style(s, string_style, existing_style)
+            }
+            HjsonValue::Integer(n) => n.to_string(),
+            HjsonValue::Float(f) => f.to_string(),
+            HjsonValue::Bool(b) => b.to_string(),
+            HjsonValue::Null => "null".to_string(),
+            HjsonValue::Array(items) => {
+                if items.is_empty() {
+                    return "[]".to_string();
+                }
+
+                let child_indent = indent_unit.repeat(depth + 1);
+                let end_indent = indent_unit.repeat(depth);
+                let mut out = String::from("[");
+                out.push_str(newline);
+                for item in items {
+                    out.push_str(&child_indent);
+                    out.push_str(&item.to_pretty_hjson_string_with_style_from_existing(
+                        indent_unit,
+                        newline,
+                        depth + 1,
+                        string_style,
+                        None,
+                    ));
+                    out.push_str(newline);
+                }
+                out.push_str(&end_indent);
+                out.push(']');
+                out
+            }
+            HjsonValue::Object(entries) => {
+                if entries.is_empty() {
+                    return "{}".to_string();
+                }
+
+                let child_indent = indent_unit.repeat(depth + 1);
+                let end_indent = indent_unit.repeat(depth);
+                let mut out = String::from("{");
+                out.push_str(newline);
+                for (key, value) in entries {
+                    out.push_str(&child_indent);
+                    out.push_str(&render_hjson_key(key));
+                    out.push_str(": ");
+                    out.push_str(&value.to_pretty_hjson_string_with_style_from_existing(
+                        indent_unit,
+                        newline,
+                        depth + 1,
+                        string_style,
+                        None,
+                    ));
+                    out.push_str(newline);
+                }
+                out.push_str(&end_indent);
+                out.push('}');
+                out
+            }
+        }
+    }
+
+    pub fn to_hjson_string_with_style(
+        &self,
+        string_style: StringStyle,
+        existing_style: Option<StringStyle>,
+    ) -> String {
+        match self {
+            HjsonValue::String(s) => {
+                render_hjson_string_with_style(s, string_style, existing_style)
+            }
+            _ => self.to_hjson_string(),
+        }
+    }
+
     pub fn from_rednode(v: RedNode) -> Self {
         match v.kind() {
             SyntaxKind::Value => v
-                .children()
+                .children_with_tokens()
                 .next()
-                .map(|child| Self::from_rednode(child))
+                .map(|child| match child {
+                    NodeOrToken::Node(node) => Self::from_rednode(node),
+                    NodeOrToken::Token(token) => {
+                        Self::from_token(token.kind(), token.text().to_string())
+                    }
+                })
                 .unwrap_or(HjsonValue::Null),
             SyntaxKind::Integer => {
                 HjsonValue::from(v.text().to_string().parse::<i64>().unwrap_or_default())
@@ -83,7 +307,10 @@ impl HjsonValue {
             }
             SyntaxKind::True => HjsonValue::Bool(true),
             SyntaxKind::False => HjsonValue::Bool(false),
-            SyntaxKind::String => HjsonValue::String(v.text().to_string()),
+            SyntaxKind::String => {
+                let text = v.text().to_string();
+                HjsonValue::String(text.trim_matches('"').to_string())
+            }
             SyntaxKind::UnquotedString => HjsonValue::String(v.text().to_string()),
             SyntaxKind::BlockString => HjsonValue::String(v.text().to_string()),
             SyntaxKind::Object => {
@@ -98,7 +325,10 @@ impl HjsonValue {
                             .find(|child| {
                                 HjsonLanguage::kind_from_raw(child.kind().into()) == SyntaxKind::Key
                             })
-                            .map(|child| child.text().to_string())
+                            .map(|child| {
+                                let text = child.text().to_string();
+                                text.trim_matches('"').to_string()
+                            })
                             .unwrap_or_default();
                         let value = child
                             .children()
@@ -126,49 +356,132 @@ impl HjsonValue {
         }
     }
 
-    fn into_greennode_or_token(self) -> NodeOrToken<GreenNode, GreenToken> {
-        match self {
-            HjsonValue::String(s) => GreenToken::new(SyntaxKind::String.into(), &s).into(),
-            HjsonValue::Integer(n) => {
-                GreenToken::new(SyntaxKind::Integer.into(), &n.to_string()).into()
-            }
-            HjsonValue::Float(f) => {
-                GreenToken::new(SyntaxKind::Float.into(), &f.to_string()).into()
-            }
-            HjsonValue::Bool(b) => {
-                let kind = if b {
-                    SyntaxKind::True
-                } else {
-                    SyntaxKind::False
-                };
-                GreenToken::new(kind.into(), &b.to_string()).into()
-            }
-            HjsonValue::Null => GreenToken::new(SyntaxKind::Null.into(), "null").into(),
-            HjsonValue::Array(arr) => {
-                let children: Vec<NodeOrToken<GreenNode, GreenToken>> = arr
-                    .into_iter()
-                    .map(|v| v.into_greennode_or_token())
-                    .collect();
-                GreenNode::new(SyntaxKind::Array.into(), children).into()
-            }
-            HjsonValue::Object(obj) => {
-                let children: Vec<NodeOrToken<GreenNode, GreenToken>> = obj
-                    .into_iter()
-                    .map(|(k, v)| {
-                        let key_token = GreenToken::new(SyntaxKind::Key.into(), &k);
-                        let value_node: NodeOrToken<GreenNode, GreenToken> =
-                            v.into_greennode_or_token();
-                        GreenNode::new(SyntaxKind::Pair.into(), vec![key_token.into(), value_node])
-                            .into()
-                    })
-                    .collect();
-                GreenNode::new(SyntaxKind::Object.into(), children).into()
-            }
+    fn from_token(kind: SyntaxKind, text: String) -> Self {
+        match kind {
+            SyntaxKind::Integer => HjsonValue::from(text.parse::<i64>().unwrap_or_default()),
+            SyntaxKind::Float => HjsonValue::from(text.parse::<f64>().unwrap_or_default()),
+            SyntaxKind::True => HjsonValue::Bool(true),
+            SyntaxKind::False => HjsonValue::Bool(false),
+            SyntaxKind::String => HjsonValue::String(text.trim_matches('"').to_string()),
+            SyntaxKind::UnquotedString => HjsonValue::String(text),
+            SyntaxKind::BlockString => HjsonValue::String(text),
+            SyntaxKind::Null => HjsonValue::Null,
+            _ => HjsonValue::Null,
         }
     }
 
     pub fn into_greennode(self) -> GreenNode {
-        let value = self.into_greennode_or_token();
-        GreenNode::new(SyntaxKind::Value.into(), vec![value])
+        let text = self.to_hjson_string();
+        let doc =
+            crate::HjsonDocument::parse(&text).expect("generated HJSON value should always parse");
+
+        doc.root()
+            .children()
+            .next()
+            .expect("parsed generated HJSON should have a value node")
+            .green()
+            .clone()
+            .into()
     }
+
+    pub fn into_greennode_with_style(
+        self,
+        string_style: StringStyle,
+        existing_style: Option<StringStyle>,
+    ) -> GreenNode {
+        let text = self.to_hjson_string_with_style(string_style, existing_style);
+        let doc =
+            crate::HjsonDocument::parse(&text).expect("generated HJSON value should always parse");
+
+        doc.root()
+            .children()
+            .next()
+            .expect("parsed generated HJSON should have a value node")
+            .green()
+            .clone()
+            .into()
+    }
+}
+
+fn render_hjson_key(s: &str) -> String {
+    if is_unquoted_ident(s) {
+        s.to_string()
+    } else {
+        format!("\"{}\"", escape_string(s))
+    }
+}
+
+fn render_hjson_string(s: &str) -> String {
+    if is_unquoted_ident(s) {
+        s.to_string()
+    } else {
+        format!("\"{}\"", escape_string(s))
+    }
+}
+
+fn render_hjson_string_with_style(
+    s: &str,
+    style: StringStyle,
+    existing_style: Option<StringStyle>,
+) -> String {
+    match style {
+        StringStyle::Preserve => match existing_style.unwrap_or(StringStyle::Unquoted) {
+            StringStyle::DoubleQuoted => render_double_quoted_string(s),
+            StringStyle::Block => render_block_string(s),
+            StringStyle::Unquoted | StringStyle::Preserve => render_unquoted_string(s),
+        },
+        StringStyle::DoubleQuoted => render_double_quoted_string(s),
+        StringStyle::Block => render_block_string(s),
+        StringStyle::Unquoted => render_unquoted_string(s),
+    }
+}
+
+fn render_double_quoted_string(s: &str) -> String {
+    format!("\"{}\"", escape_string(s))
+}
+
+fn render_block_string(s: &str) -> String {
+    if s.contains("'''") {
+        render_double_quoted_string(s)
+    } else {
+        format!("'''{}'''", s)
+    }
+}
+
+fn render_unquoted_string(s: &str) -> String {
+    if is_unquoted_ident(s) {
+        s.to_string()
+    } else if s.contains('\n') || s.contains('\r') {
+        render_block_string(s)
+    } else {
+        render_double_quoted_string(s)
+    }
+}
+
+fn is_unquoted_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn escape_string(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
