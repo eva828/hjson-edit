@@ -27,4 +27,3 @@ required-features = ["cli"]
 
 [lib]
 name = "hjson_edit"
-path = "src/lib.rs"
