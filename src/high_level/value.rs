@@ -317,10 +317,14 @@ impl HjsonValue {
             SyntaxKind::False => HjsonValue::Bool(false),
             SyntaxKind::String => {
                 let text = v.text().to_string();
-                HjsonValue::String(text.trim_matches('"').to_string())
+                let inner = text.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&text);
+                HjsonValue::String(unescape_json_string(inner))
             }
             SyntaxKind::UnquotedString => HjsonValue::String(v.text().to_string()),
-            SyntaxKind::BlockString => HjsonValue::String(v.text().to_string()),
+            SyntaxKind::BlockString => {
+                let text = v.text().to_string();
+                HjsonValue::String(decode_block_string(&text))
+            }
             SyntaxKind::Object => {
                 let pairs = v
                     .children()
@@ -335,7 +339,11 @@ impl HjsonValue {
                             })
                             .map(|child| {
                                 let text = child.text().to_string();
-                                text.trim_matches('"').to_string()
+                                if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
+                                    unescape_json_string(&text[1..text.len() - 1])
+                                } else {
+                                    text
+                                }
                             })
                             .unwrap_or_default();
                         let value = child
@@ -366,13 +374,26 @@ impl HjsonValue {
 
     fn from_token(kind: SyntaxKind, text: String) -> Self {
         match kind {
-            SyntaxKind::Integer => HjsonValue::from(text.parse::<i64>().unwrap_or_default()),
-            SyntaxKind::Float => HjsonValue::from(text.parse::<f64>().unwrap_or_default()),
+            SyntaxKind::Integer => {
+                let value = text.parse::<i64>().unwrap_or_else(|e| {
+                    panic!("Failed to parse integer literal `{}` as i64: {}", text, e);
+                });
+                HjsonValue::from(value)
+            }
+            SyntaxKind::Float => {
+                let value = text.parse::<f64>().unwrap_or_else(|e| {
+                    panic!("Failed to parse float literal `{}` as f64: {}", text, e);
+                });
+                HjsonValue::from(value)
+            }
             SyntaxKind::True => HjsonValue::Bool(true),
             SyntaxKind::False => HjsonValue::Bool(false),
-            SyntaxKind::String => HjsonValue::String(text.trim_matches('"').to_string()),
+            SyntaxKind::String => {
+                let inner = text.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&text);
+                HjsonValue::String(unescape_json_string(inner))
+            }
             SyntaxKind::UnquotedString => HjsonValue::String(text),
-            SyntaxKind::BlockString => HjsonValue::String(text),
+            SyntaxKind::BlockString => HjsonValue::String(decode_block_string(&text)),
             SyntaxKind::Null => HjsonValue::Null,
             _ => HjsonValue::Null,
         }
@@ -492,4 +513,130 @@ fn escape_string(s: &str) -> String {
         }
     }
     escaped
+}
+
+/// Decode a JSON-style quoted string: takes the content *between* the quotes,
+/// and expands all RFC 8259 escape sequences including surrogate pairs.
+fn unescape_json_string(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('"') => result.push('"'),
+            Some('\\') => result.push('\\'),
+            Some('/') => result.push('/'),
+            Some('b') => result.push('\x08'),
+            Some('f') => result.push('\x0C'),
+            Some('n') => result.push('\n'),
+            Some('r') => result.push('\r'),
+            Some('t') => result.push('\t'),
+            Some('u') => {
+                let mut hex = String::with_capacity(4);
+                for _ in 0..4 {
+                    if let Some(h) = chars.next() {
+                        hex.push(h);
+                    }
+                }
+                if let Ok(code) = u16::from_str_radix(&hex, 16) {
+                    // High surrogate: pair with the following \uXXXX
+                    if (0xD800..=0xDBFF).contains(&code) {
+                        // Consume the mandatory low-surrogate escape \uXXXX
+                        let low = if chars.next() == Some('\\') {
+                            if chars.next() == Some('u') {
+                                let mut hex2 = String::with_capacity(4);
+                                for _ in 0..4 {
+                                    if let Some(h) = chars.next() {
+                                        hex2.push(h);
+                                    }
+                                }
+                                u16::from_str_radix(&hex2, 16).ok()
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        match low {
+                            Some(low_code) if (0xDC00..=0xDFFF).contains(&low_code) => {
+                                let scalar = 0x10000u32
+                                    + ((code as u32 - 0xD800) << 10)
+                                    + (low_code as u32 - 0xDC00);
+                                if let Some(ch) = char::from_u32(scalar) {
+                                    result.push(ch);
+                                } else {
+                                    result.push(char::REPLACEMENT_CHARACTER);
+                                }
+                            }
+                            _ => result.push(char::REPLACEMENT_CHARACTER),
+                        }
+                    } else if let Some(ch) = char::from_u32(code as u32) {
+                        result.push(ch);
+                    } else {
+                        result.push(char::REPLACEMENT_CHARACTER);
+                    }
+                } else {
+                    result.push(char::REPLACEMENT_CHARACTER);
+                }
+            }
+            Some(other) => {
+                result.push('\\');
+                result.push(other);
+            }
+            None => result.push('\\'),
+        }
+    }
+
+    result
+}
+
+/// Decode an HJSON block string token (including the surrounding `'''` delimiters).
+///
+/// Per the HJSON spec:
+/// 1. Strip the opening and closing `'''`.
+/// 2. Strip the very first newline (LF or CRLF) after the opening `'''`.
+/// 3. The indent level equals the number of leading spaces on the closing-`'''` line.
+/// 4. Strip that many leading spaces from every content line.
+/// 5. Strip the trailing newline (the one immediately before the closing `'''` line).
+/// 6. Normalise all `\r\n` / `\r` to `\n`.
+fn decode_block_string(raw: &str) -> String {
+    // Strip delimiters
+    let inner = raw.strip_prefix("'''").unwrap_or(raw);
+    let inner = inner.strip_suffix("'''").unwrap_or(inner);
+
+    // Normalise line endings to \n for processing
+    let normalised: std::borrow::Cow<str> = if inner.contains('\r') {
+        std::borrow::Cow::Owned(inner.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(inner)
+    };
+
+    // Strip the first newline
+    let content = normalised.strip_prefix('\n').unwrap_or(&normalised);
+
+    // The last "line" (after the final \n) is the indent prefix before the closing '''.
+    let (body, indent) = if let Some(last_nl) = content.rfind('\n') {
+        (&content[..last_nl], &content[last_nl + 1..])
+    } else {
+        // No newline at all: entire content is on one line with no indent.
+        (content, "")
+    };
+
+    let indent_len = indent.len();
+
+    // Strip the common indent from each content line
+    body.split('\n')
+        .map(|line| {
+            if line.len() >= indent_len {
+                &line[indent_len..]
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
