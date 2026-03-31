@@ -153,9 +153,6 @@ impl HjsonDocument {
                 .ok_or_else(|| HjsonEditError::ParentNotFound)?;
         }
 
-        let pair_parent = pair
-            .parent()
-            .ok_or_else(|| HjsonEditError::ParentNotFound)?;
         let value_index = pair
             .green()
             .children()
@@ -171,19 +168,13 @@ impl HjsonDocument {
                 found: pair.kind(),
             })?;
 
-        let root = self.root().clone();
-        let pair_index = pair.index();
+        // Replace the Value child inside the Pair, then propagate the change all the way
+        // to the root using replace_with so that arbitrary nesting depths work correctly.
         let updated_pair = pair
             .green()
             .splice_children(value_index..value_index + 1, vec![new_value.into()]);
-        let updated_parent = pair_parent
-            .green()
-            .splice_children(pair_index..pair_index + 1, vec![updated_pair.into()]);
-        let parent_index = pair_parent.index();
-        let updated_root = root
-            .green()
-            .splice_children(parent_index..parent_index + 1, vec![updated_parent.into()]);
-        self.root = RedNode::new_root(updated_root);
+        let new_root = pair.replace_with(updated_pair);
+        self.root = RedNode::new_root(new_root);
         Ok(())
     }
 
@@ -192,53 +183,83 @@ impl HjsonDocument {
         path: &HjsonPath,
         value: HjsonValue,
     ) -> Result<(), HjsonEditError> {
-        if path.segments.len() == 1 {
-            if let PathSegment::Object(ObjectPathSegment::Key(key)) = &path.segments[0] {
-                let source = self.to_string();
-                if let Some(close_index) = source.rfind('}') {
-                    let style = DocumentStyle::new(&source);
-                    let newline = style.newline();
-                    let before_close = &source[..close_index];
-                    let trimmed = before_close.strip_suffix(newline).unwrap_or(before_close);
-                    let line_start = trimmed
-                        .rfind(newline)
-                        .map(|idx| idx + newline.len())
-                        .unwrap_or(0);
-                    let child_indent = trimmed[line_start..]
-                        .chars()
-                        .take_while(|ch| *ch == ' ' || *ch == '\t')
-                        .collect::<String>();
-                    let child_indent = if child_indent.is_empty() {
-                        style.indent_unit()
-                    } else {
-                        child_indent
-                    };
-                    let value_text = value.to_pretty_hjson_string_with_style(
-                        &style.indent_unit(),
-                        newline,
-                        0,
-                        self.current_string_style(),
-                    );
-                    let insertion_prefix = if before_close.ends_with(newline) {
-                        ""
-                    } else {
-                        newline
-                    };
-                    let insertion = format!(
-                        "{}{}{}: {}{}",
-                        insertion_prefix,
-                        child_indent,
-                        Self::render_object_key_for_insert(key),
-                        value_text,
-                        newline
-                    );
-                    let text = format!("{}{}{}", before_close, insertion, &source[close_index..]);
-                    self.replace_document_from_text(&text)?;
-                    return Ok(());
-                }
+        // For any path whose leaf segment is an object key, try a text-based insertion that
+        // preserves all comments and formatting.  The insertion point is chosen just before
+        // the line that contains the closing `}` of the enclosing object so that:
+        //   • the closing-brace indentation is inspected to derive the child indentation
+        //     (one extra indent_unit deeper), and
+        //   • the existing content (comments, other keys) is left untouched.
+        if let Some(PathSegment::Object(ObjectPathSegment::Key(key))) = path.segments.last() {
+            let source = self.to_string();
+            let style = DocumentStyle::new(&source);
+            let newline = style.newline();
+            let indent_unit = style.indent_unit();
+
+            // Locate the closing `}` of the target object and the start of its line.
+            // Returns (insert_at, brace_indent) where `insert_at` is the byte offset of
+            // the first character of the `}` line (i.e. its indentation prefix).
+            let location: Option<(usize, String)> = if path.segments.len() == 1 {
+                // Root object: search in the whole document.
+                source.rfind('}').map(|abs_close| {
+                    let before = &source[..abs_close];
+                    find_brace_line_start(before, abs_close)
+                })
+            } else {
+                // Nested: resolve the parent node and search only within it.
+                let parent_path = HjsonPath {
+                    segments: path.segments[..path.segments.len() - 1].to_vec(),
+                };
+                self.get_internal(&parent_path).ok().and_then(|parent_node| {
+                    let start: usize = parent_node.text_range().start().into();
+                    let end: usize = parent_node.text_range().end().into();
+                    let parent_text = &source[start..end];
+                    parent_text.rfind('}').and_then(|brace_rel| {
+                        let abs_close = start + brace_rel;
+                        let before_in_parent = &source[start..abs_close];
+                        let (insert_at, brace_indent) =
+                            find_brace_line_start(before_in_parent, abs_close);
+                        // For an inline `{}` there is no newline → fall through to
+                        // the semantic path.
+                        if insert_at == abs_close {
+                            None
+                        } else {
+                            Some((insert_at, brace_indent))
+                        }
+                    })
+                })
+            };
+
+            if let Some((insert_at, brace_indent)) = location {
+                let child_indent = format!("{}{}", brace_indent, indent_unit);
+                let before_content = &source[..insert_at];
+                let value_text = value.to_pretty_hjson_string_with_style(
+                    &indent_unit,
+                    newline,
+                    0,
+                    self.current_string_style(),
+                );
+                let insertion_prefix = if before_content.ends_with(newline) {
+                    ""
+                } else {
+                    newline
+                };
+                let insertion = format!(
+                    "{}{}{}: {}{}",
+                    insertion_prefix,
+                    child_indent,
+                    Self::render_object_key_for_insert(key),
+                    value_text,
+                    newline
+                );
+                let text =
+                    format!("{}{}{}", before_content, insertion, &source[insert_at..]);
+                self.replace_document_from_text(&text)?;
+                return Ok(());
             }
         }
 
+        // Fallback: parent path does not yet exist.  Reconstruct the whole document from
+        // semantic values (comments in affected subtrees are lost).
         let root_value = self.semantic_root_value()?;
         let updated = self.apply_path_to_value(root_value, &path.segments, value);
         let config = self.current_format_config();
@@ -567,5 +588,31 @@ impl HjsonDocument {
         let format_config = self.current_format_config();
         self.reformat_current_document(format_config);
         Ok(())
+    }
+}
+
+/// Given a `before_brace` slice (everything in source before the `}` character)
+/// and `abs_close` (absolute byte offset of `}` in the full source), returns
+/// `(insert_at, brace_indent)` where:
+///   - `insert_at` is the absolute offset of the first character on the `}` line
+///     (i.e. immediately after the newline preceding that line).
+///   - `brace_indent` is the whitespace between `insert_at` and `abs_close`.
+///
+/// When there is no preceding newline (inline `{}`), returns
+/// `(abs_close, String::new())` as a sentinel so callers can fall back.
+fn find_brace_line_start(before_brace: &str, abs_close: usize) -> (usize, String) {
+    if let Some(nl_rel) = before_brace.rfind('\n') {
+        let line_start = nl_rel + 1; // offset within `before_brace` of the first char on the `}` line
+        // `before_brace` starts at `abs_close - before_brace.len()`.
+        let base = abs_close - before_brace.len();
+        let abs_line_start = base + line_start;
+        let brace_indent: String = before_brace[line_start..]
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+        (abs_line_start, brace_indent)
+    } else {
+        // No newline found — the `}` is on the same line as `{` (inline object).
+        (abs_close, String::new())
     }
 }

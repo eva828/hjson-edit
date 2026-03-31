@@ -134,6 +134,66 @@ fn push_preserves_parent_newline_kind_for_inserted_entry() {
 }
 
 #[test]
+fn set_existing_key_preserves_comments() {
+    let input = "{\n    // comment\n    name: app\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc.set("name", "api").unwrap();
+    let output = updated.to_string();
+    assert!(
+        output.contains("// comment"),
+        "comment should be preserved after set, got: {:?}",
+        output
+    );
+    expect_value(
+        updated.get("name"),
+        HjsonValue::String("api".to_string()),
+    );
+}
+
+#[test]
+fn set_nested_existing_key_preserves_comments() {
+    let input = "{\n    // outer comment\n    outer: {\n        // inner comment\n        inner: old\n    }\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc.set("outer.inner", "new").unwrap();
+    let output = updated.to_string();
+    assert!(
+        output.contains("// outer comment"),
+        "outer comment should be preserved after nested set, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("// inner comment"),
+        "inner comment should be preserved after nested set, got: {:?}",
+        output
+    );
+    expect_value(
+        updated.get("outer.inner"),
+        HjsonValue::String("new".to_string()),
+    );
+}
+
+#[test]
+fn set_new_key_in_existing_nested_object_preserves_comments() {
+    let input = "{\n    // comment\n    outer: {\n        existing: value\n    }\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc.set("outer.new_key", "hello").unwrap();
+    let output = updated.to_string();
+    assert!(
+        output.contains("// comment"),
+        "comment should be preserved when adding new nested key, got: {:?}",
+        output
+    );
+    expect_value(
+        updated.get("outer.new_key"),
+        HjsonValue::String("hello".to_string()),
+    );
+    expect_value(
+        updated.get("outer.existing"),
+        HjsonValue::String("value".to_string()),
+    );
+}
+
+#[test]
 fn invalid_path_errors() {
     let doc = HjsonDocument::parse("items: [1, 2]\n").unwrap();
 
