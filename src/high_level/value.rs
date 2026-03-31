@@ -300,10 +300,18 @@ impl HjsonValue {
                 })
                 .unwrap_or(HjsonValue::Null),
             SyntaxKind::Integer => {
-                HjsonValue::from(v.text().to_string().parse::<i64>().unwrap_or_default())
+                let text = v.text().to_string();
+                let value = text.parse::<i64>().unwrap_or_else(|e| {
+                    panic!("Failed to parse integer literal `{}` as i64: {}", text, e);
+                });
+                HjsonValue::from(value)
             }
             SyntaxKind::Float => {
-                HjsonValue::from(v.text().to_string().parse::<f64>().unwrap_or_default())
+                let text = v.text().to_string();
+                let value = text.parse::<f64>().unwrap_or_else(|e| {
+                    panic!("Failed to parse float literal `{}` as f64: {}", text, e);
+                });
+                HjsonValue::from(value)
             }
             SyntaxKind::True => HjsonValue::Bool(true),
             SyntaxKind::False => HjsonValue::Bool(false),
