@@ -20,13 +20,13 @@ hjson-edit parse config.hjson
 hjson-edit format config.hjson
 
 # 編集後、変更したコンテナだけ整形して出力
-hjson-edit edit config.hjson --set server.host localhost --array-append items newValue
+hjson-edit edit config.hjson --set server.host localhost --set items[-] newValue
 ```
 
 ### ライブラリ
 
 ```rust
-use hjson_edit::{DocumentValueEdit, HjsonDocument};
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit};
 
 let input = r#"{
     // Configuration

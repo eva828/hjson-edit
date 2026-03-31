@@ -125,9 +125,19 @@ impl HjsonPath {
     }
 }
 
-impl Into<HjsonPath> for &str {
-    fn into(self) -> HjsonPath {
-        HjsonPath::parse_dot_path(self).unwrap_or_else(|_| HjsonPath { segments: vec![] })
+impl TryFrom<&str> for HjsonPath {
+    type Error = HjsonEditError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        HjsonPath::parse_dot_path(s)
+    }
+}
+
+impl std::str::FromStr for HjsonPath {
+    type Err = HjsonEditError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        HjsonPath::parse_dot_path(s)
     }
 }
 

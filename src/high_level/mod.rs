@@ -24,7 +24,7 @@ use line_index::LineIndex;
 pub struct HjsonDocument {
     root: RedNode,
     string_style: StringStyle,
-    commnt_style: CommentStyle,
+    comment_style: CommentStyle,
 }
 
 impl HjsonDocument {
@@ -54,7 +54,7 @@ impl HjsonDocument {
         Ok(Self {
             root,
             string_style: StringStyle::default(),
-            commnt_style: CommentStyle::default(),
+            comment_style: CommentStyle::default(),
         })
     }
 
@@ -64,7 +64,7 @@ impl HjsonDocument {
     }
 
     pub fn comment_style(mut self, style: CommentStyle) -> Self {
-        self.commnt_style = style;
+        self.comment_style = style;
         self
     }
 
@@ -73,7 +73,7 @@ impl HjsonDocument {
     }
 
     pub fn current_comment_style(&self) -> CommentStyle {
-        self.commnt_style
+        self.comment_style
     }
 
     pub fn root(&self) -> &RedNode {

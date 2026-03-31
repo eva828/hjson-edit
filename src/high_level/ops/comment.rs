@@ -28,22 +28,22 @@ pub enum CommentPath {
 }
 
 pub trait HjsonDocumentCommentEdit {
-    fn get(&self, path: impl Into<HjsonPath>) -> Result<Option<String>, HjsonEditError>;
+    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Option<String>, HjsonEditError>;
     fn set(
         self,
-        path: impl Into<HjsonPath>,
+        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(self, path: impl Into<HjsonPath>) -> Result<Self, HjsonEditError>
+    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
 
 impl HjsonDocumentCommentEdit for HjsonDocument {
-    fn get(&self, path: impl Into<HjsonPath>) -> Result<Option<String>, HjsonEditError> {
-        let path = path.into();
+    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Option<String>, HjsonEditError> {
+        let path = path.try_into()?;
 
         if is_document_comment_path(&path, ":header") {
             return Ok(extract_document_comment(self, true));
@@ -69,10 +69,10 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 
     fn set(
         mut self,
-        path: impl Into<HjsonPath>,
+        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError> {
-        let path = path.into();
+        let path = path.try_into()?;
         let comment = comment.into();
 
         if is_document_comment_path(&path, ":header") {
@@ -93,7 +93,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
             .into_iter()
             .find_map(|elem| comment_style_from_element(&elem));
 
-        self = self.remove(path.clone())?;
+        self = self.remove_comment_by_path(path.clone())?;
 
         let resolved_style =
             resolve_comment_style(self.current_comment_style(), &comment, existing_style);
@@ -121,9 +121,14 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
         Ok(self)
     }
 
-    fn remove(mut self, path: impl Into<HjsonPath>) -> Result<Self, HjsonEditError> {
-        let path = path.into();
+    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError> {
+        let path = path.try_into()?;
+        self.remove_comment_by_path(path)
+    }
+}
 
+impl HjsonDocument {
+    fn remove_comment_by_path(mut self, path: HjsonPath) -> Result<Self, HjsonEditError> {
         if is_document_comment_path(&path, ":header") {
             remove_document_comment(&mut self, true)?;
             return Ok(self);

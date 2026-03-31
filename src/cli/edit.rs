@@ -374,27 +374,14 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 doc = HjsonDocumentObjectEdit::remove(doc, path.as_str())?;
             }
             EditOp::CommentSet { path, text } => {
-                doc = match path {
-                    CommentPath::Header => {
-                        let newline = if content.contains("\r\n") {
-                            "\r\n"
-                        } else {
-                            "\n"
-                        };
-                        HjsonDocument::parse(&format!("// {}{}{}", text, newline, doc.to_string()))?
-                    }
-                    CommentPath::Footer => {
-                        let newline = if content.contains("\r\n") {
-                            "\r\n"
-                        } else {
-                            "\n"
-                        };
-                        HjsonDocument::parse(&format!("{}{}// {}", doc.to_string(), newline, text))?
-                    }
+                let dot_path = match &path {
+                    CommentPath::Header => ":header",
+                    CommentPath::Footer => ":footer",
                     CommentPath::Key { dot_path } | CommentPath::Inline { dot_path } => {
-                        HjsonDocumentCommentEdit::set(doc, dot_path.as_str(), text)?
+                        dot_path.as_str()
                     }
                 };
+                doc = HjsonDocumentCommentEdit::set(doc, dot_path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
                 let dot_path = match &path {

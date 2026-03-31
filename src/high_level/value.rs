@@ -488,6 +488,11 @@ fn render_unquoted_string(s: &str) -> String {
 }
 
 fn is_unquoted_ident(s: &str) -> bool {
+    // Reserved literals must be quoted to preserve their type on roundtrip.
+    if matches!(s, "true" | "false" | "null") {
+        return false;
+    }
+
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return false;

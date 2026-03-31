@@ -15,15 +15,15 @@ use crate::{
 };
 
 pub trait HjsonDocumentObjectEdit {
-    fn get(&self, path: impl Into<HjsonPath>) -> Result<HjsonValue, HjsonEditError>;
+    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<HjsonValue, HjsonEditError>;
     fn set(
         self,
-        path: impl Into<HjsonPath>,
+        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(self, path: impl Into<HjsonPath>) -> Result<Self, HjsonEditError>
+    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
@@ -38,21 +38,21 @@ pub enum StringStyle {
 }
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
-    fn get(&self, path: impl Into<HjsonPath>) -> Result<HjsonValue, HjsonEditError> {
-        let path = path.into();
+    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<HjsonValue, HjsonEditError> {
+        let path = path.try_into()?;
         let node = self.get_internal(&path)?;
         Ok(HjsonValue::from_rednode(node))
     }
 
     fn set(
         mut self,
-        path: impl Into<HjsonPath>,
+        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized,
     {
-        let path = path.into();
+        let path = path.try_into()?;
         let new_value = value.into();
 
         if path.segments.is_empty() {
@@ -84,11 +84,11 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         Ok(self)
     }
 
-    fn remove(mut self, path: impl Into<HjsonPath>) -> Result<Self, HjsonEditError>
+    fn remove(mut self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError>
     where
         Self: Sized,
     {
-        let path = path.into();
+        let path = path.try_into()?;
 
         if path.segments.is_empty() {
             return Err(HjsonEditError::PathNotFound(path));
