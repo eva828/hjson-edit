@@ -6,6 +6,7 @@ pub mod comment;
 pub mod object;
 
 impl HjsonDocument {
+    #[allow(dead_code)]
     fn get_internal(&self, path: &HjsonPath) -> Result<RedNode, HjsonEditError> {
         let root = self.root().clone();
 
