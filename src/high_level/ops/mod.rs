@@ -1,5 +1,6 @@
 use crate::{
-    high_level::walker::PathWalker, HjsonDocument, HjsonEditError, HjsonPath, RedNode, SyntaxKind,
+    high_level::{path::HjsonObjectPath, walker::PathWalker},
+    HjsonDocument, HjsonEditError, RedNode, SyntaxKind,
 };
 
 pub mod comment;
@@ -7,7 +8,7 @@ pub mod object;
 
 impl HjsonDocument {
     #[allow(dead_code)]
-    fn get_internal(&self, path: &HjsonPath) -> Result<RedNode, HjsonEditError> {
+    fn get_internal(&self, path: &HjsonObjectPath) -> Result<RedNode, HjsonEditError> {
         let root = self.root().clone();
 
         if path.depth() == 0 {

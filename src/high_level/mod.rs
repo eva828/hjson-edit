@@ -49,7 +49,8 @@ impl HjsonDocument {
             });
         }
 
-        let root = RedNode::new_root(result.green).clone_for_update();
+        let root = RedNode::new_root(result.green);
+        // let root = RedNode::new_root(result.green).clone_for_update();
 
         Ok(Self {
             root,

@@ -1,9 +1,12 @@
-use crate::{ArrayPathSegment, HjsonPath, ObjectPathSegment, PathSegment, RedNode, SyntaxKind};
+use crate::{
+    high_level::path::HjsonObjectPath, ArrayPathSegment, ObjectPathSegment, PathSegment, RedNode,
+    SyntaxKind,
+};
 
 pub trait RedNodeExt {
     fn children_by_kind(&self, kind: SyntaxKind) -> impl Iterator<Item = RedNode>;
     fn child(&self, path: &PathSegment) -> Option<RedNode>;
-    fn path(&self) -> HjsonPath;
+    fn path(&self) -> HjsonObjectPath;
 }
 
 impl RedNodeExt for RedNode {
@@ -48,7 +51,7 @@ impl RedNodeExt for RedNode {
         }
     }
 
-    fn path(&self) -> HjsonPath {
+    fn path(&self) -> HjsonObjectPath {
         let mut segments = Vec::new();
         let mut current = self.clone();
 
@@ -75,6 +78,6 @@ impl RedNodeExt for RedNode {
         }
 
         segments.reverse();
-        HjsonPath { segments }
+        HjsonObjectPath::new(segments)
     }
 }

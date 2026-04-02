@@ -1,22 +1,26 @@
-use crate::{
-    high_level::{
-        error::HjsonEditError,
-        path::{ArrayPathSegment, HjsonPath, PathSegment},
-        value::HjsonValue,
-        HjsonDocument,
-    },
+use crate::high_level::{
+    error::HjsonEditError,
+    path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
+    value::HjsonValue,
+    HjsonDocument,
 };
 
 pub trait HjsonDocumentObjectEdit {
-    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<HjsonValue, HjsonEditError>;
+    fn get(
+        &self,
+        path: impl TryInto<HjsonObjectPath, Error = HjsonEditError>,
+    ) -> Result<HjsonValue, HjsonEditError>;
     fn set(
         self,
-        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
+        path: impl TryInto<HjsonObjectPath, Error = HjsonEditError>,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError>
+    fn remove(
+        self,
+        path: impl TryInto<HjsonObjectPath, Error = HjsonEditError>,
+    ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
@@ -33,14 +37,17 @@ pub enum StringStyle {
 }
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
-    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<HjsonValue, HjsonEditError> {
+    fn get(
+        &self,
+        path: impl TryInto<HjsonObjectPath, Error = HjsonEditError>,
+    ) -> Result<HjsonValue, HjsonEditError> {
         let _path = path.try_into()?;
         unimplemented!()
     }
 
     fn set(
         self,
-        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
+        path: impl TryInto<HjsonObjectPath, Error = HjsonEditError>,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError>
     where
@@ -49,11 +56,11 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         let path = path.try_into()?;
         let _value = value.into();
 
-        if path.segments.is_empty() {
+        if path.segments().is_empty() {
             return Err(HjsonEditError::PathNotFound(path));
         }
 
-        let last_segment = path.segments.last().unwrap();
+        let last_segment = path.segments().last().unwrap();
 
         match last_segment {
             PathSegment::Array(ArrayPathSegment::Push) => {
@@ -72,17 +79,20 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         }
     }
 
-    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError>
+    fn remove(
+        self,
+        path: impl TryInto<HjsonObjectPath, Error = HjsonEditError>,
+    ) -> Result<Self, HjsonEditError>
     where
         Self: Sized,
     {
         let path = path.try_into()?;
 
-        if path.segments.is_empty() {
+        if path.segments().is_empty() {
             return Err(HjsonEditError::PathNotFound(path));
         }
 
-        let last_segment = path.segments.last().unwrap();
+        let last_segment = path.segments().last().unwrap();
 
         match last_segment {
             PathSegment::Array(ArrayPathSegment::Index(_index)) => {

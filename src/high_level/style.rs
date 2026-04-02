@@ -1,6 +1,6 @@
 use crate::syntax::GreenElement;
 use crate::syntax::{HjsonLanguage, SyntaxKind};
-use rowan::{Language, NodeOrToken};
+use rowan::Language;
 
 /// 改行コードの種類
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -29,6 +29,14 @@ impl NewlineKind {
             _ => None,
         }
     }
+
+    pub fn normalize(self, text: &str) -> String {
+        let (from, to) = match self {
+            Self::Lf => (Self::CrLf, Self::Lf),
+            Self::CrLf => (Self::Lf, Self::CrLf),
+        };
+        text.replace(from.as_str(), to.as_str())
+    }
 }
 
 /// 改行コードを検出可能な対象
@@ -37,159 +45,44 @@ impl NewlineKind {
 /// 検出できない場合は `None` を返す。
 pub trait DetectNewline {
     /// 改行コードを検出する。検出できない場合は `None` を返す。
-    fn try_detect_newline(&self) -> Option<NewlineKind>;
+    fn detect_newline(&self) -> NewlineKind;
 }
 
 impl DetectNewline for &str {
-    fn try_detect_newline(&self) -> Option<NewlineKind> {
+    fn detect_newline(&self) -> NewlineKind {
         if self.contains("\r\n") {
-            Some(NewlineKind::CrLf)
+            NewlineKind::CrLf
         } else if self.contains('\n') {
-            Some(NewlineKind::Lf)
+            NewlineKind::Lf
         } else {
-            None
+            NewlineKind::default()
         }
     }
 }
 
 impl DetectNewline for &[GreenElement] {
-    fn try_detect_newline(&self) -> Option<NewlineKind> {
-        let mut saw_lf = false;
+    fn detect_newline(&self) -> NewlineKind {
+        let newlines = self
+            .iter()
+            .flat_map(|e| e.as_token())
+            .filter(|e| HjsonLanguage::kind_from_raw(e.kind()) != SyntaxKind::Newline);
 
-        for element in *self {
-            let NodeOrToken::Token(token) = element else {
-                continue;
-            };
-
-            if HjsonLanguage::kind_from_raw(token.kind()) != SyntaxKind::Newline {
-                continue;
-            }
-
-            match NewlineKind::from_newline_text(token.text()) {
-                Some(NewlineKind::CrLf) => return Some(NewlineKind::CrLf),
-                Some(NewlineKind::Lf) => saw_lf = true,
-                None => {}
-            }
-        }
-
-        if saw_lf {
-            Some(NewlineKind::Lf)
-        } else {
-            None
-        }
+        newlines
+            .clone()
+            .flat_map(|token| NewlineKind::from_newline_text(token.text()))
+            .find(|kind| *kind != NewlineKind::default())
+            .unwrap_or(NewlineKind::default())
     }
 }
 
 impl DetectNewline for String {
-    fn try_detect_newline(&self) -> Option<NewlineKind> {
-        self.as_str().try_detect_newline()
+    fn detect_newline(&self) -> NewlineKind {
+        self.as_str().detect_newline()
     }
 }
 
 impl DetectNewline for Vec<GreenElement> {
-    fn try_detect_newline(&self) -> Option<NewlineKind> {
-        self.as_slice().try_detect_newline()
-    }
-}
-
-// impl DetectNewline for HjsonDocument {
-//     fn try_detect_newline(&self) -> Option<NewlineKind> {
-//         let root_green = self.green_node();
-//         let elements = root_green.children();
-
-//         // まず構造要素から検出を試みる
-//         elements
-//             .try_detect_newline()
-//             // フォールバック: テキスト全体から検出
-//             .or_else(|| self.to_string().try_detect_newline())
-//     }
-// }
-
-// impl DetectNewline for RedNode {
-//     fn try_detect_newline(&self) -> Option<NewlineKind> {
-//         let green = self.to_green();
-//         let elements: Vec<GreenElement> = green.children().map(clone_element).collect();
-//         elements.try_detect_newline()
-//     }
-// }
-
-pub struct DocumentStyle<'a> {
-    source: &'a str,
-}
-
-impl<'a> DocumentStyle<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Self { source }
-    }
-
-    pub fn newline_kind(&self) -> NewlineKind {
-        self.source.try_detect_newline().unwrap_or_default()
-    }
-
-    pub fn newline(&self) -> &'static str {
-        self.newline_kind().as_str()
-    }
-
-    pub fn indent_unit(&self) -> String {
-        let mut space_indents = Vec::new();
-        let mut tab_count = 0usize;
-
-        for line in self.source.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let indent: String = line
-                .chars()
-                .take_while(|ch| *ch == ' ' || *ch == '\t')
-                .collect();
-            if indent.is_empty() {
-                continue;
-            }
-            if indent.contains('\t') {
-                tab_count += 1;
-            } else {
-                space_indents.push(indent.len());
-            }
-        }
-
-        if tab_count > 0 {
-            return "\t".to_string();
-        }
-
-        let width = space_indents
-            .into_iter()
-            .filter(|len| *len > 0)
-            .min()
-            .unwrap_or(2);
-        " ".repeat(width)
-    }
-
-    pub fn line_indent_for_offset(&self, offset: usize) -> String {
-        let clamped = offset.min(self.source.len());
-        let start = self.source[..clamped]
-            .rfind('\n')
-            .map(|idx| idx + 1)
-            .unwrap_or(0);
-        self.source[start..clamped]
-            .chars()
-            .take_while(|ch| *ch == ' ' || *ch == '\t')
-            .collect()
-    }
-
-    pub fn normalize_text(&self, text: &str) -> String {
-        TextNormalizer::normalize_newlines(text, self.newline_kind())
-    }
-}
-
-pub struct TextNormalizer;
-
-impl TextNormalizer {
-    pub fn normalize_newlines(text: &str, style: NewlineKind) -> String {
-        let normalized = text.replace("\r\n", "\n");
-        match style {
-            NewlineKind::Lf => normalized,
-            NewlineKind::CrLf => normalized.replace('\n', "\r\n"),
-        }
+    fn detect_newline(&self) -> NewlineKind {
+        self.as_slice().detect_newline()
     }
 }

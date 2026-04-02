@@ -18,7 +18,7 @@ pub use high_level::{
     error::HjsonEditError,
     ops::comment::{CommentPath, CommentStyle},
     ops::object::{HjsonDocumentObjectEdit, StringStyle},
-    path::{ArrayPathSegment, HjsonPath, ObjectPathSegment, PathSegment},
+    path::{ArrayPathSegment, ObjectPathSegment, PathSegment},
     value::HjsonValue,
     HjsonDocument,
 };

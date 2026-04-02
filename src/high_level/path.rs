@@ -21,18 +21,35 @@ pub enum PathSegment {
 }
 
 #[derive(Debug, Clone)]
-pub struct HjsonPath {
-    pub segments: Vec<PathSegment>,
+pub struct HjsonObjectPath {
+    segments: Vec<PathSegment>,
 }
 
-impl HjsonPath {
-    pub fn new(path: impl Into<HjsonPath>) -> Self {
+#[derive(Debug, Clone)]
+pub enum HjsonCommentPath {
+    Header,
+    Footer,
+    Before(HjsonObjectPath),
+    Inline(HjsonObjectPath),
+}
+
+impl HjsonObjectPath {
+    pub fn new(path: impl Into<HjsonObjectPath>) -> Self {
         path.into()
     }
 
-    pub fn parse_dot_path(s: &str) -> Result<Self, HjsonEditError> {
+    pub fn segments(&self) -> &[PathSegment] {
+        &self.segments
+    }
+
+    pub fn segment(&self, index: usize) -> Option<&PathSegment> {
+        self.segments.get(index)
+    }
+
+    pub fn parse(path: impl Into<String>) -> Result<Self, HjsonEditError> {
+        let path = path.into();
         let mut segments = Vec::new();
-        let mut chars = s.chars().peekable();
+        let mut chars = path.chars().peekable();
 
         while chars.peek().is_some() {
             // Parse key part
@@ -73,7 +90,7 @@ impl HjsonPath {
 
                 // Expect closing bracket
                 if chars.peek() != Some(&']') {
-                    return Err(HjsonEditError::InvalidPath(s.to_string()));
+                    return Err(HjsonEditError::InvalidPath(path.clone()));
                 }
                 chars.next(); // consume ']'
 
@@ -83,18 +100,18 @@ impl HjsonPath {
                 } else if op_str.starts_with('+') {
                     let idx: usize = op_str[1..]
                         .parse()
-                        .map_err(|_| HjsonEditError::InvalidPath(s.to_string()))?;
+                        .map_err(|_| HjsonEditError::InvalidPath(path.clone()))?;
                     segments.push(PathSegment::Array(ArrayPathSegment::InsertAt(idx)));
                 } else {
                     let idx: usize = op_str
                         .parse()
-                        .map_err(|_| HjsonEditError::InvalidPath(s.to_string()))?;
+                        .map_err(|_| HjsonEditError::InvalidPath(path.clone()))?;
                     segments.push(PathSegment::Array(ArrayPathSegment::Index(idx)));
                 }
             }
         }
 
-        Ok(HjsonPath { segments })
+        Ok(HjsonObjectPath { segments })
     }
 
     pub fn split_first(&self) -> Option<(PathSegment, Self)> {
@@ -125,33 +142,33 @@ impl HjsonPath {
     }
 }
 
-impl TryFrom<&str> for HjsonPath {
+impl TryFrom<&str> for HjsonObjectPath {
     type Error = HjsonEditError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        HjsonPath::parse_dot_path(s)
+        HjsonObjectPath::parse(s)
     }
 }
 
-impl std::str::FromStr for HjsonPath {
+impl std::str::FromStr for HjsonObjectPath {
     type Err = HjsonEditError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        HjsonPath::parse_dot_path(s)
+        HjsonObjectPath::parse(s)
     }
 }
 
-impl Into<HjsonPath> for &[PathSegment] {
-    fn into(self) -> HjsonPath {
-        HjsonPath {
+impl Into<HjsonObjectPath> for &[PathSegment] {
+    fn into(self) -> HjsonObjectPath {
+        HjsonObjectPath {
             segments: self.to_vec(),
         }
     }
 }
 
-impl Into<HjsonPath> for Vec<PathSegment> {
-    fn into(self) -> HjsonPath {
-        HjsonPath { segments: self }
+impl Into<HjsonObjectPath> for Vec<PathSegment> {
+    fn into(self) -> HjsonObjectPath {
+        HjsonObjectPath { segments: self }
     }
 }
 

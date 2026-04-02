@@ -1,6 +1,6 @@
 use crate::{
     high_level::{
-        path::{HjsonPath, ObjectPathSegment, PathSegment},
+        path::{HjsonCommentPath, HjsonObjectPath, ObjectPathSegment, PathSegment},
         HjsonDocument,
     },
     HjsonEditError,
@@ -34,82 +34,97 @@ pub enum CommentPath {
 }
 
 pub trait HjsonDocumentCommentEdit {
-    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Option<String>, HjsonEditError>;
+    fn get(
+        &self,
+        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
+    ) -> Result<Option<String>, HjsonEditError>;
     fn set(
         self,
-        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
+        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError>
+    fn remove(
+        self,
+        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
+    ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
 
 impl HjsonDocumentCommentEdit for HjsonDocument {
-    fn get(&self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Option<String>, HjsonEditError> {
+    fn get(
+        &self,
+        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
+    ) -> Result<Option<String>, HjsonEditError> {
         let path = path.try_into()?;
 
-        if is_document_comment_path(&path, ":header") {
-            // Return the header comment (before the root value).
-            unimplemented!()
+        match path {
+            HjsonCommentPath::Header => {
+                // Return the header comment (before the root value).
+                unimplemented!()
+            }
+            HjsonCommentPath::Footer => {
+                // Return the footer comment (after the root value).
+                unimplemented!()
+            }
+            HjsonCommentPath::Before(path) => {
+                unimplemented!()
+            }
+            HjsonCommentPath::Inline(path) => {
+                unimplemented!()
+            }
         }
-
-        if is_document_comment_path(&path, ":footer") {
-            // Return the footer comment (after the root value).
-            unimplemented!()
-        }
-
-        // Return the leading comment of the key at `path`.
-        unimplemented!()
     }
 
     fn set(
         self,
-        path: impl TryInto<HjsonPath, Error = HjsonEditError>,
+        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError> {
         let path = path.try_into()?;
         let _comment = comment.into();
 
-        if is_document_comment_path(&path, ":header") {
-            // Replace or insert the header comment.
-            unimplemented!()
+        match path {
+            HjsonCommentPath::Header => {
+                // Return the header comment (before the root value).
+                unimplemented!()
+            }
+            HjsonCommentPath::Footer => {
+                // Return the footer comment (after the root value).
+                unimplemented!()
+            }
+            HjsonCommentPath::Before(path) => {
+                unimplemented!()
+            }
+            HjsonCommentPath::Inline(path) => {
+                unimplemented!()
+            }
         }
-
-        if is_document_comment_path(&path, ":footer") {
-            // Replace or insert the footer comment.
-            unimplemented!()
-        }
-
-        // Set the leading comment of the key at `path`.
-        unimplemented!()
     }
 
-    fn remove(self, path: impl TryInto<HjsonPath, Error = HjsonEditError>) -> Result<Self, HjsonEditError> {
+    fn remove(
+        self,
+        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
+    ) -> Result<Self, HjsonEditError> {
         let path = path.try_into()?;
 
-        if is_document_comment_path(&path, ":header") {
-            // Remove the header comment.
-            unimplemented!()
+        match path {
+            HjsonCommentPath::Header => {
+                // Return the header comment (before the root value).
+                unimplemented!()
+            }
+            HjsonCommentPath::Footer => {
+                // Return the footer comment (after the root value).
+                unimplemented!()
+            }
+            HjsonCommentPath::Before(path) => {
+                unimplemented!()
+            }
+            HjsonCommentPath::Inline(path) => {
+                unimplemented!()
+            }
         }
-
-        if is_document_comment_path(&path, ":footer") {
-            // Remove the footer comment.
-            unimplemented!()
-        }
-
-        // Remove the leading comment of the key at `path`.
-        unimplemented!()
     }
-}
-
-/// Returns `true` when `path` is a single-segment object path matching `needle`
-/// (e.g. `":header"` or `":footer"`).
-fn is_document_comment_path(path: &HjsonPath, needle: &str) -> bool {
-    matches!(
-        path.segments.as_slice(),
-        [PathSegment::Object(ObjectPathSegment::Key(key))] if key == needle
-    )
 }
