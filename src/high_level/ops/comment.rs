@@ -1,9 +1,8 @@
 use rowan::{GreenToken, NodeOrToken};
 
 use crate::{
-    ast::{CommentKind, Trivia},
+    ast::{AstNode, CommentKind, Trivia},
     high_level::{
-        ast::AstNode,
         error::HjsonEditError,
         ext::RedNodeExt,
         path::{HjsonCommentPath, HjsonObjectPath},
@@ -44,9 +43,12 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
             HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
                 let pair = self.resolve_pair(&path)?;
                 let comments = pair
-                    .leading_trivia()?
+                    .leading_trivia
                     .into_iter()
-                    .filter_map(|elem| comment_body_from_trivia(&elem))
+                    .filter_map(|elem| match elem {
+                        Trivia::Comment(comment) => Some(comment.body),
+                        _ => None,
+                    })
                     .collect::<Vec<_>>();
 
                 if comments.is_empty() {
@@ -79,9 +81,16 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
             HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
                 let existing_style = self
                     .resolve_pair(&path)?
-                    .leading_trivia()?
+                    .leading_trivia
                     .into_iter()
-                    .find_map(|elem| comment_style_from_trivia(&elem));
+                    .find_map(|elem| match elem {
+                        Trivia::Comment(comment) => Some(match comment.kind {
+                            CommentKind::Line => CommentStyle::Line,
+                            CommentKind::Hash => CommentStyle::Hash,
+                            CommentKind::Block => CommentStyle::Block,
+                        }),
+                        _ => None,
+                    });
 
                 self = self.remove_comment_by_path(HjsonCommentPath::Before(path.clone()))?;
 
@@ -144,12 +153,10 @@ impl HjsonDocument {
             HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
                 let pair = self.resolve_pair(&path)?;
                 let parent = pair.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
-                let trivia = pair.leading_trivia_elements()?;
-                let start = trivia
+                let start = pair
+                    .leading_trivia
                     .iter()
-                    .filter(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind().is_comment()))
-                    .map(|elem| elem.index())
-                    .min();
+                    .position(|elem| matches!(elem, Trivia::Comment(_)));
 
                 let Some(start) = start else {
                     return Ok(self);
@@ -242,15 +249,15 @@ fn extract_document_comment(doc: &HjsonDocument, header: bool) -> Option<String>
     let mut bodies = Vec::new();
 
     if header {
-        for elem in ast.leading_trivia().ok()? {
+        for elem in &ast.leading_trivia {
             if let Trivia::Comment(comment) = elem {
-                bodies.push(comment.body)
+                bodies.push(comment.body.clone())
             }
         }
     } else {
-        for elem in ast.trailing_trivia().ok()? {
+        for elem in &ast.trailing_trivia {
             if let Trivia::Comment(comment) = elem {
-                bodies.push(comment.body)
+                bodies.push(comment.body.clone())
             }
         }
     }
@@ -266,46 +273,28 @@ fn extract_document_comment_style(doc: &HjsonDocument, header: bool) -> Option<C
     let ast = doc.ast().ok()?;
 
     if header {
-        for elem in ast.leading_trivia().ok()? {
+        for elem in &ast.leading_trivia {
             if let Trivia::Comment(comment) = elem {
-                return comment_style_from_kind(comment.kind);
+                return Some(match comment.kind {
+                    CommentKind::Line => CommentStyle::Line,
+                    CommentKind::Hash => CommentStyle::Hash,
+                    CommentKind::Block => CommentStyle::Block,
+                });
             }
         }
     } else {
-        for elem in ast.trailing_trivia().ok()? {
+        for elem in &ast.trailing_trivia {
             if let Trivia::Comment(comment) = elem {
-                return comment_style_from_kind(comment.kind);
+                return Some(match comment.kind {
+                    CommentKind::Line => CommentStyle::Line,
+                    CommentKind::Hash => CommentStyle::Hash,
+                    CommentKind::Block => CommentStyle::Block,
+                });
             }
         }
     }
 
     None
-}
-
-fn comment_body_from_trivia(elem: &Trivia) -> Option<String> {
-    match elem {
-        Trivia::Comment(comment) => Some(comment.body.clone()),
-        _ => None,
-    }
-}
-
-fn comment_style_from_trivia(elem: &Trivia) -> Option<CommentStyle> {
-    match elem {
-        Trivia::Comment(comment) => Some(match comment.kind {
-            CommentKind::Line => CommentStyle::Line,
-            CommentKind::Hash => CommentStyle::Hash,
-            CommentKind::Block => CommentStyle::Block,
-        }),
-        _ => None,
-    }
-}
-
-fn comment_style_from_kind(kind: CommentKind) -> Option<CommentStyle> {
-    match kind {
-        CommentKind::Line => Some(CommentStyle::Line),
-        CommentKind::Hash => Some(CommentStyle::Hash),
-        CommentKind::Block => Some(CommentStyle::Block),
-    }
 }
 
 fn kind_from_style(style: CommentStyle) -> SyntaxKind {

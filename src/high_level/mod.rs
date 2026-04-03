@@ -2,7 +2,6 @@
 //!
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
-pub mod ast;
 pub mod error;
 pub mod ext;
 pub mod ops;
