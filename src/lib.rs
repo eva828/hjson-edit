@@ -7,6 +7,7 @@
 //! - ロスレス編集（空白・改行・コメントを保持）
 //! - Green/Red Tree方式による効率的な編集
 
+pub mod ast;
 pub(crate) mod format;
 pub mod high_level;
 pub(crate) mod number;

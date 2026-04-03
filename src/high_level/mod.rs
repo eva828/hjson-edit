@@ -11,6 +11,8 @@ pub mod style;
 pub mod value;
 pub mod walker;
 
+use crate::ast as semantic_ast;
+use crate::ast::AstNode;
 use crate::high_level::error::HjsonEditError;
 use crate::high_level::ops::comment::CommentStyle;
 use crate::high_level::ops::object::StringStyle;
@@ -79,6 +81,10 @@ impl HjsonDocument {
 
     pub fn root(&self) -> &RedNode {
         &self.root
+    }
+
+    pub fn ast(&self) -> Result<semantic_ast::Document, HjsonEditError> {
+        semantic_ast::Document::cast(self.root.clone())
     }
 
     pub fn to_string(&self) -> String {

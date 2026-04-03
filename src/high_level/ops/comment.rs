@@ -1,6 +1,7 @@
 use rowan::{GreenToken, NodeOrToken};
 
 use crate::{
+    ast::{CommentKind, Trivia},
     high_level::{
         ast::AstNode,
         error::HjsonEditError,
@@ -9,7 +10,7 @@ use crate::{
         style::DetectNewline,
         HjsonDocument,
     },
-    syntax::{RedNode, RedToken, SyntaxKind},
+    syntax::{RedNode, SyntaxKind},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -45,7 +46,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 let comments = pair
                     .leading_trivia()?
                     .into_iter()
-                    .filter_map(|elem| comment_body_from_element(&elem))
+                    .filter_map(|elem| comment_body_from_trivia(&elem))
                     .collect::<Vec<_>>();
 
                 if comments.is_empty() {
@@ -80,7 +81,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                     .resolve_pair(&path)?
                     .leading_trivia()?
                     .into_iter()
-                    .find_map(|elem| comment_style_from_element(&elem));
+                    .find_map(|elem| comment_style_from_trivia(&elem));
 
                 self = self.remove_comment_by_path(HjsonCommentPath::Before(path.clone()))?;
 
@@ -115,10 +116,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 }
 
 impl HjsonDocument {
-    fn resolve_pair(
-        &self,
-        path: &HjsonObjectPath,
-    ) -> Result<crate::high_level::ast::Pair, HjsonEditError> {
+    fn resolve_pair(&self, path: &HjsonObjectPath) -> Result<crate::ast::Pair, HjsonEditError> {
         let mut target = self.root().clone().document_start_node();
         for segment in path.segments() {
             target = target
@@ -130,7 +128,7 @@ impl HjsonDocument {
             target = target.parent().ok_or(HjsonEditError::ParentNotFound)?;
         }
 
-        crate::high_level::ast::Pair::cast(target)
+        crate::ast::Pair::cast(target)
     }
 
     fn remove_comment_by_path(mut self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
@@ -146,7 +144,7 @@ impl HjsonDocument {
             HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
                 let pair = self.resolve_pair(&path)?;
                 let parent = pair.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
-                let trivia = pair.leading_trivia()?;
+                let trivia = pair.leading_trivia_elements()?;
                 let start = trivia
                     .iter()
                     .filter(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind().is_comment()))
@@ -240,32 +238,21 @@ fn remove_document_comment(doc: &mut HjsonDocument, header: bool) -> Result<(), 
 }
 
 fn extract_document_comment(doc: &HjsonDocument, header: bool) -> Option<String> {
-    let children: Vec<_> = doc.root().children_with_tokens().collect();
+    let ast = doc.ast().ok()?;
     let mut bodies = Vec::new();
 
     if header {
-        for elem in children {
-            match elem {
-                NodeOrToken::Token(token) if token.kind().is_comment() => {
-                    bodies.push(strip_comment_body(token.kind(), token.text()))
-                }
-                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
-                NodeOrToken::Node(_) => break,
-                _ => break,
+        for elem in ast.leading_trivia().ok()? {
+            if let Trivia::Comment(comment) = elem {
+                bodies.push(comment.body)
             }
         }
     } else {
-        for elem in children.into_iter().rev() {
-            match elem {
-                NodeOrToken::Token(token) if token.kind().is_comment() => {
-                    bodies.push(strip_comment_body(token.kind(), token.text()))
-                }
-                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
-                NodeOrToken::Node(_) => break,
-                _ => break,
+        for elem in ast.trailing_trivia().ok()? {
+            if let Trivia::Comment(comment) = elem {
+                bodies.push(comment.body)
             }
         }
-        bodies.reverse();
     }
 
     if bodies.is_empty() {
@@ -276,28 +263,18 @@ fn extract_document_comment(doc: &HjsonDocument, header: bool) -> Option<String>
 }
 
 fn extract_document_comment_style(doc: &HjsonDocument, header: bool) -> Option<CommentStyle> {
-    let children: Vec<_> = doc.root().children_with_tokens().collect();
+    let ast = doc.ast().ok()?;
 
     if header {
-        for elem in children {
-            match elem {
-                NodeOrToken::Token(token) if token.kind().is_comment() => {
-                    return comment_style_from_kind(token.kind())
-                }
-                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
-                NodeOrToken::Node(_) => break,
-                _ => break,
+        for elem in ast.leading_trivia().ok()? {
+            if let Trivia::Comment(comment) = elem {
+                return comment_style_from_kind(comment.kind);
             }
         }
     } else {
-        for elem in children.into_iter().rev() {
-            match elem {
-                NodeOrToken::Token(token) if token.kind().is_comment() => {
-                    return comment_style_from_kind(token.kind())
-                }
-                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
-                NodeOrToken::Node(_) => break,
-                _ => break,
+        for elem in ast.trailing_trivia().ok()? {
+            if let Trivia::Comment(comment) = elem {
+                return comment_style_from_kind(comment.kind);
             }
         }
     }
@@ -305,28 +282,29 @@ fn extract_document_comment_style(doc: &HjsonDocument, header: bool) -> Option<C
     None
 }
 
-fn comment_body_from_element(elem: &NodeOrToken<RedNode, RedToken>) -> Option<String> {
+fn comment_body_from_trivia(elem: &Trivia) -> Option<String> {
     match elem {
-        NodeOrToken::Token(token) if token.kind().is_comment() => {
-            Some(strip_comment_body(token.kind(), token.text()))
-        }
+        Trivia::Comment(comment) => Some(comment.body.clone()),
         _ => None,
     }
 }
 
-fn comment_style_from_element(elem: &NodeOrToken<RedNode, RedToken>) -> Option<CommentStyle> {
+fn comment_style_from_trivia(elem: &Trivia) -> Option<CommentStyle> {
     match elem {
-        NodeOrToken::Token(token) => comment_style_from_kind(token.kind()),
-        NodeOrToken::Node(_) => None,
+        Trivia::Comment(comment) => Some(match comment.kind {
+            CommentKind::Line => CommentStyle::Line,
+            CommentKind::Hash => CommentStyle::Hash,
+            CommentKind::Block => CommentStyle::Block,
+        }),
+        _ => None,
     }
 }
 
-fn comment_style_from_kind(kind: SyntaxKind) -> Option<CommentStyle> {
+fn comment_style_from_kind(kind: CommentKind) -> Option<CommentStyle> {
     match kind {
-        SyntaxKind::LineComment => Some(CommentStyle::Line),
-        SyntaxKind::HashComment => Some(CommentStyle::Hash),
-        SyntaxKind::BlockComment => Some(CommentStyle::Block),
-        _ => None,
+        CommentKind::Line => Some(CommentStyle::Line),
+        CommentKind::Hash => Some(CommentStyle::Hash),
+        CommentKind::Block => Some(CommentStyle::Block),
     }
 }
 
@@ -360,27 +338,5 @@ fn render_comment_text(style: CommentStyle, comment: &str) -> String {
         CommentStyle::Line => format!("// {}", comment),
         CommentStyle::Hash => format!("# {}", comment),
         CommentStyle::Block | CommentStyle::Preserve => format!("/* {} */", comment),
-    }
-}
-
-fn strip_comment_body(kind: SyntaxKind, text: &str) -> String {
-    match kind {
-        SyntaxKind::LineComment => text
-            .strip_prefix("//")
-            .unwrap_or(text)
-            .trim_start()
-            .to_string(),
-        SyntaxKind::HashComment => text
-            .strip_prefix('#')
-            .unwrap_or(text)
-            .trim_start()
-            .to_string(),
-        SyntaxKind::BlockComment => text
-            .strip_prefix("/*")
-            .and_then(|s| s.strip_suffix("*/"))
-            .unwrap_or(text)
-            .trim()
-            .to_string(),
-        _ => text.to_string(),
     }
 }
