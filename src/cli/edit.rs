@@ -3,9 +3,10 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use anyhow::{Context, Result};
 use hjson_edit::high_level::{
     ops::{
-        comment::{CommentPath, CommentStyle, HjsonDocumentCommentEdit},
+        comment::{CommentStyle, HjsonDocumentCommentEdit},
         object::{HjsonDocumentObjectEdit, StringStyle},
     },
+    path::HjsonCommentPath,
     value::HjsonValue,
     HjsonDocument,
 };
@@ -21,15 +22,15 @@ enum EditOp {
         path: String,
     },
     CommentSet {
-        path: CommentPath,
+        path: HjsonCommentPath,
         text: String,
     },
     CommentAppend {
-        path: CommentPath,
+        path: HjsonCommentPath,
         text: String,
     },
     CommentRemove {
-        path: CommentPath,
+        path: HjsonCommentPath,
     },
     SetCommentStyle(CommentStyle),
     SetStringStyle(StringStyle),
@@ -152,20 +153,8 @@ impl CliValueParser {
         None
     }
 
-    fn parse_comment_path(raw: &str) -> CommentPath {
-        if raw == ":header" {
-            CommentPath::Header
-        } else if raw == ":footer" {
-            CommentPath::Footer
-        } else if let Some(stripped) = raw.strip_suffix(":inline") {
-            CommentPath::Inline {
-                dot_path: stripped.to_string(),
-            }
-        } else {
-            CommentPath::Key {
-                dot_path: raw.to_string(),
-            }
-        }
+    fn parse_comment_path(raw: &str) -> Result<HjsonCommentPath> {
+        HjsonCommentPath::try_from(raw).with_context(|| format!("Invalid comment path: {raw}"))
     }
 }
 
@@ -253,7 +242,8 @@ impl<'a> EditOpCollector<'a> {
                 self.ops_with_indices.push((
                     idx_chunk[0],
                     EditOp::CommentSet {
-                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy()),
+                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())
+                            .expect("comment path should parse"),
                         text: chunk[1].to_string_lossy().to_string(),
                     },
                 ));
@@ -272,7 +262,8 @@ impl<'a> EditOpCollector<'a> {
                 self.ops_with_indices.push((
                     idx_chunk[0],
                     EditOp::CommentAppend {
-                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy()),
+                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())
+                            .expect("comment path should parse"),
                         text: chunk[1].to_string_lossy().to_string(),
                     },
                 ));
@@ -287,7 +278,8 @@ impl<'a> EditOpCollector<'a> {
                 self.ops_with_indices.push((
                     *idx,
                     EditOp::CommentRemove {
-                        path: CliValueParser::parse_comment_path(&val.to_string_lossy()),
+                        path: CliValueParser::parse_comment_path(&val.to_string_lossy())
+                            .expect("comment path should parse"),
                     },
                 ));
             }
@@ -368,44 +360,25 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 string_style,
             } => {
                 let style = string_style.unwrap_or(StringStyle::Preserve);
-                doc = HjsonDocumentObjectEdit::set(doc.string_style(style), path.as_str(), value)?;
+                doc = HjsonDocumentObjectEdit::set(doc.string_style(style), path, value)?;
             }
             EditOp::Remove { path } => {
-                doc = HjsonDocumentObjectEdit::remove(doc, path.as_str())?;
+                doc = HjsonDocumentObjectEdit::remove(doc, path)?;
             }
             EditOp::CommentSet { path, text } => {
-                let dot_path = match &path {
-                    CommentPath::Header => ":header",
-                    CommentPath::Footer => ":footer",
-                    CommentPath::Key { dot_path } | CommentPath::Inline { dot_path } => {
-                        dot_path.as_str()
-                    }
-                };
-                doc = HjsonDocumentCommentEdit::set(doc, dot_path, text)?;
+                doc = HjsonDocumentCommentEdit::set(doc, path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
-                let dot_path = match &path {
-                    CommentPath::Key { dot_path } => dot_path.as_str(),
-                    CommentPath::Inline { dot_path } => dot_path.as_str(),
-                    CommentPath::Header => ":header",
-                    CommentPath::Footer => ":footer",
-                };
                 // getとsetを使ってappendを実装
-                let existing = HjsonDocumentCommentEdit::get(&doc, dot_path)?;
+                let existing = HjsonDocumentCommentEdit::get(&doc, path.clone())?;
                 let new_comment = match existing {
                     Some(existing) => format!("{}\n{}", existing, text),
                     None => text,
                 };
-                doc = HjsonDocumentCommentEdit::set(doc, dot_path, new_comment)?;
+                doc = HjsonDocumentCommentEdit::set(doc, path, new_comment)?;
             }
             EditOp::CommentRemove { path } => {
-                let dot_path = match &path {
-                    CommentPath::Key { dot_path } => dot_path.as_str(),
-                    CommentPath::Inline { dot_path } => dot_path.as_str(),
-                    CommentPath::Header => ":header",
-                    CommentPath::Footer => ":footer",
-                };
-                doc = HjsonDocumentCommentEdit::remove(doc, dot_path)?;
+                doc = HjsonDocumentCommentEdit::remove(doc, path)?;
             }
         }
     }

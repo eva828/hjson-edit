@@ -33,6 +33,24 @@ pub enum HjsonCommentPath {
     Inline(HjsonObjectPath),
 }
 
+impl TryFrom<&str> for HjsonCommentPath {
+    type Error = HjsonEditError;
+
+    fn try_from(raw: &str) -> Result<Self, Self::Error> {
+        if raw == ":header" {
+            Ok(Self::Header)
+        } else if raw == ":footer" {
+            Ok(Self::Footer)
+        } else if let Some(stripped) = raw.strip_suffix(":inline") {
+            Ok(Self::Inline(HjsonObjectPath::parse(stripped.to_string())?))
+        } else if let Some(stripped) = raw.strip_suffix(":before") {
+            Ok(Self::Before(HjsonObjectPath::parse(stripped.to_string())?))
+        } else {
+            Ok(Self::Before(HjsonObjectPath::parse(raw.to_string())?))
+        }
+    }
+}
+
 impl HjsonObjectPath {
     pub fn new(path: impl Into<HjsonObjectPath>) -> Self {
         path.into()

@@ -1,130 +1,386 @@
+use rowan::{GreenToken, NodeOrToken};
+
 use crate::{
     high_level::{
-        path::{HjsonCommentPath, HjsonObjectPath, ObjectPathSegment, PathSegment},
+        ast::AstNode,
+        error::HjsonEditError,
+        ext::RedNodeExt,
+        path::{HjsonCommentPath, HjsonObjectPath},
+        style::DetectNewline,
         HjsonDocument,
     },
-    HjsonEditError,
+    syntax::{RedNode, RedToken, SyntaxKind},
 };
 
-/// Style to use when writing comments into the document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommentStyle {
-    /// Preserve whatever style the comment already has; default to block when creating new.
     #[default]
     Preserve,
-    /// `// …`
     Line,
-    /// `# …`
     Hash,
-    /// `/* … */`
     Block,
 }
 
-/// Identifies the target of a comment operation.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CommentPath {
-    /// The leading comment of the key at the given dot-path.
-    Key { dot_path: String },
-    /// The inline (trailing) comment of the value at the given dot-path.
-    Inline { dot_path: String },
-    /// The document-level header comment (before the root value).
-    Header,
-    /// The document-level footer comment (after the root value).
-    Footer,
-}
-
 pub trait HjsonDocumentCommentEdit {
-    fn get(
-        &self,
-        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
-    ) -> Result<Option<String>, HjsonEditError>;
+    fn get(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;
     fn set(
         self,
-        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
+        path: HjsonCommentPath,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(
-        self,
-        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
-    ) -> Result<Self, HjsonEditError>
+    fn remove(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
 
 impl HjsonDocumentCommentEdit for HjsonDocument {
-    fn get(
-        &self,
-        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
-    ) -> Result<Option<String>, HjsonEditError> {
-        let path = path.try_into()?;
+    fn get(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError> {
+        Ok(match path {
+            HjsonCommentPath::Header => extract_document_comment(self, true),
+            HjsonCommentPath::Footer => extract_document_comment(self, false),
+            HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
+                let pair = self.resolve_pair(&path)?;
+                let comments = pair
+                    .leading_trivia()?
+                    .into_iter()
+                    .filter_map(|elem| comment_body_from_element(&elem))
+                    .collect::<Vec<_>>();
 
-        match path {
-            HjsonCommentPath::Header => {
-                // Return the header comment (before the root value).
-                unimplemented!()
+                if comments.is_empty() {
+                    None
+                } else {
+                    Some(comments.into_iter().rev().collect::<Vec<_>>().join("\n"))
+                }
             }
-            HjsonCommentPath::Footer => {
-                // Return the footer comment (after the root value).
-                unimplemented!()
-            }
-            HjsonCommentPath::Before(path) => {
-                unimplemented!()
-            }
-            HjsonCommentPath::Inline(path) => {
-                unimplemented!()
-            }
-        }
+        })
     }
 
     fn set(
-        self,
-        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
+        mut self,
+        path: HjsonCommentPath,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError> {
-        let path = path.try_into()?;
-        let _comment = comment.into();
+        let comment = comment.into();
 
         match path {
             HjsonCommentPath::Header => {
-                // Return the header comment (before the root value).
-                unimplemented!()
+                let existing_style = extract_document_comment_style(&self, true);
+                remove_document_comment(&mut self, true)?;
+                insert_document_comment(self, true, comment, existing_style)
             }
             HjsonCommentPath::Footer => {
-                // Return the footer comment (after the root value).
-                unimplemented!()
+                let existing_style = extract_document_comment_style(&self, false);
+                remove_document_comment(&mut self, false)?;
+                insert_document_comment(self, false, comment, existing_style)
             }
-            HjsonCommentPath::Before(path) => {
-                unimplemented!()
-            }
-            HjsonCommentPath::Inline(path) => {
-                unimplemented!()
+            HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
+                let existing_style = self
+                    .resolve_pair(&path)?
+                    .leading_trivia()?
+                    .into_iter()
+                    .find_map(|elem| comment_style_from_element(&elem));
+
+                self = self.remove_comment_by_path(HjsonCommentPath::Before(path.clone()))?;
+
+                let resolved_style =
+                    resolve_comment_style(self.current_comment_style(), &comment, existing_style);
+                let rendered = render_comment_text(resolved_style, &comment);
+                let pair = self.resolve_pair(&path)?;
+                let parent = pair.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+
+                let source = self.to_string();
+                let style = source.detect_newline().as_str().to_string();
+                let newline = SyntaxKind::Newline.create_token(&style);
+                let indent = SyntaxKind::Whitespace.create_token(&"  ".repeat(path.depth()));
+                let comment_token =
+                    GreenToken::new(kind_from_style(resolved_style).into(), &rendered);
+
+                let index = pair.node().index();
+                let new_green = parent.green().splice_children(
+                    index..index,
+                    vec![comment_token.into(), newline.into(), indent.into()],
+                );
+                let new_root = parent.replace_with(new_green);
+                self.root = RedNode::new_root(new_root);
+                Ok(self)
             }
         }
     }
 
-    fn remove(
-        self,
-        path: impl TryInto<HjsonCommentPath, Error = HjsonEditError>,
-    ) -> Result<Self, HjsonEditError> {
-        let path = path.try_into()?;
+    fn remove(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
+        self.remove_comment_by_path(path)
+    }
+}
 
+impl HjsonDocument {
+    fn resolve_pair(
+        &self,
+        path: &HjsonObjectPath,
+    ) -> Result<crate::high_level::ast::Pair, HjsonEditError> {
+        let mut target = self.root().clone().document_start_node();
+        for segment in path.segments() {
+            target = target
+                .child(segment)
+                .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+        }
+
+        while target.kind() != SyntaxKind::Pair {
+            target = target.parent().ok_or(HjsonEditError::ParentNotFound)?;
+        }
+
+        crate::high_level::ast::Pair::cast(target)
+    }
+
+    fn remove_comment_by_path(mut self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
         match path {
             HjsonCommentPath::Header => {
-                // Return the header comment (before the root value).
-                unimplemented!()
+                remove_document_comment(&mut self, true)?;
+                Ok(self)
             }
             HjsonCommentPath::Footer => {
-                // Return the footer comment (after the root value).
-                unimplemented!()
+                remove_document_comment(&mut self, false)?;
+                Ok(self)
             }
-            HjsonCommentPath::Before(path) => {
-                unimplemented!()
-            }
-            HjsonCommentPath::Inline(path) => {
-                unimplemented!()
+            HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
+                let pair = self.resolve_pair(&path)?;
+                let parent = pair.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+                let trivia = pair.leading_trivia()?;
+                let start = trivia
+                    .iter()
+                    .filter(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind().is_comment()))
+                    .map(|elem| elem.index())
+                    .min();
+
+                let Some(start) = start else {
+                    return Ok(self);
+                };
+
+                let new_green = parent
+                    .green()
+                    .splice_children(start..pair.node().index(), vec![]);
+                let new_root = parent.replace_with(new_green);
+                self.root = RedNode::new_root(new_root);
+                Ok(self)
             }
         }
+    }
+}
+
+fn insert_document_comment(
+    mut doc: HjsonDocument,
+    header: bool,
+    comment: String,
+    existing_style: Option<CommentStyle>,
+) -> Result<HjsonDocument, HjsonEditError> {
+    let style = resolve_comment_style(doc.current_comment_style(), &comment, existing_style);
+    let rendered = render_comment_text(style, &comment);
+    let source = doc.to_string();
+    let newline = source.detect_newline().as_str().to_string();
+
+    let root = doc.root().clone();
+    let comment_token = GreenToken::new(kind_from_style(style).into(), &rendered);
+    let newline = SyntaxKind::Newline.create_token(&newline);
+
+    let insert_at = if header {
+        0
+    } else {
+        root.children_with_tokens().count()
+    };
+    let new_green = root.green().splice_children(
+        insert_at..insert_at,
+        vec![comment_token.into(), newline.into()],
+    );
+    doc.root = RedNode::new_root(new_green);
+    Ok(doc)
+}
+
+fn remove_document_comment(doc: &mut HjsonDocument, header: bool) -> Result<(), HjsonEditError> {
+    let root = doc.root().clone();
+    let children: Vec<_> = root.children_with_tokens().collect();
+
+    let range = if header {
+        let mut end = 0usize;
+        while end < children.len() {
+            match &children[end] {
+                NodeOrToken::Token(token)
+                    if token.kind().is_comment() || token.kind().is_trivia() =>
+                {
+                    end += 1
+                }
+                NodeOrToken::Node(_) => break,
+                _ => break,
+            }
+        }
+        0..end
+    } else {
+        let mut start = children.len();
+        while start > 0 {
+            match &children[start - 1] {
+                NodeOrToken::Token(token)
+                    if token.kind().is_comment() || token.kind().is_trivia() =>
+                {
+                    start -= 1
+                }
+                NodeOrToken::Node(_) => break,
+                _ => break,
+            }
+        }
+        start..children.len()
+    };
+
+    if range.is_empty() {
+        return Ok(());
+    }
+
+    let new_green = root.green().splice_children(range, vec![]);
+    doc.root = RedNode::new_root(new_green);
+    Ok(())
+}
+
+fn extract_document_comment(doc: &HjsonDocument, header: bool) -> Option<String> {
+    let children: Vec<_> = doc.root().children_with_tokens().collect();
+    let mut bodies = Vec::new();
+
+    if header {
+        for elem in children {
+            match elem {
+                NodeOrToken::Token(token) if token.kind().is_comment() => {
+                    bodies.push(strip_comment_body(token.kind(), token.text()))
+                }
+                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
+                NodeOrToken::Node(_) => break,
+                _ => break,
+            }
+        }
+    } else {
+        for elem in children.into_iter().rev() {
+            match elem {
+                NodeOrToken::Token(token) if token.kind().is_comment() => {
+                    bodies.push(strip_comment_body(token.kind(), token.text()))
+                }
+                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
+                NodeOrToken::Node(_) => break,
+                _ => break,
+            }
+        }
+        bodies.reverse();
+    }
+
+    if bodies.is_empty() {
+        None
+    } else {
+        Some(bodies.join("\n"))
+    }
+}
+
+fn extract_document_comment_style(doc: &HjsonDocument, header: bool) -> Option<CommentStyle> {
+    let children: Vec<_> = doc.root().children_with_tokens().collect();
+
+    if header {
+        for elem in children {
+            match elem {
+                NodeOrToken::Token(token) if token.kind().is_comment() => {
+                    return comment_style_from_kind(token.kind())
+                }
+                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
+                NodeOrToken::Node(_) => break,
+                _ => break,
+            }
+        }
+    } else {
+        for elem in children.into_iter().rev() {
+            match elem {
+                NodeOrToken::Token(token) if token.kind().is_comment() => {
+                    return comment_style_from_kind(token.kind())
+                }
+                NodeOrToken::Token(token) if token.kind().is_trivia() => {}
+                NodeOrToken::Node(_) => break,
+                _ => break,
+            }
+        }
+    }
+
+    None
+}
+
+fn comment_body_from_element(elem: &NodeOrToken<RedNode, RedToken>) -> Option<String> {
+    match elem {
+        NodeOrToken::Token(token) if token.kind().is_comment() => {
+            Some(strip_comment_body(token.kind(), token.text()))
+        }
+        _ => None,
+    }
+}
+
+fn comment_style_from_element(elem: &NodeOrToken<RedNode, RedToken>) -> Option<CommentStyle> {
+    match elem {
+        NodeOrToken::Token(token) => comment_style_from_kind(token.kind()),
+        NodeOrToken::Node(_) => None,
+    }
+}
+
+fn comment_style_from_kind(kind: SyntaxKind) -> Option<CommentStyle> {
+    match kind {
+        SyntaxKind::LineComment => Some(CommentStyle::Line),
+        SyntaxKind::HashComment => Some(CommentStyle::Hash),
+        SyntaxKind::BlockComment => Some(CommentStyle::Block),
+        _ => None,
+    }
+}
+
+fn kind_from_style(style: CommentStyle) -> SyntaxKind {
+    match style {
+        CommentStyle::Preserve | CommentStyle::Block => SyntaxKind::BlockComment,
+        CommentStyle::Line => SyntaxKind::LineComment,
+        CommentStyle::Hash => SyntaxKind::HashComment,
+    }
+}
+
+fn resolve_comment_style(
+    preferred: CommentStyle,
+    comment: &str,
+    existing_style: Option<CommentStyle>,
+) -> CommentStyle {
+    if comment.contains('\n') || comment.contains('\r') {
+        return CommentStyle::Block;
+    }
+
+    match preferred {
+        CommentStyle::Preserve => existing_style.unwrap_or(CommentStyle::Block),
+        CommentStyle::Line => CommentStyle::Line,
+        CommentStyle::Hash => CommentStyle::Hash,
+        CommentStyle::Block => CommentStyle::Block,
+    }
+}
+
+fn render_comment_text(style: CommentStyle, comment: &str) -> String {
+    match style {
+        CommentStyle::Line => format!("// {}", comment),
+        CommentStyle::Hash => format!("# {}", comment),
+        CommentStyle::Block | CommentStyle::Preserve => format!("/* {} */", comment),
+    }
+}
+
+fn strip_comment_body(kind: SyntaxKind, text: &str) -> String {
+    match kind {
+        SyntaxKind::LineComment => text
+            .strip_prefix("//")
+            .unwrap_or(text)
+            .trim_start()
+            .to_string(),
+        SyntaxKind::HashComment => text
+            .strip_prefix('#')
+            .unwrap_or(text)
+            .trim_start()
+            .to_string(),
+        SyntaxKind::BlockComment => text
+            .strip_prefix("/*")
+            .and_then(|s| s.strip_suffix("*/"))
+            .unwrap_or(text)
+            .trim()
+            .to_string(),
+        _ => text.to_string(),
     }
 }

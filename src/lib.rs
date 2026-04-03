@@ -16,7 +16,7 @@ pub(crate) mod syntax;
 pub use format::{FormatConfig, Formatter};
 pub use high_level::{
     error::HjsonEditError,
-    ops::comment::{CommentPath, CommentStyle},
+    ops::comment::CommentStyle,
     ops::object::{HjsonDocumentObjectEdit, StringStyle},
     path::{ArrayPathSegment, ObjectPathSegment, PathSegment},
     value::HjsonValue,
