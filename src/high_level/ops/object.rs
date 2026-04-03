@@ -164,7 +164,10 @@ fn set_value_child(
         .children()
         .find(|child| !child.kind().is_trivia())
         .ok_or(HjsonEditError::ParentNotFound)?;
-    rebuild_child_with_set(&child, last, value)
+    let updated_child = rebuild_child_with_set(&child, last, value)?;
+    Ok(parent
+        .green()
+        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
 }
 
 fn set_object_child(
@@ -191,6 +194,11 @@ fn set_object_child(
                     && pair.pair_key().as_deref() == Some(key.as_str()) =>
             {
                 children.push(value.pair_to_green(key).into());
+                replaced = true;
+            }
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBrace && !replaced => {
+                children.push(value.pair_to_green(key).into());
+                children.push(owned_green(NodeOrToken::Token(token)));
                 replaced = true;
             }
             NodeOrToken::Node(node) => children.push(owned_green(NodeOrToken::Node(node))),
@@ -277,7 +285,10 @@ fn remove_value_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         .children()
         .find(|child| !child.kind().is_trivia())
         .ok_or(HjsonEditError::ParentNotFound)?;
-    rebuild_child_with_remove(&child, last)
+    let updated_child = rebuild_child_with_remove(&child, last)?;
+    Ok(parent
+        .green()
+        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
 }
 
 fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
