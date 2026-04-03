@@ -201,7 +201,10 @@ pub enum DocumentItem {
 
 impl AstNode for Document {
     fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::Root
+        matches!(
+            kind,
+            SyntaxKind::Root | SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
+        )
     }
 
     fn cast(node: RedNode) -> Result<Self, HjsonEditError> {
@@ -226,14 +229,24 @@ impl AstNode for Document {
 
 impl Document {
     pub fn item(&self) -> Option<DocumentItem> {
-        let child = self
-            .syntax
-            .children()
-            .find(|child| !child.kind().is_trivia())?;
-        match child.kind() {
-            SyntaxKind::Object => Some(DocumentItem::Object(Object::cast(child).ok()?)),
-            SyntaxKind::Array => Some(DocumentItem::Array(Array::cast(child).ok()?)),
-            SyntaxKind::Value => Some(DocumentItem::Value(Value::cast(child).ok()?)),
+        match self.syntax.kind() {
+            SyntaxKind::Root => {
+                let child = self
+                    .syntax
+                    .children()
+                    .find(|child| !child.kind().is_trivia())?;
+                match child.kind() {
+                    SyntaxKind::Object => Some(DocumentItem::Object(Object::cast(child).ok()?)),
+                    SyntaxKind::Array => Some(DocumentItem::Array(Array::cast(child).ok()?)),
+                    SyntaxKind::Value => Some(DocumentItem::Value(Value::cast(child).ok()?)),
+                    _ => None,
+                }
+            }
+            SyntaxKind::Object => Some(DocumentItem::Object(
+                Object::cast(self.syntax.clone()).ok()?,
+            )),
+            SyntaxKind::Array => Some(DocumentItem::Array(Array::cast(self.syntax.clone()).ok()?)),
+            SyntaxKind::Value => Some(DocumentItem::Value(Value::cast(self.syntax.clone()).ok()?)),
             _ => None,
         }
     }
@@ -411,6 +424,23 @@ impl AstNode for Key {
 }
 
 impl Key {
+    pub fn raw_text(&self) -> Option<String> {
+        self.syntax
+            .children_with_tokens()
+            .find_map(|elem| match elem {
+                NodeOrToken::Token(token) => {
+                    let text = token.text().to_string();
+                    match token.kind() {
+                        SyntaxKind::String
+                        | SyntaxKind::BlockString
+                        | SyntaxKind::UnquotedString => Some(text),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+    }
+
     pub fn body_text(&self) -> Option<String> {
         self.syntax
             .children_with_tokens()

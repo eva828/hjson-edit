@@ -209,8 +209,23 @@ impl RedNodeExt for RedNode {
 
     fn format_like(&self, root: GreenNode) -> GreenNode {
         let mut config = FormatConfig::default();
-        config.newline = self.to_string().detect_newline().as_str().to_string();
-        Formatter::format_with_depth(root, self.container_depth(), config)
+        config.newline = root.to_string().detect_newline().as_str().to_string();
+
+        let document = match crate::high_level::HjsonDocument::parse(&root.to_string()) {
+            Ok(document) => document,
+            Err(_) => return root,
+        };
+
+        let ast = match document.ast() {
+            Ok(ast) => ast,
+            Err(_) => return root,
+        };
+
+        let rendered = Formatter::format(&ast, config);
+        match crate::high_level::HjsonDocument::parse(&rendered) {
+            Ok(document) => document.root().green().into_owned(),
+            Err(_) => root,
+        }
     }
 }
 
