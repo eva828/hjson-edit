@@ -68,6 +68,13 @@ impl Trivia {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Layout {
+    pub depth: usize,
+    pub is_last: bool,
+    pub owns_trivia: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringValue {
     raw: String,
@@ -155,6 +162,7 @@ pub struct Document {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub layout: Layout,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,6 +170,7 @@ pub struct Object {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub layout: Layout,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +178,7 @@ pub struct Array {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub layout: Layout,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -176,6 +186,7 @@ pub struct Member {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub layout: Layout,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -188,6 +199,7 @@ pub struct Value {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub layout: Layout,
 }
 
 pub type Pair = Member;
@@ -215,10 +227,13 @@ impl AstNode for Document {
             });
         }
 
+        let layout = collect_layout(&node, true);
+
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node),
-            trailing_trivia: collect_trailing_trivia(&node),
+            leading_trivia: collect_root_leading_trivia(&node),
+            trailing_trivia: collect_root_trailing_trivia(&node),
+            layout,
         })
     }
 
@@ -294,10 +309,17 @@ impl AstNode for Object {
             });
         }
 
+        let owns_trivia = !matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        );
+        let layout = collect_layout(&node, owns_trivia);
+
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node),
-            trailing_trivia: collect_trailing_trivia(&node),
+            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
+            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            layout,
         })
     }
 
@@ -335,10 +357,17 @@ impl AstNode for Array {
             });
         }
 
+        let owns_trivia = !matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        );
+        let layout = collect_layout(&node, owns_trivia);
+
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node),
-            trailing_trivia: collect_trailing_trivia(&node),
+            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
+            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            layout,
         })
     }
 
@@ -370,10 +399,13 @@ impl AstNode for Member {
             });
         }
 
+        let layout = collect_layout(&node, true);
+
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node),
-            trailing_trivia: collect_trailing_trivia(&node),
+            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
+            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            layout,
         })
     }
 
@@ -424,21 +456,24 @@ impl AstNode for Key {
 }
 
 impl Key {
-    pub fn raw_text(&self) -> Option<String> {
+    pub fn token_text_and_kind(&self) -> Option<(SyntaxKind, String)> {
         self.syntax
             .children_with_tokens()
             .find_map(|elem| match elem {
-                NodeOrToken::Token(token) => {
-                    let text = token.text().to_string();
-                    match token.kind() {
-                        SyntaxKind::String
-                        | SyntaxKind::BlockString
-                        | SyntaxKind::UnquotedString => Some(text),
-                        _ => None,
-                    }
+                NodeOrToken::Token(token)
+                    if matches!(
+                        token.kind(),
+                        SyntaxKind::String | SyntaxKind::BlockString | SyntaxKind::UnquotedString
+                    ) =>
+                {
+                    Some((token.kind(), token.text().to_string()))
                 }
                 _ => None,
             })
+    }
+
+    pub fn raw_text(&self) -> Option<String> {
+        self.token_text_and_kind().map(|(_, text)| text)
     }
 
     pub fn body_text(&self) -> Option<String> {
@@ -472,10 +507,17 @@ impl AstNode for Value {
             });
         }
 
+        let owns_trivia = !matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        );
+        let layout = collect_layout(&node, owns_trivia);
+
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node),
-            trailing_trivia: collect_trailing_trivia(&node),
+            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
+            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            layout,
         })
     }
 
@@ -560,7 +602,81 @@ fn strip_block(text: &str) -> String {
         .to_string()
 }
 
-fn collect_leading_trivia(node: &RedNode) -> Vec<Trivia> {
+fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
+    if !enabled {
+        return Vec::new();
+    }
+
+    let children = if let Some(parent) = node.parent() {
+        parent.children_with_tokens().collect::<Vec<_>>()
+    } else {
+        node.children_with_tokens().collect::<Vec<_>>()
+    };
+
+    let index = node.index();
+    if index == 0 {
+        return Vec::new();
+    }
+
+    let mut trivia = Vec::new();
+    let mut saw_comment = false;
+    let mut saw_newline = false;
+
+    for elem in children.iter().take(index).rev() {
+        let Some(item) = trivia_from_element(elem) else {
+            break;
+        };
+
+        match item {
+            Trivia::Whitespace(_) => continue,
+            Trivia::Comma(_) => break,
+            Trivia::Comment(comment) => {
+                saw_comment = true;
+                trivia.push(Trivia::Comment(comment));
+            }
+            Trivia::Newline { kind, text } => {
+                if saw_newline && !saw_comment {
+                    break;
+                }
+                saw_newline = true;
+                trivia.push(Trivia::Newline { kind, text });
+            }
+        }
+    }
+
+    trivia.reverse();
+    if saw_comment {
+        trivia
+    } else {
+        Vec::new()
+    }
+}
+
+fn collect_root_leading_trivia(node: &RedNode) -> Vec<Trivia> {
+    let children = node.children_with_tokens().collect::<Vec<_>>();
+    let mut trivia = Vec::new();
+
+    for elem in children.iter() {
+        let Some(item) = trivia_from_element(elem) else {
+            break;
+        };
+
+        match item {
+            Trivia::Whitespace(text) => trivia.push(Trivia::Whitespace(text)),
+            Trivia::Newline { kind, text } => trivia.push(Trivia::Newline { kind, text }),
+            Trivia::Comment(comment) => trivia.push(Trivia::Comment(comment)),
+            Trivia::Comma(_) => break,
+        }
+    }
+
+    trivia
+}
+
+fn collect_trailing_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
+    if !enabled {
+        return Vec::new();
+    }
+
     let children = if let Some(parent) = node.parent() {
         parent.children_with_tokens().collect::<Vec<_>>()
     } else {
@@ -569,15 +685,41 @@ fn collect_leading_trivia(node: &RedNode) -> Vec<Trivia> {
 
     let index = node.index();
     let mut trivia = Vec::new();
+    for elem in children.iter().skip(index + 1) {
+        let Some(item) = trivia_from_element(elem) else {
+            break;
+        };
 
-    if index == 0 {
-        return trivia;
+        match item {
+            Trivia::Whitespace(_) => continue,
+            Trivia::Comma(text) => trivia.push(Trivia::Comma(text)),
+            Trivia::Comment(comment) => {
+                trivia.push(Trivia::Comment(comment));
+            }
+            Trivia::Newline { kind, text } => {
+                trivia.push(Trivia::Newline { kind, text });
+                break;
+            }
+        }
     }
 
-    for elem in children.iter().take(index).rev() {
-        match trivia_from_element(elem) {
-            Some(item) => trivia.push(item),
-            None => break,
+    trivia
+}
+
+fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
+    let children = node.children_with_tokens().collect::<Vec<_>>();
+    let mut trivia = Vec::new();
+
+    for elem in children.iter().rev() {
+        let Some(item) = trivia_from_element(elem) else {
+            break;
+        };
+
+        match item {
+            Trivia::Whitespace(text) => trivia.push(Trivia::Whitespace(text)),
+            Trivia::Newline { kind, text } => trivia.push(Trivia::Newline { kind, text }),
+            Trivia::Comment(comment) => trivia.push(Trivia::Comment(comment)),
+            Trivia::Comma(_) => break,
         }
     }
 
@@ -585,24 +727,31 @@ fn collect_leading_trivia(node: &RedNode) -> Vec<Trivia> {
     trivia
 }
 
-fn collect_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
-    let children = if let Some(parent) = node.parent() {
-        parent.children_with_tokens().collect::<Vec<_>>()
-    } else {
-        node.children_with_tokens().collect::<Vec<_>>()
-    };
-
-    let index = node.index();
-    let mut trivia = Vec::new();
-
-    for elem in children.iter().skip(index + 1) {
-        match trivia_from_element(elem) {
-            Some(item) => trivia.push(item),
-            None => break,
+fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
+    let mut depth = 0usize;
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if matches!(parent.kind(), SyntaxKind::Object | SyntaxKind::Array) {
+            depth += 1;
         }
+        current = parent.parent();
     }
 
-    trivia
+    let is_last = node.parent().is_some_and(|parent| {
+        let mut last_child = None;
+        for child in parent.children() {
+            if !child.kind().is_trivia() {
+                last_child = Some(child);
+            }
+        }
+        last_child.is_some_and(|child| child == *node)
+    });
+
+    Layout {
+        depth,
+        is_last,
+        owns_trivia,
+    }
 }
 
 fn trivia_from_element(element: &NodeOrToken<RedNode, RedToken>) -> Option<Trivia> {

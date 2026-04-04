@@ -1,4 +1,7 @@
+use rowan::{GreenNode, GreenNodeBuilder};
+
 use crate::ast::{Array, Document, DocumentItem, Member, Object, Trivia, Value, ValueContent};
+use crate::syntax::SyntaxKind;
 
 #[derive(Clone, Debug)]
 pub struct FormatConfig {
@@ -25,146 +28,218 @@ impl FormatConfig {
 pub struct Formatter;
 
 impl Formatter {
-    pub fn format(document: &Document, config: FormatConfig) -> String {
-        let mut out = String::new();
-        render_document(document, 0, &config, &mut out);
-        out
+    pub fn build(document: &Document, config: FormatConfig) -> GreenNode {
+        let mut builder = GreenNodeBuilder::new();
+        build_document(&mut builder, document, &config);
+        builder.finish()
     }
 }
 
-fn render_document(document: &Document, depth: usize, config: &FormatConfig, out: &mut String) {
-    render_trivia(&document.leading_trivia, depth, config, out);
+fn build_document(
+    builder: &mut GreenNodeBuilder<'static>,
+    document: &Document,
+    config: &FormatConfig,
+) {
+    builder.start_node(SyntaxKind::Root.into());
+    write_comments(builder, &document.leading_trivia, 0, config);
 
     if let Some(item) = document.item() {
-        render_item(item, depth, config, out);
+        build_item(builder, item, config, 0);
     }
 
-    render_trivia(&document.trailing_trivia, depth, config, out);
+    write_comments(builder, &document.trailing_trivia, 0, config);
+    builder.finish_node();
 }
 
-fn render_item(item: DocumentItem, depth: usize, config: &FormatConfig, out: &mut String) {
+fn build_item(
+    builder: &mut GreenNodeBuilder<'static>,
+    item: DocumentItem,
+    config: &FormatConfig,
+    depth: usize,
+) {
     match item {
-        DocumentItem::Object(object) => render_object(&object, depth, config, out),
-        DocumentItem::Array(array) => render_array(&array, depth, config, out),
-        DocumentItem::Value(value) => render_value(&value, depth, config, out),
+        DocumentItem::Object(object) => build_object(builder, &object, config, depth),
+        DocumentItem::Array(array) => build_array(builder, &array, config, depth),
+        DocumentItem::Value(value) => build_value(builder, &value, config, depth),
     }
 }
 
-fn render_object(object: &Object, depth: usize, config: &FormatConfig, out: &mut String) {
-    render_trivia(&object.leading_trivia, depth, config, out);
-    out.push('{');
+fn build_object(
+    builder: &mut GreenNodeBuilder<'static>,
+    object: &Object,
+    config: &FormatConfig,
+    depth: usize,
+) {
+    builder.start_node(SyntaxKind::Object.into());
+    write_comments(builder, &object.leading_trivia, depth, config);
+    builder.token(SyntaxKind::LBrace.into(), "{");
 
     let members = object.members();
     if !members.is_empty() {
-        for (idx, member) in members.iter().enumerate() {
-            render_prefix(&member.leading_trivia, depth + 1, config, out);
-            render_member(member, depth + 1, config, out);
-
-            if idx + 1 == members.len() {
-                render_closing_gap(&member.trailing_trivia, depth, config, out);
-            }
+        for member in &members {
+            emit_newline(builder, config);
+            build_member(builder, member, config, depth + 1);
         }
+        emit_newline(builder, config);
+        emit_indent(builder, depth, config);
     }
 
-    out.push('}');
+    write_inline_trivia(builder, &object.trailing_trivia, config);
+    builder.token(SyntaxKind::RBrace.into(), "}");
+    builder.finish_node();
 }
 
-fn render_array(array: &Array, depth: usize, config: &FormatConfig, out: &mut String) {
-    render_trivia(&array.leading_trivia, depth, config, out);
-    out.push('[');
+fn build_array(
+    builder: &mut GreenNodeBuilder<'static>,
+    array: &Array,
+    config: &FormatConfig,
+    depth: usize,
+) {
+    builder.start_node(SyntaxKind::Array.into());
+    write_comments(builder, &array.leading_trivia, depth, config);
+    builder.token(SyntaxKind::LBracket.into(), "[");
 
     let items = array.items();
     if !items.is_empty() {
-        for (idx, item) in items.iter().enumerate() {
-            render_prefix(&item.leading_trivia, depth + 1, config, out);
-            render_array_item(item, depth + 1, config, out);
-
-            if idx + 1 == items.len() {
-                render_closing_gap(&item.trailing_trivia, depth, config, out);
-            }
+        for value in &items {
+            emit_newline(builder, config);
+            build_value(builder, value, config, depth + 1);
         }
+        emit_newline(builder, config);
+        emit_indent(builder, depth, config);
     }
 
-    out.push(']');
+    write_inline_trivia(builder, &array.trailing_trivia, config);
+    builder.token(SyntaxKind::RBracket.into(), "]");
+    builder.finish_node();
 }
 
-fn render_array_item(value: &Value, depth: usize, config: &FormatConfig, out: &mut String) {
-    render_value(value, depth, config, out);
-}
+fn build_member(
+    builder: &mut GreenNodeBuilder<'static>,
+    member: &Member,
+    config: &FormatConfig,
+    depth: usize,
+) {
+    builder.start_node(SyntaxKind::Pair.into());
+    write_comments(builder, &member.leading_trivia, depth, config);
+    emit_indent(builder, depth, config);
 
-fn render_member(member: &Member, depth: usize, config: &FormatConfig, out: &mut String) {
-    if let Some(key) = member.key().and_then(|key| key.raw_text()) {
-        out.push_str(&key);
+    builder.start_node(SyntaxKind::Key.into());
+    if let Some((kind, text)) = member.key().and_then(|key| key.token_text_and_kind()) {
+        builder.token(kind.into(), &text);
     }
-    out.push_str(": ");
+    builder.finish_node();
+
+    builder.token(SyntaxKind::Colon.into(), ":");
+    builder.token(SyntaxKind::Whitespace.into(), " ");
 
     if let Some(value) = member.value() {
-        render_value(&value, depth, config, out);
+        build_value(builder, &value, config, depth);
     }
+
+    write_inline_trivia(builder, &member.trailing_trivia, config);
+    builder.finish_node();
 }
 
-fn render_value(value: &Value, depth: usize, config: &FormatConfig, out: &mut String) {
+fn build_value(
+    builder: &mut GreenNodeBuilder<'static>,
+    value: &Value,
+    config: &FormatConfig,
+    depth: usize,
+) {
+    builder.start_node(SyntaxKind::Value.into());
+    write_comments(builder, &value.leading_trivia, depth, config);
+
     match value.content() {
-        Ok(ValueContent::Object(object)) => render_object(&object, depth, config, out),
-        Ok(ValueContent::Array(array)) => render_array(&array, depth, config, out),
+        Ok(ValueContent::Object(object)) => build_object(builder, &object, config, depth),
+        Ok(ValueContent::Array(array)) => build_array(builder, &array, config, depth),
         Ok(ValueContent::Scalar(scalar)) => match scalar {
-            crate::ast::ScalarValue::String(string) => out.push_str(string.raw_text()),
-            crate::ast::ScalarValue::Integer { raw, .. } => out.push_str(&raw),
-            crate::ast::ScalarValue::Float { raw, .. } => out.push_str(&raw),
-            crate::ast::ScalarValue::Bool(true) => out.push_str("true"),
-            crate::ast::ScalarValue::Bool(false) => out.push_str("false"),
-            crate::ast::ScalarValue::Null => out.push_str("null"),
+            crate::ast::ScalarValue::String(string) => builder.token(
+                token_kind_for_quote(string.quote_style()).into(),
+                string.raw_text(),
+            ),
+            crate::ast::ScalarValue::Integer { raw, .. } => {
+                builder.token(SyntaxKind::Integer.into(), &raw)
+            }
+            crate::ast::ScalarValue::Float { raw, .. } => {
+                builder.token(SyntaxKind::Float.into(), &raw)
+            }
+            crate::ast::ScalarValue::Bool(true) => builder.token(SyntaxKind::True.into(), "true"),
+            crate::ast::ScalarValue::Bool(false) => {
+                builder.token(SyntaxKind::False.into(), "false")
+            }
+            crate::ast::ScalarValue::Null => builder.token(SyntaxKind::Null.into(), "null"),
         },
         Err(_) => {}
     }
+
+    write_inline_trivia(builder, &value.trailing_trivia, config);
+    builder.finish_node();
 }
 
-fn render_prefix(trivia: &[Trivia], depth: usize, config: &FormatConfig, out: &mut String) {
-    if trivia.is_empty() {
-        out.push_str(&config.newline);
-        out.push_str(&config.indent_unit.repeat(depth));
-        return;
-    }
-
-    render_trivia(trivia, depth, config, out);
-    if !trivia
-        .iter()
-        .any(|item| matches!(item, Trivia::Newline { .. }))
-    {
-        out.push_str(&config.newline);
-        out.push_str(&config.indent_unit.repeat(depth));
+fn token_kind_for_quote(style: crate::ast::QuoteStyle) -> SyntaxKind {
+    match style {
+        crate::ast::QuoteStyle::DoubleQuoted => SyntaxKind::String,
+        crate::ast::QuoteStyle::Block => SyntaxKind::BlockString,
+        crate::ast::QuoteStyle::Unquoted => SyntaxKind::UnquotedString,
     }
 }
 
-fn render_closing_gap(trivia: &[Trivia], depth: usize, config: &FormatConfig, out: &mut String) {
-    if trivia.is_empty() {
-        out.push_str(&config.newline);
-        out.push_str(&config.indent_unit.repeat(depth));
-        return;
+fn write_comments(
+    builder: &mut GreenNodeBuilder<'static>,
+    trivia: &[Trivia],
+    depth: usize,
+    config: &FormatConfig,
+) {
+    let mut first = true;
+    for item in trivia {
+        if let Trivia::Comment(comment) = item {
+            if !first {
+                emit_newline(builder, config);
+            }
+            emit_indent(builder, depth, config);
+            builder.token(comment_token_kind(comment).into(), &comment.text);
+            first = false;
+        }
     }
-
-    render_trivia(trivia, depth, config, out);
-    if trivia
-        .iter()
-        .any(|item| matches!(item, Trivia::Newline { .. }))
-    {
-        out.push_str(&config.indent_unit.repeat(depth));
-    } else {
-        out.push_str(&config.newline);
-        out.push_str(&config.indent_unit.repeat(depth));
+    if !first {
+        emit_newline(builder, config);
     }
 }
 
-fn render_trivia(trivia: &[Trivia], depth: usize, config: &FormatConfig, out: &mut String) {
+fn write_inline_trivia(
+    builder: &mut GreenNodeBuilder<'static>,
+    trivia: &[Trivia],
+    config: &FormatConfig,
+) {
     for item in trivia {
         match item {
-            Trivia::Whitespace(text) => out.push_str(text),
-            Trivia::Newline { text, .. } => out.push_str(text),
-            Trivia::Comma(_) => {}
+            Trivia::Comma(text) => builder.token(SyntaxKind::Comma.into(), text),
             Trivia::Comment(comment) => {
-                out.push_str(&config.indent_unit.repeat(depth));
-                out.push_str(&comment.text);
+                builder.token(SyntaxKind::Whitespace.into(), " ");
+                builder.token(comment_token_kind(comment).into(), &comment.text);
             }
+            Trivia::Whitespace(_) | Trivia::Newline { .. } => {}
         }
+    }
+    let _ = config;
+}
+
+fn emit_newline(builder: &mut GreenNodeBuilder<'static>, config: &FormatConfig) {
+    builder.token(SyntaxKind::Newline.into(), &config.newline);
+}
+
+fn emit_indent(builder: &mut GreenNodeBuilder<'static>, depth: usize, config: &FormatConfig) {
+    builder.token(
+        SyntaxKind::Whitespace.into(),
+        &config.indent_unit.repeat(depth),
+    );
+}
+
+fn comment_token_kind(comment: &crate::ast::CommentTrivia) -> SyntaxKind {
+    match comment.kind {
+        crate::ast::CommentKind::Line => SyntaxKind::LineComment,
+        crate::ast::CommentKind::Hash => SyntaxKind::HashComment,
+        crate::ast::CommentKind::Block => SyntaxKind::BlockComment,
     }
 }

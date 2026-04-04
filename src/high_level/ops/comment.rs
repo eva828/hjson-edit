@@ -100,9 +100,8 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 let pair = self.resolve_pair(&path)?;
                 let parent = pair.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
 
-                let source = self.to_string();
-                let style = source.detect_newline().as_str().to_string();
-                let newline = SyntaxKind::Newline.create_token(&style);
+                let newline =
+                    SyntaxKind::Newline.create_token(self.root().detect_newline().as_str());
                 let indent = SyntaxKind::Whitespace.create_token(&"  ".repeat(path.depth()));
                 let comment_token =
                     GreenToken::new(kind_from_style(resolved_style).into(), &rendered);
@@ -181,8 +180,7 @@ fn insert_document_comment(
 ) -> Result<HjsonDocument, HjsonEditError> {
     let style = resolve_comment_style(doc.current_comment_style(), &comment, existing_style);
     let rendered = render_comment_text(style, &comment);
-    let source = doc.to_string();
-    let newline = source.detect_newline().as_str().to_string();
+    let newline = doc.root().detect_newline().as_str().to_string();
 
     let root = doc.root().clone();
     let comment_token = GreenToken::new(kind_from_style(style).into(), &rendered);

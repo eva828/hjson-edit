@@ -35,10 +35,11 @@ impl RedNodeExt for RedNode {
 
     fn child(&self, segment: &PathSegment) -> Option<RedNode> {
         if self.kind() == SyntaxKind::Value {
-            return self
+            let next = self
                 .children()
                 .next()
                 .and_then(|child| child.child(segment));
+            return next;
         }
 
         match segment {
@@ -59,7 +60,10 @@ impl RedNodeExt for RedNode {
                     ArrayPathSegment::Push => values.last(),
                 }
             }
-            _ => self.children().find_map(|child| child.child(segment)),
+            _ => {
+                let next = self.children().find_map(|child| child.child(segment));
+                next
+            }
         }
     }
 
@@ -144,10 +148,49 @@ impl RedNodeExt for RedNode {
                 .ok_or(HjsonEditError::ParentNotFound)?
                 .node_to_value(),
             SyntaxKind::Value => self
-                .children()
-                .find(|child| !child.kind().is_trivia())
-                .ok_or(HjsonEditError::ParentNotFound)?
-                .node_to_value(),
+                .children_with_tokens()
+                .find(|child| match child {
+                    NodeOrToken::Node(node) => !node.kind().is_trivia(),
+                    NodeOrToken::Token(token) => !token.kind().is_trivia(),
+                })
+                .ok_or(HjsonEditError::ParentNotFound)
+                .and_then(|child| match child {
+                    NodeOrToken::Node(node) => node.node_to_value(),
+                    NodeOrToken::Token(token) => match token.kind() {
+                        SyntaxKind::String => Ok(HjsonValue::String(decode_double_quoted(
+                            token.text().to_string(),
+                        ))),
+                        SyntaxKind::BlockString => Ok(HjsonValue::String(strip_block_string(
+                            token.text().to_string(),
+                        ))),
+                        SyntaxKind::UnquotedString => {
+                            Ok(HjsonValue::String(token.text().to_string()))
+                        }
+                        SyntaxKind::Integer => token
+                            .text()
+                            .parse::<i64>()
+                            .map(HjsonValue::Integer)
+                            .map_err(|_| HjsonEditError::UnexpectedStructure {
+                                expected: SyntaxKind::Integer,
+                                found: token.kind(),
+                            }),
+                        SyntaxKind::Float => token
+                            .text()
+                            .parse::<f64>()
+                            .map(HjsonValue::Float)
+                            .map_err(|_| HjsonEditError::UnexpectedStructure {
+                                expected: SyntaxKind::Float,
+                                found: token.kind(),
+                            }),
+                        SyntaxKind::True => Ok(HjsonValue::Bool(true)),
+                        SyntaxKind::False => Ok(HjsonValue::Bool(false)),
+                        SyntaxKind::Null => Ok(HjsonValue::Null),
+                        _ => Err(HjsonEditError::UnexpectedStructure {
+                            expected: SyntaxKind::Value,
+                            found: token.kind(),
+                        }),
+                    },
+                }),
             SyntaxKind::Object => {
                 let mut entries = Vec::new();
                 for pair in self
@@ -213,13 +256,11 @@ impl RedNodeExt for RedNode {
     }
 
     fn format_like(&self, root: GreenNode) -> GreenNode {
-        let mut config = FormatConfig::default();
-        config.newline = root.to_string().detect_newline().as_str().to_string();
-
         let document = HjsonDocument {
             root: RedNode::new_root(root.clone()),
             string_style: StringStyle::default(),
             comment_style: CommentStyle::default(),
+            newline: self.detect_newline().as_str().to_string(),
         };
 
         let ast = match document.ast() {
@@ -227,11 +268,10 @@ impl RedNodeExt for RedNode {
             Err(_) => return root,
         };
 
-        let rendered = Formatter::format(&ast, config);
-        match HjsonDocument::parse(&rendered) {
-            Ok(document) => document.root().green().into_owned(),
-            Err(_) => root,
-        }
+        Formatter::build(
+            &ast,
+            FormatConfig::default().with_newline(self.detect_newline().as_str()),
+        )
     }
 }
 

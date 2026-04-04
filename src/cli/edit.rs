@@ -383,11 +383,13 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         }
     }
 
-    let result = doc.to_string();
-    let result = if content.ends_with("\r\n") && !result.ends_with("\r\n") {
-        format!("{}\r\n", result)
-    } else if content.ends_with('\n') && !result.ends_with('\n') {
-        format!("{}\n", result)
+    let result = hjson_edit::Formatter::build(
+        &doc.ast()?,
+        hjson_edit::FormatConfig::default().with_newline(doc.current_newline()),
+    )
+    .to_string();
+    let result = if content.ends_with('\n') && !result.ends_with('\n') {
+        format!("{}{}", result, doc.current_newline())
     } else {
         result
     };

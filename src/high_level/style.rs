@@ -1,6 +1,8 @@
 use crate::syntax::GreenElement;
 use crate::syntax::{HjsonLanguage, SyntaxKind};
+use crate::RedNode;
 use rowan::Language;
+use rowan::NodeOrToken;
 
 /// 改行コードの種類
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -85,4 +87,30 @@ impl DetectNewline for Vec<GreenElement> {
     fn detect_newline(&self) -> NewlineKind {
         self.as_slice().detect_newline()
     }
+}
+
+impl DetectNewline for RedNode {
+    fn detect_newline(&self) -> NewlineKind {
+        detect_newline_in_node(self).unwrap_or_default()
+    }
+}
+
+fn detect_newline_in_node(node: &RedNode) -> Option<NewlineKind> {
+    for child in node.children_with_tokens() {
+        match child {
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
+                if let Some(kind) = NewlineKind::from_newline_text(token.text()) {
+                    return Some(kind);
+                }
+            }
+            NodeOrToken::Node(child) => {
+                if let Some(kind) = detect_newline_in_node(&child) {
+                    return Some(kind);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }

@@ -11,10 +11,10 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
-            let config = FormatConfig::default();
+            let config = FormatConfig::default().with_newline(document.current_newline());
             let ast = document.ast()?;
-            let formatted = Formatter::format(&ast, config);
-            print!("{}", formatted);
+            let formatted = Formatter::build(&ast, config);
+            print!("{}", formatted.to_string());
             Ok(())
         }
         Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
