@@ -3,7 +3,12 @@ use rowan::{GreenNode, NodeOrToken};
 use crate::{
     format::{FormatConfig, Formatter},
     high_level::{
-        error::HjsonEditError, path::HjsonObjectPath, style::DetectNewline, value::HjsonValue,
+        error::HjsonEditError,
+        ops::{comment::CommentStyle, object::StringStyle},
+        path::HjsonObjectPath,
+        style::DetectNewline,
+        value::HjsonValue,
+        HjsonDocument,
     },
     ArrayPathSegment, ObjectPathSegment, PathSegment, RedNode, SyntaxKind,
 };
@@ -211,9 +216,10 @@ impl RedNodeExt for RedNode {
         let mut config = FormatConfig::default();
         config.newline = root.to_string().detect_newline().as_str().to_string();
 
-        let document = match crate::high_level::HjsonDocument::parse(&root.to_string()) {
-            Ok(document) => document,
-            Err(_) => return root,
+        let document = HjsonDocument {
+            root: RedNode::new_root(root.clone()),
+            string_style: StringStyle::default(),
+            comment_style: CommentStyle::default(),
         };
 
         let ast = match document.ast() {
@@ -222,7 +228,7 @@ impl RedNodeExt for RedNode {
         };
 
         let rendered = Formatter::format(&ast, config);
-        match crate::high_level::HjsonDocument::parse(&rendered) {
+        match HjsonDocument::parse(&rendered) {
             Ok(document) => document.root().green().into_owned(),
             Err(_) => root,
         }
