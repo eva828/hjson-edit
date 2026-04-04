@@ -346,6 +346,20 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
 
     let ops = collect_ops(matches)?;
 
+    if ops.is_empty() {
+        if matches.get_flag("in-place") {
+            std::fs::write(path, &content)
+                .with_context(|| format!("Failed to write file: {}", path.display()))?;
+        } else if let Some(output_path) = matches.get_one::<PathBuf>("output") {
+            std::fs::write(output_path, &content)
+                .with_context(|| format!("Failed to write file: {}", output_path.display()))?;
+        } else {
+            print!("{}", content);
+        }
+
+        return Ok(());
+    }
+
     for op in ops {
         match op {
             EditOp::SetCommentStyle(style) => {

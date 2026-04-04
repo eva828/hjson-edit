@@ -52,25 +52,67 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         path: impl AsRef<str>,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError> {
-        let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
+        let path_str = path.as_ref().to_string();
+        let path = HjsonObjectPath::parse(path_str.clone())?;
         let value = value.into();
-        let root = self.root().clone().document_start_node();
+
+        if let Ok(current) = self.get(&path_str) {
+            if current == value {
+                return Ok(self);
+            }
+        }
+
+        let root = self.root().clone();
         let updated = if path.depth() == 0 {
-            value.value_to_green()
+            replace_root_value(&root, &value)?
         } else {
             rebuild_tree_with_set(root.clone(), &path, &value)?
         };
+        if path.depth() == 1 {
+            return Ok(finish_document(self, updated));
+        }
         let updated = root.format_like(updated);
         Ok(finish_document(self, updated))
     }
 
     fn remove(self, path: impl AsRef<str>) -> Result<Self, HjsonEditError> {
         let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
-        let root = self.root().clone().document_start_node();
+        let root = self.root().clone();
         let updated = rebuild_tree_with_remove(root.clone(), &path)?;
+        if path.depth() == 1 {
+            return Ok(finish_document(self, updated));
+        }
         let updated = root.format_like(updated);
         Ok(finish_document(self, updated))
     }
+}
+
+fn replace_root_value(root: &RedNode, value: &HjsonValue) -> Result<GreenNode, HjsonEditError> {
+    let mut children: Vec<GreenElement> = Vec::new();
+    let mut replaced = false;
+
+    for child in root.children_with_tokens() {
+        match child {
+            NodeOrToken::Node(node)
+                if !replaced
+                    && matches!(
+                        node.kind(),
+                        SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
+                    ) =>
+            {
+                children.push(value.value_to_green().into());
+                replaced = true;
+            }
+            NodeOrToken::Node(node) => children.push(owned_green(NodeOrToken::Node(node))),
+            NodeOrToken::Token(token) => children.push(owned_green(NodeOrToken::Token(token))),
+        }
+    }
+
+    if !replaced {
+        children.push(value.value_to_green().into());
+    }
+
+    Ok(SyntaxKind::Root.create_node(children))
 }
 
 fn rebuild_tree_with_set(
@@ -125,7 +167,7 @@ fn resolve_parent(
     path: &HjsonObjectPath,
     create_missing: bool,
 ) -> Result<RedNode, HjsonEditError> {
-    let mut current = root.document_start_node();
+    let mut current = root;
     for (idx, segment) in path.segments().iter().enumerate() {
         if let Some(next) = current.child(segment) {
             current = next;
@@ -144,15 +186,24 @@ fn resolve_parent(
 }
 
 fn set_root_child(
-    _parent: &RedNode,
+    parent: &RedNode,
     last: &PathSegment,
     value: &HjsonValue,
 ) -> Result<GreenNode, HjsonEditError> {
-    match last {
-        PathSegment::Object(ObjectPathSegment::Key(_)) | PathSegment::Array(_) => {
-            Ok(value.value_to_green())
-        }
-    }
+    let child = parent
+        .children()
+        .find(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
+            )
+        })
+        .ok_or(HjsonEditError::ParentNotFound)?;
+    let updated_child = rebuild_child_with_set(&child, last, value)?;
+
+    Ok(parent
+        .green()
+        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
 }
 
 fn set_value_child(
@@ -266,18 +317,20 @@ fn set_array_child(
 }
 
 fn remove_root_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
-    match last {
-        PathSegment::Object(_) => Ok(parent
-            .children()
-            .find(|c| !c.kind().is_trivia())
-            .ok_or(HjsonEditError::ParentNotFound)?
-            .replace_with(SyntaxKind::Value.create_node(vec![]))),
-        PathSegment::Array(_) => Ok(parent
-            .children()
-            .find(|c| !c.kind().is_trivia())
-            .ok_or(HjsonEditError::ParentNotFound)?
-            .replace_with(SyntaxKind::Value.create_node(vec![]))),
-    }
+    let child = parent
+        .children()
+        .find(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
+            )
+        })
+        .ok_or(HjsonEditError::ParentNotFound)?;
+    let updated_child = rebuild_child_with_remove(&child, last)?;
+
+    Ok(parent
+        .green()
+        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
 }
 
 fn remove_value_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {

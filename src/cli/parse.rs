@@ -262,6 +262,11 @@ where
                 rowan::NodeOrToken::Token(t) if t.kind().is_trivia() && !self.show_trivia => {
                     continue
                 }
+                rowan::NodeOrToken::Node(n)
+                    if n.kind() == SyntaxKind::Comment && !self.show_trivia =>
+                {
+                    continue
+                }
                 _ => return Some(item),
             }
         }
@@ -277,6 +282,11 @@ where
         while let Some(item) = self.iter.next() {
             match &item {
                 rowan::NodeOrToken::Token(t) if t.kind().is_trivia() && !self.show_trivia => {
+                    continue
+                }
+                rowan::NodeOrToken::Node(n)
+                    if n.kind() == SyntaxKind::Comment && !self.show_trivia =>
+                {
                     continue
                 }
                 _ => {

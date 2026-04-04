@@ -72,7 +72,9 @@ fn build_object(
 ) {
     builder.start_node(SyntaxKind::Object.into());
     write_comments(builder, &object.leading_trivia, depth, config);
-    builder.token(SyntaxKind::LBrace.into(), "{");
+    if object.braced {
+        builder.token(SyntaxKind::LBrace.into(), "{");
+    }
 
     let members = object.members();
     if !members.is_empty() {
@@ -85,7 +87,9 @@ fn build_object(
     }
 
     write_inline_trivia(builder, &object.trailing_trivia, config);
-    builder.token(SyntaxKind::RBrace.into(), "}");
+    if object.braced {
+        builder.token(SyntaxKind::RBrace.into(), "}");
+    }
     builder.finish_node();
 }
 
@@ -97,7 +101,9 @@ fn build_array(
 ) {
     builder.start_node(SyntaxKind::Array.into());
     write_comments(builder, &array.leading_trivia, depth, config);
-    builder.token(SyntaxKind::LBracket.into(), "[");
+    if array.braced {
+        builder.token(SyntaxKind::LBracket.into(), "[");
+    }
 
     let items = array.items();
     if !items.is_empty() {
@@ -110,7 +116,9 @@ fn build_array(
     }
 
     write_inline_trivia(builder, &array.trailing_trivia, config);
-    builder.token(SyntaxKind::RBracket.into(), "]");
+    if array.braced {
+        builder.token(SyntaxKind::RBracket.into(), "]");
+    }
     builder.finish_node();
 }
 
@@ -130,8 +138,23 @@ fn build_member(
     }
     builder.finish_node();
 
+    write_inline_comments(builder, &member.before_colon_trivia, config);
     builder.token(SyntaxKind::Colon.into(), ":");
-    builder.token(SyntaxKind::Whitespace.into(), " ");
+    if !member.after_colon_trivia.is_empty() {
+        for item in &member.after_colon_trivia {
+            match item {
+                Trivia::Whitespace(text) => builder.token(SyntaxKind::Whitespace.into(), text),
+                Trivia::Comment(comment) => {
+                    builder.token(SyntaxKind::Whitespace.into(), " ");
+                    builder.token(comment_token_kind(comment).into(), &comment.text);
+                }
+                Trivia::Newline { text, .. } => builder.token(SyntaxKind::Newline.into(), text),
+                Trivia::Comma(text) => builder.token(SyntaxKind::Comma.into(), text),
+            }
+        }
+    } else {
+        builder.token(SyntaxKind::Whitespace.into(), " ");
+    }
 
     if let Some(value) = member.value() {
         build_value(builder, &value, config, depth);
@@ -223,6 +246,22 @@ fn write_inline_trivia(
         }
     }
     let _ = config;
+}
+
+fn write_inline_comments(
+    builder: &mut GreenNodeBuilder<'static>,
+    trivia: &[Trivia],
+    config: &FormatConfig,
+) {
+    for item in trivia {
+        if let Trivia::Comment(comment) = item {
+            builder.token(SyntaxKind::Whitespace.into(), " ");
+            builder.token(comment_token_kind(comment).into(), &comment.text);
+            if !comment.text.ends_with(&config.newline) {
+                builder.token(SyntaxKind::Whitespace.into(), " ");
+            }
+        }
+    }
 }
 
 fn emit_newline(builder: &mut GreenNodeBuilder<'static>, config: &FormatConfig) {

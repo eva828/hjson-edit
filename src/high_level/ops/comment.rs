@@ -1,4 +1,4 @@
-use rowan::{GreenToken, NodeOrToken};
+use rowan::NodeOrToken;
 
 use crate::{
     ast::{AstNode, CommentKind, Trivia},
@@ -103,13 +103,15 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 let newline =
                     SyntaxKind::Newline.create_token(self.root().detect_newline().as_str());
                 let indent = SyntaxKind::Whitespace.create_token(&"  ".repeat(path.depth()));
-                let comment_token =
-                    GreenToken::new(kind_from_style(resolved_style).into(), &rendered);
+                let comment_node =
+                    SyntaxKind::Comment.create_node(vec![kind_from_style(resolved_style)
+                        .create_token(&rendered)
+                        .into()]);
 
                 let index = pair.node().index();
                 let new_green = parent.green().splice_children(
                     index..index,
-                    vec![comment_token.into(), newline.into(), indent.into()],
+                    vec![comment_node.into(), newline.into(), indent.into()],
                 );
                 let new_root = parent.replace_with(new_green);
                 self.root = RedNode::new_root(new_root);
@@ -183,7 +185,8 @@ fn insert_document_comment(
     let newline = doc.root().detect_newline().as_str().to_string();
 
     let root = doc.root().clone();
-    let comment_token = GreenToken::new(kind_from_style(style).into(), &rendered);
+    let comment_node = SyntaxKind::Comment
+        .create_node(vec![kind_from_style(style).create_token(&rendered).into()]);
     let newline = SyntaxKind::Newline.create_token(&newline);
 
     let insert_at = if header {
@@ -193,7 +196,7 @@ fn insert_document_comment(
     };
     let new_green = root.green().splice_children(
         insert_at..insert_at,
-        vec![comment_token.into(), newline.into()],
+        vec![comment_node.into(), newline.into()],
     );
     doc.root = RedNode::new_root(new_green);
     Ok(doc)
@@ -207,6 +210,7 @@ fn remove_document_comment(doc: &mut HjsonDocument, header: bool) -> Result<(), 
         let mut end = 0usize;
         while end < children.len() {
             match &children[end] {
+                NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => end += 1,
                 NodeOrToken::Token(token)
                     if token.kind().is_comment() || token.kind().is_trivia() =>
                 {
@@ -221,6 +225,7 @@ fn remove_document_comment(doc: &mut HjsonDocument, header: bool) -> Result<(), 
         let mut start = children.len();
         while start > 0 {
             match &children[start - 1] {
+                NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => start -= 1,
                 NodeOrToken::Token(token)
                     if token.kind().is_comment() || token.kind().is_trivia() =>
                 {

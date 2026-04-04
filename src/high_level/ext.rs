@@ -37,7 +37,7 @@ impl RedNodeExt for RedNode {
         if self.kind() == SyntaxKind::Value {
             let next = self
                 .children()
-                .next()
+                .find(|child| !child.kind().is_trivia())
                 .and_then(|child| child.child(segment));
             return next;
         }
@@ -96,7 +96,9 @@ impl RedNodeExt for RedNode {
 
     fn document_start_node(&self) -> RedNode {
         if self.kind() == SyntaxKind::Root {
-            self.children().next().unwrap_or_else(|| self.clone())
+            self.children()
+                .find(|child| !child.kind().is_trivia())
+                .unwrap_or_else(|| self.clone())
         } else {
             self.clone()
         }

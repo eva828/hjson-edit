@@ -170,6 +170,7 @@ pub struct Object {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub braced: bool,
     pub layout: Layout,
 }
 
@@ -178,6 +179,7 @@ pub struct Array {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
+    pub braced: bool,
     pub layout: Layout,
 }
 
@@ -185,8 +187,16 @@ pub struct Array {
 pub struct Member {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
+    pub before_colon_trivia: Vec<Trivia>,
+    pub after_colon_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Comment {
+    syntax: RedNode,
+    pub trivia: CommentTrivia,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -246,10 +256,9 @@ impl Document {
     pub fn item(&self) -> Option<DocumentItem> {
         match self.syntax.kind() {
             SyntaxKind::Root => {
-                let child = self
-                    .syntax
-                    .children()
-                    .find(|child| !child.kind().is_trivia())?;
+                let child = self.syntax.children().find(|child| {
+                    !matches!(child.kind(), SyntaxKind::Comment) && !child.kind().is_trivia()
+                })?;
                 match child.kind() {
                     SyntaxKind::Object => Some(DocumentItem::Object(Object::cast(child).ok()?)),
                     SyntaxKind::Array => Some(DocumentItem::Array(Array::cast(child).ok()?)),
@@ -294,6 +303,10 @@ impl Document {
             _ => None,
         }
     }
+
+    pub fn comments(&self) -> Vec<Comment> {
+        collect_comments(&self.syntax)
+    }
 }
 
 impl AstNode for Object {
@@ -314,11 +327,32 @@ impl AstNode for Object {
             Some(SyntaxKind::Root)
         );
         let layout = collect_layout(&node, owns_trivia);
+        let braced = matches!(
+            node.children().next().map(|child| child.kind()),
+            Some(SyntaxKind::LBrace)
+        );
+        let leading_trivia = if matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        ) {
+            collect_root_leading_trivia(&node)
+        } else {
+            collect_container_leading_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::LBrace))
+        };
+        let trailing_trivia = if matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        ) {
+            collect_root_trailing_trivia(&node)
+        } else {
+            collect_container_trailing_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::RBrace))
+        };
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
-            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            leading_trivia,
+            trailing_trivia,
+            braced,
             layout,
         })
     }
@@ -335,6 +369,10 @@ impl Object {
             .filter(|child| child.kind() == SyntaxKind::Pair)
             .filter_map(|child| Member::cast(child).ok())
             .collect()
+    }
+
+    pub fn comments(&self) -> Vec<Comment> {
+        collect_comments(&self.syntax)
     }
 
     pub fn member_by_key(&self, key: &str) -> Option<Member> {
@@ -362,11 +400,32 @@ impl AstNode for Array {
             Some(SyntaxKind::Root)
         );
         let layout = collect_layout(&node, owns_trivia);
+        let braced = matches!(
+            node.children().next().map(|child| child.kind()),
+            Some(SyntaxKind::LBracket)
+        );
+        let leading_trivia = if matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        ) {
+            collect_root_leading_trivia(&node)
+        } else {
+            collect_container_leading_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::LBracket))
+        };
+        let trailing_trivia = if matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        ) {
+            collect_root_trailing_trivia(&node)
+        } else {
+            collect_container_trailing_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::RBracket))
+        };
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
-            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            leading_trivia,
+            trailing_trivia,
+            braced,
             layout,
         })
     }
@@ -384,6 +443,10 @@ impl Array {
             .filter_map(|child| Value::cast(child).ok())
             .collect()
     }
+
+    pub fn comments(&self) -> Vec<Comment> {
+        collect_comments(&self.syntax)
+    }
 }
 
 impl AstNode for Member {
@@ -400,10 +463,13 @@ impl AstNode for Member {
         }
 
         let layout = collect_layout(&node, true);
+        let (before_colon_trivia, after_colon_trivia) = collect_member_middle_trivia(&node);
 
         Ok(Self {
             syntax: node.clone(),
             leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
+            before_colon_trivia,
+            after_colon_trivia,
             trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
             layout,
         })
@@ -431,6 +497,50 @@ impl Member {
 
     pub fn pair_key(&self) -> Option<String> {
         self.key().and_then(|key| key.body_text())
+    }
+
+    pub fn comments(&self) -> Vec<Comment> {
+        collect_comments(&self.syntax)
+    }
+}
+
+impl AstNode for Comment {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::Comment
+    }
+
+    fn cast(node: RedNode) -> Result<Self, HjsonEditError> {
+        if !Self::can_cast(node.kind()) {
+            return Err(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Comment,
+                found: node.kind(),
+            });
+        }
+
+        let trivia = collect_comment_trivia(&node).ok_or(HjsonEditError::ParentNotFound)?;
+
+        Ok(Self {
+            syntax: node,
+            trivia,
+        })
+    }
+
+    fn syntax(&self) -> &RedNode {
+        &self.syntax
+    }
+}
+
+impl Comment {
+    pub fn kind(&self) -> CommentKind {
+        self.trivia.kind
+    }
+
+    pub fn raw_text(&self) -> &str {
+        &self.trivia.text
+    }
+
+    pub fn body_text(&self) -> &str {
+        &self.trivia.body
     }
 }
 
@@ -512,11 +622,21 @@ impl AstNode for Value {
             Some(SyntaxKind::Root)
         );
         let layout = collect_layout(&node, owns_trivia);
+        let parent_kind = node.parent().map(|parent| parent.kind());
+        let owns_value_trivia = matches!(parent_kind, Some(SyntaxKind::Array));
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
-            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            leading_trivia: if owns_value_trivia {
+                collect_leading_trivia(&node, true)
+            } else {
+                Vec::new()
+            },
+            trailing_trivia: if owns_value_trivia {
+                collect_trailing_trivia(&node, true)
+            } else {
+                Vec::new()
+            },
             layout,
         })
     }
@@ -602,6 +722,97 @@ fn strip_block(text: &str) -> String {
         .to_string()
 }
 
+fn collect_comments(node: &RedNode) -> Vec<Comment> {
+    node.children()
+        .filter(|child| child.kind() == SyntaxKind::Comment)
+        .filter_map(|child| Comment::cast(child).ok())
+        .collect()
+}
+
+fn collect_comment_trivia(node: &RedNode) -> Option<CommentTrivia> {
+    node.children_with_tokens().find_map(|elem| match elem {
+        NodeOrToken::Token(token) => match token.kind() {
+            SyntaxKind::LineComment => Some(CommentTrivia {
+                kind: CommentKind::Line,
+                text: token.text().to_string(),
+                body: strip_line_comment(token.text()),
+            }),
+            SyntaxKind::HashComment => Some(CommentTrivia {
+                kind: CommentKind::Hash,
+                text: token.text().to_string(),
+                body: strip_hash_comment(token.text()),
+            }),
+            SyntaxKind::BlockComment => Some(CommentTrivia {
+                kind: CommentKind::Block,
+                text: token.text().to_string(),
+                body: strip_block_comment(token.text()),
+            }),
+            _ => None,
+        },
+        NodeOrToken::Node(_) => None,
+    })
+}
+
+fn collect_container_leading_trivia(
+    node: &RedNode,
+    structural_kind: SyntaxKind,
+    opening: Option<SyntaxKind>,
+) -> Vec<Trivia> {
+    let children = node.children_with_tokens().collect::<Vec<_>>();
+    let start = opening
+        .and_then(|kind| {
+            children
+                .iter()
+                .position(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == kind))
+        })
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+
+    let mut trivia = Vec::new();
+    for elem in children.iter().skip(start) {
+        match elem {
+            NodeOrToken::Node(node) if node.kind() == structural_kind => break,
+            _ => {
+                if let Some(item) = trivia_from_element(elem) {
+                    trivia.push(item);
+                }
+            }
+        }
+    }
+
+    trivia
+}
+
+fn collect_container_trailing_trivia(
+    node: &RedNode,
+    structural_kind: SyntaxKind,
+    closing: Option<SyntaxKind>,
+) -> Vec<Trivia> {
+    let children = node.children_with_tokens().collect::<Vec<_>>();
+    let end = closing
+        .and_then(|kind| {
+            children
+                .iter()
+                .rposition(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == kind))
+        })
+        .unwrap_or(children.len());
+
+    let start = children
+        .iter()
+        .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == structural_kind))
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+
+    let mut trivia = Vec::new();
+    for elem in children.iter().skip(start).take(end.saturating_sub(start)) {
+        if let Some(item) = trivia_from_element(elem) {
+            trivia.push(item);
+        }
+    }
+
+    trivia
+}
+
 fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
     if !enabled {
         return Vec::new();
@@ -619,37 +830,22 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
     }
 
     let mut trivia = Vec::new();
-    let mut saw_comment = false;
-    let mut saw_newline = false;
 
-    for elem in children.iter().take(index).rev() {
+    for elem in children.iter().take(index) {
         let Some(item) = trivia_from_element(elem) else {
-            break;
+            trivia.clear();
+            continue;
         };
 
         match item {
-            Trivia::Whitespace(_) => continue,
-            Trivia::Comma(_) => break,
-            Trivia::Comment(comment) => {
-                saw_comment = true;
-                trivia.push(Trivia::Comment(comment));
+            Trivia::Comma(_) => {
+                trivia.clear();
             }
-            Trivia::Newline { kind, text } => {
-                if saw_newline && !saw_comment {
-                    break;
-                }
-                saw_newline = true;
-                trivia.push(Trivia::Newline { kind, text });
-            }
+            other => trivia.push(other),
         }
     }
 
-    trivia.reverse();
-    if saw_comment {
-        trivia
-    } else {
-        Vec::new()
-    }
+    trivia
 }
 
 fn collect_root_leading_trivia(node: &RedNode) -> Vec<Trivia> {
@@ -670,6 +866,34 @@ fn collect_root_leading_trivia(node: &RedNode) -> Vec<Trivia> {
     }
 
     trivia
+}
+
+fn collect_member_middle_trivia(node: &RedNode) -> (Vec<Trivia>, Vec<Trivia>) {
+    let mut before_colon = Vec::new();
+    let mut after_colon = Vec::new();
+    let mut seen_colon = false;
+
+    for child in node.children_with_tokens() {
+        match child {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Key => continue,
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value => break,
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Colon => {
+                seen_colon = true;
+                continue;
+            }
+            other => {
+                if let Some(item) = trivia_from_element(&other) {
+                    if seen_colon {
+                        after_colon.push(item);
+                    } else {
+                        before_colon.push(item);
+                    }
+                }
+            }
+        }
+    }
+
+    (before_colon, after_colon)
 }
 
 fn collect_trailing_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
@@ -756,6 +980,9 @@ fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
 
 fn trivia_from_element(element: &NodeOrToken<RedNode, RedToken>) -> Option<Trivia> {
     match element {
+        NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
+            collect_comment_trivia(node).map(Trivia::Comment)
+        }
         NodeOrToken::Token(token) => match token.kind() {
             SyntaxKind::Whitespace => Some(Trivia::Whitespace(token.text().to_string())),
             SyntaxKind::Newline => Some(Trivia::Newline {
@@ -809,6 +1036,120 @@ fn strip_block_comment(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comment_ownership_sample() {
+        let input = r#"// This is a header comment
+
+// {
+    a: aaa,
+    b: bbb
+    c: cc cc
+    d: dd // d
+    e: /* e */ ee
+    // standalone
+    
+f: fff
+  g: ggg
+    h: hhh
+    // iiiiii
+    i: iii
+    /* j */ j:  jj
+    k: {
+    l: lll
+      m: mm
+    }
+// }
+
+// This is a footer comment 
+"#;
+
+        let doc = crate::high_level::HjsonDocument::parse(input).unwrap();
+        let ast = doc.ast().unwrap();
+        let object = ast.object().unwrap();
+
+        let f = object.member_by_key("f").unwrap();
+        let i = object.member_by_key("i").unwrap();
+        let j = object.member_by_key("j").unwrap();
+
+        println!("f.leading={:?}", f.leading_trivia);
+        println!("f.before={:?}", f.before_colon_trivia);
+        println!("f.trailing={:?}", f.trailing_trivia);
+        println!("i.leading={:?}", i.leading_trivia);
+        println!("i.before={:?}", i.before_colon_trivia);
+        println!("i.trailing={:?}", i.trailing_trivia);
+        println!("j.leading={:?}", j.leading_trivia);
+        println!("j.before={:?}", j.before_colon_trivia);
+        println!("j.trailing={:?}", j.trailing_trivia);
+
+        assert!(f
+            .leading_trivia
+            .iter()
+            .any(|t| matches!(t, Trivia::Comment(c) if c.body == "standalone")));
+        assert!(i
+            .leading_trivia
+            .iter()
+            .any(|t| matches!(t, Trivia::Comment(c) if c.body == "iiiiii")));
+        assert!(j
+            .leading_trivia
+            .iter()
+            .any(|t| matches!(t, Trivia::Comment(c) if c.body == "j")));
+    }
+
+    #[test]
+    fn edited_sample_keeps_member_comments_in_leading_trivia() {
+        let input = r#"// This is a header comment
+
+// {
+    a: aaa,
+    b: bbb
+    c: cc cc
+    d: dd // d
+    e: /* e */ ee
+    // standalone
+    
+f: fff
+  g: ggg
+    h: hhh
+    // iiiiii
+    i: iii
+    /* j */ j:  jj
+    k: {
+    l: lll
+      m: mm
+    }
+// }
+
+// This is a footer comment 
+"#;
+
+        let doc = crate::high_level::HjsonDocument::parse(input).unwrap();
+        let doc =
+            crate::high_level::ops::object::HjsonDocumentObjectEdit::set(doc, "a", "zzz").unwrap();
+        let ast = doc.ast().unwrap();
+        let object = ast.object().unwrap();
+
+        let f = object.member_by_key("f").unwrap();
+        let i = object.member_by_key("i").unwrap();
+        let j = object.member_by_key("j").unwrap();
+
+        assert!(f
+            .leading_trivia
+            .iter()
+            .any(|t| matches!(t, Trivia::Comment(c) if c.body == "standalone")));
+        assert!(i
+            .leading_trivia
+            .iter()
+            .any(|t| matches!(t, Trivia::Comment(c) if c.body == "iiiiii")));
+        assert!(j
+            .leading_trivia
+            .iter()
+            .any(|t| matches!(t, Trivia::Comment(c) if c.body == "j")));
+
+        assert!(f.before_colon_trivia.is_empty());
+        assert!(i.before_colon_trivia.is_empty());
+        assert!(j.before_colon_trivia.is_empty());
+    }
 
     #[test]
     fn value_style_roundtrip() {

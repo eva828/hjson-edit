@@ -308,6 +308,16 @@ impl Parser {
         }
     }
 
+    fn bump_trivia(&mut self) {
+        if matches!(self.current().map(|token| token.kind), Some(kind) if kind.is_comment()) {
+            self.builder.start_node(SyntaxKind::Comment.into());
+            self.bump();
+            self.builder.finish_node();
+        } else {
+            self.bump();
+        }
+    }
+
     /// 特定の非トリビアトークンかチェック
     fn at(&self, kind: SyntaxKind) -> bool {
         self.current_kind() == Some(kind)
@@ -333,7 +343,11 @@ impl Parser {
     /// 回復点までトークンを消費（トリビア含めてすべて保持）
     fn consume_until_recovery(&mut self, recovery_kinds: &[SyntaxKind]) {
         while !self.is_at_end() && !self.at_any(recovery_kinds) {
-            self.bump();
+            if self.current().is_some_and(|token| token.kind.is_trivia()) {
+                self.bump_trivia();
+            } else {
+                self.bump();
+            }
         }
     }
 
@@ -343,7 +357,7 @@ impl Parser {
     fn eat_trivia(&mut self) {
         while let Some(token) = self.current() {
             if token.kind.is_trivia() {
-                self.bump();
+                self.bump_trivia();
             } else {
                 break;
             }
@@ -357,7 +371,7 @@ impl Parser {
                 if token.kind == SyntaxKind::Newline {
                     had_newline = true;
                 }
-                self.bump();
+                self.bump_trivia();
             } else {
                 break;
             }

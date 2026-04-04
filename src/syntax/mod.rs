@@ -55,6 +55,9 @@ pub enum SyntaxKind {
     Key,
     Value,
 
+    // コメントノード
+    Comment,
+
     // エラー回復用
     Error,
 }
@@ -105,7 +108,8 @@ impl Language for HjsonLanguage {
             22 => SyntaxKind::Pair,
             23 => SyntaxKind::Key,
             24 => SyntaxKind::Value,
-            25 => SyntaxKind::Error,
+            25 => SyntaxKind::Comment,
+            26 => SyntaxKind::Error,
             n => panic!("Unknown SyntaxKind: {n}"),
         }
     }
@@ -195,7 +199,10 @@ impl SyntaxKind {
     /// ノードかどうか
     pub fn is_node(self) -> bool {
         use SyntaxKind::*;
-        matches!(self, Root | Object | Array | Pair | Key | Value | Error)
+        matches!(
+            self,
+            Root | Object | Array | Pair | Key | Value | Comment | Error
+        )
     }
 
     /// トリビア（空白・コメント）かどうか
@@ -203,14 +210,14 @@ impl SyntaxKind {
         use SyntaxKind::*;
         matches!(
             self,
-            Whitespace | Newline | LineComment | HashComment | BlockComment
+            Whitespace | Newline | LineComment | HashComment | BlockComment | Comment
         )
     }
 
     /// コメントかどうか
     pub fn is_comment(self) -> bool {
         use SyntaxKind::*;
-        matches!(self, LineComment | HashComment | BlockComment)
+        matches!(self, LineComment | HashComment | BlockComment | Comment)
     }
 }
 
@@ -260,6 +267,7 @@ mod tests {
             Pair,
             Key,
             Value,
+            Comment,
             Error,
         ];
         for kind in all_kinds {

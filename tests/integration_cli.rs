@@ -8,6 +8,31 @@ use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 use std::fs;
 use std::path::PathBuf;
 
+const COMMENT_HEAVY_INPUT: &str = r#"// This is a header comment
+
+// {
+    a: aaa,
+    b: bbb
+    c: cc cc
+    d: dd // d
+    e: /* e */ ee
+    // standalone
+    
+f: fff
+  g: ggg
+    h: hhh
+    // iiiiii
+    i: iii
+    /* j */ j:  jj
+    k: {
+    l: lll
+      m: mm
+    }
+// }
+
+// This is a footer comment 
+"#;
+
 fn cli_binary_path() -> PathBuf {
     let mut path = std::env::current_exe().unwrap();
     path.pop();
@@ -47,6 +72,23 @@ fn basic_commands() {
     let (stdout, _, success) = run_cli(&["format", path.to_str().unwrap()]);
     assert!(success, "format command should succeed");
     assert!(stdout.contains("key"));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_preserves_comment_shape() {
+    let path = temp_path("comment_shape");
+    fs::write(&path, COMMENT_HEAVY_INPUT).unwrap();
+
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap()]);
+    assert!(success);
+    assert!(stdout.contains("// This is a header comment"));
+    assert!(stdout.contains("// standalone"));
+    assert!(stdout.contains("/* j */ j:  jj"));
+    assert!(stdout.contains("k: {"));
+    assert!(!stdout.contains("/* e */  /* e */"));
+    assert!(!stdout.contains("l// This is a header comment"));
 
     fs::remove_file(&path).ok();
 }
