@@ -1,6 +1,6 @@
 //! Property-based roundtrip tests
 
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit};
 use proptest::prelude::*;
 
 proptest! {

@@ -397,11 +397,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         }
     }
 
-    let result = hjson_edit::Formatter::build(
-        &doc.ast()?,
-        hjson_edit::FormatConfig::default().with_newline(doc.current_newline()),
-    )
-    .to_string();
+    let result = doc.to_string();
     let result = if content.ends_with('\n') && !result.ends_with('\n') {
         format!("{}{}", result, doc.current_newline())
     } else {

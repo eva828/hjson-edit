@@ -1,6 +1,6 @@
 //! Parser basic tests - unified table-driven tests
 
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit};
 
 /// Table-driven test for all root types
 #[test]
@@ -49,7 +49,6 @@ fn hjson_extensions() {
 
 /// Test block strings (multiline)
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn block_strings() {
     let input = "text: '''\n    line1\n      line2\n    '''\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -65,7 +64,6 @@ fn block_strings() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn block_strings_with_crlf() {
     let input = "text: '''\r\n    line1\r\n      line2\r\n    '''\r\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -113,7 +111,6 @@ fn nested_structures() {
 
 /// Test array of objects
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn array_of_objects() {
     let input = r#"[
   { name: "first", value: 1 },
@@ -137,7 +134,6 @@ fn array_of_objects() {
 /// - \n, \t, \" は実際の文字に変換される
 /// - \uXXXX はUnicode文字に変換される
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn json_string_escapes() {
     // 引用符のエスケープ
     let doc = HjsonDocument::parse(r#"{"key": "say \"hello\""}"#).unwrap();
@@ -184,7 +180,6 @@ fn json_string_escapes() {
 
 /// 指数表記の数値
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn number_exponent_notation() {
     let cases = [
         ("positive_exp", "1e6", 1_000_000.0),
@@ -212,7 +207,6 @@ fn number_exponent_notation() {
 
 /// リテラル・数値の終端チェック（quoteless stringとの区別）
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn literal_and_number_end_checking() {
     // RFC: "true blue" は文字列 "true blue" で、boolean true ではない
     let cases = [

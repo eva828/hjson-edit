@@ -140,6 +140,7 @@ impl HjsonValue {
         builder.token(key_kind.into(), key_text.as_str());
         builder.finish_node();
         builder.token(SyntaxKind::Colon.into(), ":");
+        builder.token(SyntaxKind::Whitespace.into(), " ");
         push_node(&mut builder, &self.render_value(string_style));
         builder.finish_node();
         builder.finish()

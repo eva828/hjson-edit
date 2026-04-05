@@ -1,15 +1,7 @@
-use rowan::{GreenNode, NodeOrToken};
+use rowan::NodeOrToken;
 
 use crate::{
-    format::{FormatConfig, Formatter},
-    high_level::{
-        error::HjsonEditError,
-        ops::{comment::CommentStyle, object::StringStyle},
-        path::HjsonObjectPath,
-        style::DetectNewline,
-        value::HjsonValue,
-        HjsonDocument,
-    },
+    high_level::{error::HjsonEditError, path::HjsonObjectPath, value::HjsonValue},
     ArrayPathSegment, ObjectPathSegment, PathSegment, RedNode, SyntaxKind,
 };
 
@@ -25,7 +17,6 @@ pub trait RedNodeExt {
     fn to_hjson_value(&self) -> Result<HjsonValue, HjsonEditError> {
         self.node_to_value()
     }
-    fn format_like(&self, root: GreenNode) -> GreenNode;
 }
 
 impl RedNodeExt for RedNode {
@@ -159,12 +150,12 @@ impl RedNodeExt for RedNode {
                 .and_then(|child| match child {
                     NodeOrToken::Node(node) => node.node_to_value(),
                     NodeOrToken::Token(token) => match token.kind() {
-                        SyntaxKind::String => Ok(HjsonValue::String(decode_double_quoted(
-                            token.text().to_string(),
-                        ))),
-                        SyntaxKind::BlockString => Ok(HjsonValue::String(strip_block_string(
-                            token.text().to_string(),
-                        ))),
+                        SyntaxKind::String => Ok(HjsonValue::String(
+                            decode_double_quoted_lossless(token.text().to_string()),
+                        )),
+                        SyntaxKind::BlockString => Ok(HjsonValue::String(
+                            strip_block_string_lossless(token.text().to_string()),
+                        )),
                         SyntaxKind::UnquotedString => {
                             Ok(HjsonValue::String(token.text().to_string()))
                         }
@@ -222,10 +213,10 @@ impl RedNodeExt for RedNode {
                 }
                 Ok(HjsonValue::Array(items))
             }
-            SyntaxKind::String => Ok(HjsonValue::String(decode_double_quoted(
+            SyntaxKind::String => Ok(HjsonValue::String(decode_double_quoted_lossless(
                 self.text().to_string(),
             ))),
-            SyntaxKind::BlockString => Ok(HjsonValue::String(strip_block_string(
+            SyntaxKind::BlockString => Ok(HjsonValue::String(strip_block_string_lossless(
                 self.text().to_string(),
             ))),
             SyntaxKind::UnquotedString => Ok(HjsonValue::String(self.text().to_string())),
@@ -255,25 +246,6 @@ impl RedNodeExt for RedNode {
                 found: self.kind(),
             }),
         }
-    }
-
-    fn format_like(&self, root: GreenNode) -> GreenNode {
-        let document = HjsonDocument {
-            root: RedNode::new_root(root.clone()),
-            string_style: StringStyle::default(),
-            comment_style: CommentStyle::default(),
-            newline: self.detect_newline().as_str().to_string(),
-        };
-
-        let ast = match document.ast() {
-            Ok(ast) => ast,
-            Err(_) => return root,
-        };
-
-        Formatter::build(
-            &ast,
-            FormatConfig::default().with_newline(self.detect_newline().as_str()),
-        )
     }
 }
 
@@ -326,4 +298,112 @@ fn decode_double_quoted(text: String) -> String {
     }
 
     out
+}
+
+fn decode_double_quoted_lossless(text: String) -> String {
+    let inner = text
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(&text);
+    let mut out = String::new();
+    let mut chars = inner.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+
+        match chars.next() {
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('/') => out.push('/'),
+            Some('b') => out.push('\u{0008}'),
+            Some('f') => out.push('\u{000C}'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('u') => {
+                let mut hex = String::new();
+                for _ in 0..4 {
+                    if let Some(ch) = chars.next() {
+                        hex.push(ch);
+                    }
+                }
+
+                if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                    if (0xD800..=0xDBFF).contains(&code) {
+                        let mut lookahead = chars.clone();
+                        if lookahead.next() == Some('\\') && lookahead.next() == Some('u') {
+                            let mut low_hex = String::new();
+                            for _ in 0..4 {
+                                if let Some(ch) = lookahead.next() {
+                                    low_hex.push(ch);
+                                }
+                            }
+                            if let Ok(low) = u32::from_str_radix(&low_hex, 16) {
+                                if (0xDC00..=0xDFFF).contains(&low) {
+                                    let combined =
+                                        0x10000 + (((code - 0xD800) << 10) | (low - 0xDC00));
+                                    if let Some(ch) = char::from_u32(combined) {
+                                        out.push(ch);
+                                        chars = lookahead;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ch) = char::from_u32(code) {
+                        out.push(ch);
+                    }
+                }
+            }
+            Some(other) => out.push(other),
+            None => break,
+        }
+    }
+
+    out
+}
+
+fn strip_block_string_lossless(text: String) -> String {
+    let inner = text
+        .strip_prefix("'''")
+        .and_then(|s| s.strip_suffix("'''"))
+        .unwrap_or(&text)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+
+    let mut lines = inner.split('\n').collect::<Vec<_>>();
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| matches!(c, ' ' | '\t')).count())
+        .min()
+        .unwrap_or(0);
+
+    lines
+        .into_iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                line.chars().skip(indent).collect::<String>()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

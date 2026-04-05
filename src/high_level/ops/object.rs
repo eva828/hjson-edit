@@ -112,24 +112,63 @@ fn rebuild_tree_with_set(
     let (parent_path, last) = path
         .split_last()
         .ok_or_else(|| HjsonEditError::InvalidPath("empty path".to_string()))?;
-    let parent = resolve_parent(root.clone(), &parent_path)?;
-    let new_parent = match parent.kind() {
-        SyntaxKind::Root => set_root_child(&parent, &last, value, string_style)?,
-        SyntaxKind::Object => set_object_child(&parent, &last, value, string_style)?,
-        SyntaxKind::Array => set_array_child(&parent, &last, value, string_style)?,
-        SyntaxKind::Value => set_value_child(&parent, &last, value, string_style)?,
-        _ => {
-            return Err(HjsonEditError::UnexpectedStructure {
-                expected: SyntaxKind::Object,
-                found: parent.kind(),
-            })
-        }
-    };
+    match resolve_parent(root.clone(), &parent_path) {
+        Ok(parent) => {
+            let new_parent = match parent.kind() {
+                SyntaxKind::Root => set_root_child(&parent, &last, value, string_style)?,
+                SyntaxKind::Object => set_object_child(&parent, &last, value, string_style)?,
+                SyntaxKind::Array => set_array_child(&parent, &last, value, string_style)?,
+                SyntaxKind::Value => set_value_child(&parent, &last, value, string_style)?,
+                _ => {
+                    return Err(HjsonEditError::UnexpectedStructure {
+                        expected: SyntaxKind::Object,
+                        found: parent.kind(),
+                    })
+                }
+            };
 
-    if parent.kind() == SyntaxKind::Root {
-        Ok(new_parent)
-    } else {
-        Ok(parent.replace_with(new_parent))
+            if parent.kind() == SyntaxKind::Root {
+                Ok(new_parent)
+            } else {
+                Ok(parent.replace_with(new_parent))
+            }
+        }
+        Err(HjsonEditError::PathNotFound(_)) => {
+            let (ancestor, consumed) = resolve_existing_prefix(root.clone(), path.segments());
+            if consumed == 0 || consumed >= path.depth() {
+                return Err(HjsonEditError::PathNotFound(path.clone()));
+            }
+
+            let missing = &path.segments()[consumed];
+            let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
+            let new_parent = match ancestor.kind() {
+                SyntaxKind::Root => {
+                    set_root_child(&ancestor, missing, &nested_value, string_style)?
+                }
+                SyntaxKind::Object => {
+                    set_object_child(&ancestor, missing, &nested_value, string_style)?
+                }
+                SyntaxKind::Array => {
+                    set_array_child(&ancestor, missing, &nested_value, string_style)?
+                }
+                SyntaxKind::Value => {
+                    set_value_child(&ancestor, missing, &nested_value, string_style)?
+                }
+                _ => {
+                    return Err(HjsonEditError::UnexpectedStructure {
+                        expected: SyntaxKind::Object,
+                        found: ancestor.kind(),
+                    })
+                }
+            };
+
+            if ancestor.kind() == SyntaxKind::Root {
+                Ok(new_parent)
+            } else {
+                Ok(ancestor.replace_with(new_parent))
+            }
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -169,6 +208,23 @@ fn resolve_parent(root: RedNode, path: &HjsonObjectPath) -> Result<RedNode, Hjso
             .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
     }
     Ok(current)
+}
+
+fn resolve_existing_prefix(root: RedNode, path: &[PathSegment]) -> (RedNode, usize) {
+    let mut current = root.document_start_node();
+    let mut consumed = 0usize;
+
+    for segment in path {
+        match current.child(segment) {
+            Some(next) => {
+                current = next;
+                consumed += 1;
+            }
+            None => break,
+        }
+    }
+
+    (current, consumed)
 }
 
 fn set_root_child(
@@ -226,56 +282,59 @@ fn set_object_child(
         }
     };
 
-    let mut children: Vec<GreenElement> = Vec::new();
-    let mut replaced = false;
+    let children = parent.children_with_tokens().collect::<Vec<_>>();
     let insert_style = resolve_quote_style(string_style, detect_string_style(parent));
+    let rendered_pair = value.render_pair(key, None, Some(insert_style));
 
-    for child in parent.children_with_tokens() {
-        match child {
-            NodeOrToken::Node(pair)
-                if pair.kind() == SyntaxKind::Pair
-                    && pair.pair_key().as_deref() == Some(key.as_str()) =>
-            {
-                children.push(replace_pair_value(&pair, value, string_style)?.into());
-                replaced = true;
-            }
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBrace && !replaced => {
-                children.push(value.render_pair(key, None, Some(insert_style)).into());
-                children.push(owned_green(NodeOrToken::Token(token)));
-                replaced = true;
-            }
-            NodeOrToken::Node(node) => children.push(owned_green(NodeOrToken::Node(node))),
-            NodeOrToken::Token(token) => children.push(owned_green(NodeOrToken::Token(token))),
-        }
-    }
-
-    if !replaced {
-        let rbrace_pos =
-            green_bracket_index(&children, SyntaxKind::RBrace).unwrap_or(children.len());
-        let last_pair_pos = children.iter().rposition(
-            |child| matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair.into()),
-        );
-        let tail_start = last_pair_pos.map(|pos| pos + 1).unwrap_or(rbrace_pos);
-        let tail_slice: &[GreenElement] = children.get(tail_start..rbrace_pos).unwrap_or(&[]);
-        let mut inserted = Vec::new();
-
-        if last_pair_pos.is_some() {
-            if tail_slice.is_empty() {
-                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-            } else {
-                inserted.extend(copy_green_elements(tail_slice));
-            }
-        }
-
-        inserted.push(value.render_pair(key, None, Some(insert_style)).into());
-
+    if let Some((pair_pos, pair)) = children.iter().enumerate().find(|(_, child)| {
+        matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair && node.pair_key().as_deref() == Some(key.as_str()))
+    }) {
+        let updated = match pair {
+            NodeOrToken::Node(node) => replace_pair_value(node, value, string_style)?,
+            _ => unreachable!(),
+        };
         return Ok(parent
             .green()
-            .splice_children(tail_start..tail_start, inserted));
+            .splice_children(pair_pos..pair_pos + 1, vec![updated.into()]));
     }
 
-    Ok(SyntaxKind::Object.create_node(children))
+    let rbrace_pos = red_bracket_index(&children, SyntaxKind::RBrace).unwrap_or(children.len());
+    let pair_positions = children
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, child)| {
+            matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair)
+                .then_some(idx)
+        })
+        .collect::<Vec<_>>();
+    let Some(&last_pair_pos) = pair_positions.last() else {
+        return Ok(parent
+            .green()
+            .splice_children(rbrace_pos..rbrace_pos, vec![rendered_pair.into()]));
+    };
+
+    let before_slice = if pair_positions.len() >= 2 {
+        let prev_pair_pos = pair_positions[pair_positions.len() - 2];
+        children
+            .get(prev_pair_pos + 1..last_pair_pos)
+            .unwrap_or(&[])
+    } else {
+        let lbrace_pos = red_bracket_index(&children, SyntaxKind::LBrace).unwrap_or(0);
+        children.get(lbrace_pos + 1..last_pair_pos).unwrap_or(&[])
+    };
+    let after_slice = children.get(last_pair_pos + 1..rbrace_pos).unwrap_or(&[]);
+
+    let mut inserted = copy_separator_tokens(before_slice);
+    if inserted.is_empty() {
+        inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+    }
+    inserted.push(rendered_pair.into());
+    inserted.extend(copy_separator_tokens(after_slice));
+
+    Ok(parent
+        .green()
+        .splice_children(last_pair_pos + 1..rbrace_pos, inserted))
 }
 
 fn set_array_child(
@@ -322,52 +381,99 @@ fn set_array_child(
                 .splice_children(value_pos..value_pos + 1, vec![updated.into()]))
         }
         ArrayPathSegment::InsertAt(idx) => {
-            let insert_pos = if *idx < value_positions.len() {
-                value_positions[*idx]
-            } else {
-                red_bracket_index(&children, SyntaxKind::RBracket).unwrap_or(children.len())
-            };
+            if *idx >= value_positions.len() {
+                let insert_pos =
+                    red_bracket_index(&children, SyntaxKind::RBracket).unwrap_or(children.len());
+                let last_value_pos = value_positions.last().copied();
+                let Some(last_value_pos) = last_value_pos else {
+                    return Ok(parent.green().splice_children(
+                        insert_pos..insert_pos,
+                        vec![value.render_value(Some(insert_style)).into()],
+                    ));
+                };
 
-            let prev_boundary = if *idx == 0 {
-                red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0)
-            } else {
-                value_positions
-                    .get(idx.saturating_sub(1))
-                    .copied()
-                    .unwrap_or(0)
-            };
-            let separator_slice: &[NodeOrToken<RedNode, crate::RedToken>] =
-                children.get(prev_boundary + 1..insert_pos).unwrap_or(&[]);
-            let mut inserted = copy_separator_tokens(separator_slice);
-            inserted.push(value.render_value(Some(insert_style)).into());
+                let before_slice = if value_positions.len() >= 2 {
+                    let prev_value_pos = value_positions[value_positions.len() - 2];
+                    children
+                        .get(prev_value_pos + 1..last_value_pos)
+                        .unwrap_or(&[])
+                } else {
+                    let lbracket_pos =
+                        red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
+                    children
+                        .get(lbracket_pos + 1..last_value_pos)
+                        .unwrap_or(&[])
+                };
+                let after_slice = children.get(last_value_pos + 1..insert_pos).unwrap_or(&[]);
+                let mut inserted = copy_separator_tokens(before_slice);
+                if inserted.is_empty() {
+                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                }
+                inserted.push(value.render_value(Some(insert_style)).into());
+                inserted.extend(copy_separator_tokens(after_slice));
 
-            Ok(parent
-                .green()
-                .splice_children(prev_boundary + 1..prev_boundary + 1, inserted))
+                Ok(parent
+                    .green()
+                    .splice_children(last_value_pos + 1..insert_pos, inserted))
+            } else {
+                let insert_pos = value_positions[*idx];
+                let prev_boundary = if *idx == 0 {
+                    red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0)
+                } else {
+                    value_positions
+                        .get(idx.saturating_sub(1))
+                        .copied()
+                        .unwrap_or(0)
+                };
+                let separator_slice: &[NodeOrToken<RedNode, crate::RedToken>] =
+                    children.get(prev_boundary + 1..insert_pos).unwrap_or(&[]);
+                let mut inserted = copy_separator_tokens(separator_slice);
+                if inserted.is_empty() {
+                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                }
+                inserted.push(value.render_value(Some(insert_style)).into());
+                inserted.extend(copy_separator_tokens(separator_slice));
+
+                Ok(parent
+                    .green()
+                    .splice_children(prev_boundary + 1..insert_pos, inserted))
+            }
         }
         ArrayPathSegment::Push => {
             let insert_pos =
                 red_bracket_index(&children, SyntaxKind::RBracket).unwrap_or(children.len());
-            let last_value_pos = value_positions.last().copied();
-            let tail_start = last_value_pos.map(|pos| pos + 1).unwrap_or(insert_pos);
-            let tail_slice: &[NodeOrToken<RedNode, crate::RedToken>] =
-                children.get(tail_start..insert_pos).unwrap_or(&[]);
-            let mut inserted = Vec::new();
+            let Some(last_value_pos) = value_positions.last().copied() else {
+                return Ok(parent.green().splice_children(
+                    insert_pos..insert_pos,
+                    vec![value.render_value(Some(insert_style)).into()],
+                ));
+            };
 
-            if last_value_pos.is_some() {
-                if tail_slice.is_empty() {
-                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-                } else {
-                    inserted.extend(copy_separator_tokens(tail_slice));
-                }
+            let before_slice = if value_positions.len() >= 2 {
+                let prev_value_pos = value_positions[value_positions.len() - 2];
+                children
+                    .get(prev_value_pos + 1..last_value_pos)
+                    .unwrap_or(&[])
+            } else {
+                let lbracket_pos = red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
+                children
+                    .get(lbracket_pos + 1..last_value_pos)
+                    .unwrap_or(&[])
+            };
+            let after_slice = children.get(last_value_pos + 1..insert_pos).unwrap_or(&[]);
+            let mut inserted = copy_separator_tokens(before_slice);
+            if inserted.is_empty() {
+                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
             }
-
             inserted.push(value.render_value(Some(insert_style)).into());
+            inserted.extend(copy_separator_tokens(after_slice));
 
             Ok(parent
                 .green()
-                .splice_children(tail_start..tail_start, inserted))
+                .splice_children(last_value_pos + 1..insert_pos, inserted))
         }
     }
 }
@@ -475,6 +581,22 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
     Ok(parent.green().splice_children(value_pos..boundary, vec![]))
 }
 
+fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
+    let mut current = value;
+    for segment in path.iter().rev() {
+        current = match segment {
+            PathSegment::Object(ObjectPathSegment::Key(key)) => {
+                HjsonValue::Object(vec![(key.clone(), current)])
+            }
+            PathSegment::Array(ArrayPathSegment::Index(_))
+            | PathSegment::Array(ArrayPathSegment::InsertAt(_))
+            | PathSegment::Array(ArrayPathSegment::Push) => HjsonValue::Array(vec![current]),
+        };
+    }
+
+    current
+}
+
 fn rebuild_child_with_set(
     child: &RedNode,
     last: &PathSegment,
@@ -550,12 +672,6 @@ fn detect_string_style(node: &RedNode) -> Option<QuoteStyle> {
     None
 }
 
-fn green_bracket_index(children: &[GreenElement], kind: SyntaxKind) -> Option<usize> {
-    children
-        .iter()
-        .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == kind.into()))
-}
-
 fn red_bracket_index(
     children: &[NodeOrToken<RedNode, crate::RedToken>],
     kind: SyntaxKind,
@@ -578,10 +694,6 @@ fn next_value_or_bracket_index(
             NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBracket => Some(idx),
             _ => None,
         })
-}
-
-fn copy_green_elements(separator_slice: &[GreenElement]) -> Vec<GreenElement> {
-    separator_slice.to_vec()
 }
 
 fn copy_separator_tokens(
@@ -608,12 +720,5 @@ fn resolve_quote_style(preference: StringStyle, detected: Option<QuoteStyle>) ->
         StringStyle::DoubleQuoted => QuoteStyle::DoubleQuoted,
         StringStyle::Block => QuoteStyle::Block,
         StringStyle::Unquoted => QuoteStyle::Unquoted,
-    }
-}
-
-fn owned_green(child: NodeOrToken<RedNode, crate::RedToken>) -> GreenElement {
-    match child {
-        NodeOrToken::Node(node) => node.green().clone().into(),
-        NodeOrToken::Token(token) => GreenToken::new(token.kind().into(), token.text()).into(),
     }
 }
