@@ -79,18 +79,15 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 insert_document_comment(self, false, comment, existing_style)
             }
             HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
-                let existing_style = self
-                    .resolve_pair(&path)?
-                    .leading_trivia
-                    .into_iter()
-                    .find_map(|elem| match elem {
-                        Trivia::Comment(comment) => Some(match comment.kind {
-                            CommentKind::Line => CommentStyle::Line,
-                            CommentKind::Hash => CommentStyle::Hash,
-                            CommentKind::Block => CommentStyle::Block,
-                        }),
-                        _ => None,
-                    });
+                let pair = self.resolve_pair(&path)?;
+                let existing_style = pair.leading_trivia.iter().find_map(|elem| match elem {
+                    Trivia::Comment(comment) => Some(match comment.kind {
+                        CommentKind::Line => CommentStyle::Line,
+                        CommentKind::Hash => CommentStyle::Hash,
+                        CommentKind::Block => CommentStyle::Block,
+                    }),
+                    _ => None,
+                });
 
                 self = self.remove_comment_by_path(HjsonCommentPath::Before(path.clone()))?;
 
@@ -102,7 +99,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 
                 let newline =
                     SyntaxKind::Newline.create_token(self.root().detect_newline().as_str());
-                let indent = SyntaxKind::Whitespace.create_token(&"  ".repeat(path.depth()));
+                let indent = SyntaxKind::Whitespace.create_token(&detect_indent_for_pair(&pair));
                 let comment_node =
                     SyntaxKind::Comment.create_node(vec![kind_from_style(resolved_style)
                         .create_token(&rendered)
@@ -322,6 +319,27 @@ fn resolve_comment_style(
         CommentStyle::Line => CommentStyle::Line,
         CommentStyle::Hash => CommentStyle::Hash,
         CommentStyle::Block => CommentStyle::Block,
+    }
+}
+
+fn detect_indent_for_pair(pair: &crate::ast::Pair) -> String {
+    let mut indent = String::new();
+    for elem in pair.leading_trivia.iter().rev() {
+        match elem {
+            Trivia::Whitespace(text) => {
+                if indent.is_empty() {
+                    indent = text.clone();
+                }
+            }
+            Trivia::Newline { .. } => break,
+            _ => {}
+        }
+    }
+
+    if indent.is_empty() {
+        "  ".repeat(pair.layout.depth)
+    } else {
+        indent
     }
 }
 

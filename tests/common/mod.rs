@@ -31,7 +31,8 @@ pub fn assert_roundtrip(input: &str) {
         "rendering parsed document should preserve original text"
     );
 
-    let reparsed = hjson_edit::HjsonDocument::parse(&rendered).expect("rendered text should reparse");
+    let reparsed =
+        hjson_edit::HjsonDocument::parse(&rendered).expect("rendered text should reparse");
     assert_eq!(
         reparsed.to_string(),
         rendered,
@@ -51,15 +52,15 @@ pub fn cli_binary_path() -> PathBuf {
 /// Run CLI command and return (stdout, stderr, success)
 pub fn run_cli(args: &[&str]) -> (String, String, bool) {
     use std::process::Command;
-    
+
     let output = Command::new(cli_binary_path())
         .args(args)
         .output()
         .expect("Failed to execute CLI command");
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let success = output.status.success();
-    
+
     (stdout, stderr, success)
 }

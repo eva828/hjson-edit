@@ -1,5 +1,6 @@
 use rowan::{GreenNode, GreenNodeBuilder, NodeOrToken};
 
+use crate::ast::QuoteStyle;
 use crate::syntax::SyntaxKind;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,13 +69,14 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
-    pub fn value_to_green(&self) -> GreenNode {
+    pub fn render_value(&self, string_style: Option<QuoteStyle>) -> GreenNode {
         let mut builder = GreenNodeBuilder::new();
         builder.start_node(SyntaxKind::Value.into());
         match self {
             HjsonValue::String(s) => {
-                let text = format!("\"{}\"", s);
-                builder.token(SyntaxKind::String.into(), text.as_str())
+                let style = string_style.unwrap_or(QuoteStyle::DoubleQuoted);
+                let (kind, text) = render_string(s, style);
+                builder.token(kind.into(), text.as_str())
             }
             HjsonValue::Integer(n) => {
                 let text = n.to_string();
@@ -91,7 +93,7 @@ impl HjsonValue {
                 builder.start_node(SyntaxKind::Array.into());
                 builder.token(SyntaxKind::LBracket.into(), "[");
                 for (idx, item) in items.iter().enumerate() {
-                    push_node(&mut builder, &item.value_to_green());
+                    push_node(&mut builder, &item.render_value(string_style));
                     if idx + 1 != items.len() {
                         builder.token(SyntaxKind::Comma.into(), ",");
                     }
@@ -103,7 +105,7 @@ impl HjsonValue {
                 builder.start_node(SyntaxKind::Object.into());
                 builder.token(SyntaxKind::LBrace.into(), "{");
                 for (idx, (key, item)) in entries.iter().enumerate() {
-                    push_node(&mut builder, &item.pair_to_green(key));
+                    push_node(&mut builder, &item.render_pair(key, None, string_style));
                     if idx + 1 != entries.len() {
                         builder.token(SyntaxKind::Comma.into(), ",");
                     }
@@ -116,21 +118,58 @@ impl HjsonValue {
         builder.finish()
     }
 
-    pub fn to_green(&self) -> GreenNode {
-        self.value_to_green()
-    }
-
-    pub fn pair_to_green(&self, key: &str) -> GreenNode {
+    pub fn render_pair(
+        &self,
+        key: &str,
+        key_style: Option<QuoteStyle>,
+        string_style: Option<QuoteStyle>,
+    ) -> GreenNode {
         let mut builder = GreenNodeBuilder::new();
         builder.start_node(SyntaxKind::Pair.into());
         builder.start_node(SyntaxKind::Key.into());
-        builder.token(SyntaxKind::UnquotedString.into(), key);
+        let (key_kind, key_text) = render_string(
+            key,
+            key_style.unwrap_or_else(|| {
+                if is_simple_unquoted_text(key) {
+                    QuoteStyle::Unquoted
+                } else {
+                    QuoteStyle::DoubleQuoted
+                }
+            }),
+        );
+        builder.token(key_kind.into(), key_text.as_str());
         builder.finish_node();
         builder.token(SyntaxKind::Colon.into(), ":");
-        push_node(&mut builder, &self.value_to_green());
+        push_node(&mut builder, &self.render_value(string_style));
         builder.finish_node();
         builder.finish()
     }
+
+    pub fn render_scalar(&self, string_style: Option<QuoteStyle>) -> GreenNode {
+        self.render_value(string_style)
+    }
+}
+
+fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
+    match style {
+        QuoteStyle::DoubleQuoted => (
+            SyntaxKind::String,
+            format!("\"{}\"", escape_double_quoted(text)),
+        ),
+        QuoteStyle::Block => (SyntaxKind::BlockString, format!("'''{}'''", text)),
+        QuoteStyle::Unquoted => (SyntaxKind::UnquotedString, text.to_string()),
+    }
+}
+
+fn is_simple_unquoted_text(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+fn escape_double_quoted(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn push_node(builder: &mut GreenNodeBuilder<'static>, node: &GreenNode) {

@@ -161,10 +161,7 @@ fn set_existing_key_preserves_comments() {
         "comment should be preserved after set, got: {:?}",
         output
     );
-    expect_value(
-        updated.get("name"),
-        HjsonValue::String("api".to_string()),
-    );
+    expect_value(updated.get("name"), HjsonValue::String("api".to_string()));
 }
 
 #[test]
@@ -219,4 +216,27 @@ fn invalid_path_errors() {
     // Invalid array index should return an InvalidPath error from path *parsing*.
     assert!(doc.clone().remove("items[abc]").is_err());
     assert!(doc.clone().remove("items[1x]").is_err());
+}
+
+#[test]
+fn set_same_value_keeps_bytes() {
+    let input = "{\n  // keep\n  name: value\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc.set("name", "value").unwrap();
+    assert_eq!(updated.to_string(), input);
+}
+
+#[test]
+fn set_existing_value_preserves_unrelated_bytes() {
+    let input = "{\n  // keep\n  name: value\n  other: 1\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc.set("name", "updated").unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("// keep"));
+    assert!(output.contains("other: 1"));
+    assert!(output.contains("updated"));
+    assert!(!output.contains("value\n  other"));
 }
