@@ -249,57 +249,6 @@ impl RedNodeExt for RedNode {
     }
 }
 
-fn strip_block_string(text: String) -> String {
-    text.strip_prefix("'''")
-        .and_then(|s| s.strip_suffix("'''"))
-        .unwrap_or(&text)
-        .to_string()
-}
-
-fn decode_double_quoted(text: String) -> String {
-    let inner = text
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .unwrap_or(&text);
-    let mut out = String::new();
-    let mut chars = inner.chars();
-
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-
-        match chars.next() {
-            Some('"') => out.push('"'),
-            Some('\\') => out.push('\\'),
-            Some('/') => out.push('/'),
-            Some('b') => out.push('\u{0008}'),
-            Some('f') => out.push('\u{000C}'),
-            Some('n') => out.push('\n'),
-            Some('r') => out.push('\r'),
-            Some('t') => out.push('\t'),
-            Some('u') => {
-                let mut hex = String::new();
-                for _ in 0..4 {
-                    if let Some(ch) = chars.next() {
-                        hex.push(ch);
-                    }
-                }
-                if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                    if let Some(ch) = char::from_u32(code) {
-                        out.push(ch);
-                    }
-                }
-            }
-            Some(other) => out.push(other),
-            None => break,
-        }
-    }
-
-    out
-}
-
 fn decode_double_quoted_lossless(text: String) -> String {
     let inner = text
         .strip_prefix('"')
