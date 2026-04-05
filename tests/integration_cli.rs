@@ -77,6 +77,27 @@ fn basic_commands() {
 }
 
 #[test]
+fn parse_ast_output() {
+    let path = temp_path("ast");
+    fs::write(&path, r#"{"key": "value"}"#).unwrap();
+
+    let (stdout, _, success) = run_cli(&["parse", path.to_str().unwrap(), "--ast", "--simple"]);
+    assert!(success, "parse --ast should succeed");
+    assert!(stdout.contains("Document"));
+    assert!(stdout.contains("Object"));
+    assert!(stdout.contains("Member"));
+    assert!(stdout.contains("Key"));
+    assert!(stdout.contains("Value"));
+    assert!(stdout.contains("String"));
+    assert!(!stdout.contains("Document {"));
+    assert!(!stdout.contains("leading_trivia"));
+    assert!(!stdout.contains("└──"));
+    assert!(!stdout.contains("├──"));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 fn edit_preserves_comment_shape() {
     let path = temp_path("comment_shape");
     fs::write(&path, COMMENT_HEAVY_INPUT).unwrap();

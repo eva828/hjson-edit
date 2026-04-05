@@ -16,6 +16,9 @@ cargo install --git https://github.com/eva828/hjson-edit
 # パースして確認
 hjson-edit parse config.hjson
 
+# ASTを木表示
+hjson-edit parse --ast config.hjson
+
 # ドキュメント全体を整形して出力
 hjson-edit format config.hjson
 

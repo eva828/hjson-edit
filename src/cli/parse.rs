@@ -4,10 +4,15 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use hjson_edit::{high_level::HjsonDocument, RedNode, RedToken, SyntaxKind};
+use hjson_edit::{
+    ast::{CommentKind, Document, DocumentItem, QuoteStyle, ScalarValue, Trivia, ValueContent},
+    high_level::HjsonDocument,
+    RedNode, RedToken, SyntaxKind,
+};
 
 pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
+    let show_ast = *matches.get_one::<bool>("ast").unwrap_or(&false);
     let show_trivia = *matches.get_one::<bool>("show-trivia").unwrap_or(&false);
     let color_mode = matches
         .get_one::<String>("color")
@@ -19,12 +24,20 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
-            let red = document.root();
+            if show_ast {
+                let ast = document.ast()?;
+                let console_config = ConsoleConfig::new(simple, color_mode);
+                let mut tree_view = AstTreeViewBuilder::new(console_config, show_trivia);
+                tree_view.dump_document(&ast, true)?;
+                print!("{}", tree_view.buf);
+            } else {
+                let red = document.root();
 
-            let console_config = ConsoleConfig::new(simple, color_mode);
-            let mut tree_view = TreeViewBuilder::new(console_config, show_trivia);
-            tree_view.dump_node(red, true)?;
-            print!("{}", tree_view.buf);
+                let console_config = ConsoleConfig::new(simple, color_mode);
+                let mut tree_view = TreeViewBuilder::new(console_config, show_trivia);
+                tree_view.dump_node(red, true)?;
+                print!("{}", tree_view.buf);
+            }
             Ok(())
         }
         Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
@@ -183,6 +196,392 @@ impl TreeViewBuilder {
         )?;
 
         Ok(())
+    }
+}
+
+struct AstTreeViewBuilder {
+    config: ConsoleConfig,
+    show_trivia: bool,
+    buf: String,
+    indent_stack: Vec<Indent>,
+}
+
+impl AstTreeViewBuilder {
+    fn new(config: ConsoleConfig, show_trivia: bool) -> Self {
+        Self {
+            config,
+            show_trivia,
+            buf: String::new(),
+            indent_stack: Vec::new(),
+        }
+    }
+
+    fn connector(&self, is_root: bool, is_last: bool) -> &'static str {
+        if self.config.pretty && !is_root {
+            if is_last {
+                "└── "
+            } else {
+                "├── "
+            }
+        } else {
+            ""
+        }
+    }
+
+    fn colorize(&self, text: &str, color: i32) -> String {
+        if self.config.colored {
+            format!("\x1b[{}m{}\x1b[0m", color, text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn push_indent(&mut self, is_last: bool) {
+        self.indent_stack.push(if is_last {
+            Indent::Last
+        } else {
+            Indent::NotLast
+        });
+    }
+
+    fn pop_indent(&mut self) {
+        self.indent_stack.pop();
+    }
+
+    fn indent(&self) -> String {
+        self.indent_stack
+            .iter()
+            .map(|indent| indent.as_str(self.config.pretty))
+            .collect()
+    }
+
+    fn begin_node(
+        &mut self,
+        label: impl Into<String>,
+        color: i32,
+        is_root: bool,
+        is_last: bool,
+    ) -> Result<()> {
+        let label = self.colorize(&label.into(), color);
+        writeln!(
+            self.buf,
+            "{}{}{}",
+            self.indent(),
+            self.connector(is_root, is_last),
+            label
+        )?;
+
+        if !is_root {
+            self.push_indent(is_last);
+        }
+
+        Ok(())
+    }
+
+    fn end_node(&mut self, is_root: bool) {
+        if !is_root {
+            self.pop_indent();
+        }
+    }
+
+    fn leaf(&mut self, label: impl Into<String>, color: i32, is_last: bool) -> Result<()> {
+        let label = self.colorize(&label.into(), color);
+        writeln!(
+            self.buf,
+            "{}{}{}",
+            self.indent(),
+            self.connector(false, is_last),
+            label
+        )?;
+        Ok(())
+    }
+
+    fn dump_document(&mut self, document: &Document, is_last: bool) -> Result<()> {
+        self.begin_node("Document", 37, true, is_last)?;
+
+        let item = document.item();
+        let show_leading = self.show_trivia && !document.leading_trivia.is_empty();
+        let show_trailing = self.show_trivia && !document.trailing_trivia.is_empty();
+        let child_count = show_leading as usize + item.is_some() as usize + show_trailing as usize;
+        let mut index = 0;
+
+        if show_leading {
+            self.dump_trivia_group(
+                "LeadingTrivia",
+                &document.leading_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        if let Some(item) = item {
+            self.dump_document_item(&item, index == child_count - 1)?;
+            index += 1;
+        }
+
+        if show_trailing {
+            self.dump_trivia_group(
+                "TrailingTrivia",
+                &document.trailing_trivia,
+                index == child_count - 1,
+            )?;
+        }
+
+        self.end_node(true);
+        Ok(())
+    }
+
+    fn dump_document_item(&mut self, item: &DocumentItem, is_last: bool) -> Result<()> {
+        match item {
+            DocumentItem::Object(object) => self.dump_object(object, is_last),
+            DocumentItem::Array(array) => self.dump_array(array, is_last),
+            DocumentItem::Value(value) => self.dump_value(value, is_last),
+        }
+    }
+
+    fn dump_object(&mut self, object: &hjson_edit::ast::Object, is_last: bool) -> Result<()> {
+        let label = if object.braced {
+            "Object".to_string()
+        } else {
+            "Object (braceless)".to_string()
+        };
+        self.begin_node(label, 36, false, is_last)?;
+
+        let members = object.members();
+        let show_leading = self.show_trivia && !object.leading_trivia.is_empty();
+        let show_trailing = self.show_trivia && !object.trailing_trivia.is_empty();
+        let child_count = show_leading as usize + members.len() + show_trailing as usize;
+        let mut index = 0;
+
+        if show_leading {
+            self.dump_trivia_group(
+                "LeadingTrivia",
+                &object.leading_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        for member in &members {
+            self.dump_member(member, index == child_count - 1)?;
+            index += 1;
+        }
+
+        if show_trailing {
+            self.dump_trivia_group(
+                "TrailingTrivia",
+                &object.trailing_trivia,
+                index == child_count - 1,
+            )?;
+        }
+
+        self.end_node(false);
+        Ok(())
+    }
+
+    fn dump_array(&mut self, array: &hjson_edit::ast::Array, is_last: bool) -> Result<()> {
+        let label = if array.braced {
+            "Array".to_string()
+        } else {
+            "Array (braceless)".to_string()
+        };
+        self.begin_node(label, 35, false, is_last)?;
+
+        let items = array.items();
+        let show_leading = self.show_trivia && !array.leading_trivia.is_empty();
+        let show_trailing = self.show_trivia && !array.trailing_trivia.is_empty();
+        let child_count = show_leading as usize + items.len() + show_trailing as usize;
+        let mut index = 0;
+
+        if show_leading {
+            self.dump_trivia_group(
+                "LeadingTrivia",
+                &array.leading_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        for item in &items {
+            self.dump_value(item, index == child_count - 1)?;
+            index += 1;
+        }
+
+        if show_trailing {
+            self.dump_trivia_group(
+                "TrailingTrivia",
+                &array.trailing_trivia,
+                index == child_count - 1,
+            )?;
+        }
+
+        self.end_node(false);
+        Ok(())
+    }
+
+    fn dump_member(&mut self, member: &hjson_edit::ast::Member, is_last: bool) -> Result<()> {
+        self.begin_node("Member", 93, false, is_last)?;
+
+        let key = member.key();
+        let value = member.value();
+        let show_leading = self.show_trivia && !member.leading_trivia.is_empty();
+        let show_before = self.show_trivia && !member.before_colon_trivia.is_empty();
+        let show_after = self.show_trivia && !member.after_colon_trivia.is_empty();
+        let show_trailing = self.show_trivia && !member.trailing_trivia.is_empty();
+        let child_count = show_leading as usize
+            + key.is_some() as usize
+            + show_before as usize
+            + value.is_some() as usize
+            + show_after as usize
+            + show_trailing as usize;
+        let mut index = 0;
+
+        if show_leading {
+            self.dump_trivia_group(
+                "LeadingTrivia",
+                &member.leading_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        if let Some(key) = key.as_ref() {
+            self.dump_key(key, index == child_count - 1)?;
+            index += 1;
+        }
+
+        if show_before {
+            self.dump_trivia_group(
+                "BeforeColonTrivia",
+                &member.before_colon_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        if let Some(value) = value.as_ref() {
+            self.dump_value(value, index == child_count - 1)?;
+            index += 1;
+        }
+
+        if show_after {
+            self.dump_trivia_group(
+                "AfterColonTrivia",
+                &member.after_colon_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        if show_trailing {
+            self.dump_trivia_group(
+                "TrailingTrivia",
+                &member.trailing_trivia,
+                index == child_count - 1,
+            )?;
+        }
+
+        self.end_node(false);
+        Ok(())
+    }
+
+    fn dump_key(&mut self, key: &hjson_edit::ast::Key, is_last: bool) -> Result<()> {
+        let label = key
+            .body_text()
+            .map(|text| format!("Key {:?}", text))
+            .unwrap_or_else(|| "Key".to_string());
+        self.leaf(label, 93, is_last)
+    }
+
+    fn dump_value(&mut self, value: &hjson_edit::ast::Value, is_last: bool) -> Result<()> {
+        self.begin_node("Value", 36, false, is_last)?;
+
+        let content = value.content()?;
+        let show_leading = self.show_trivia && !value.leading_trivia.is_empty();
+        let show_trailing = self.show_trivia && !value.trailing_trivia.is_empty();
+        let child_count = show_leading as usize + 1 + show_trailing as usize;
+        let mut index = 0;
+
+        if show_leading {
+            self.dump_trivia_group(
+                "LeadingTrivia",
+                &value.leading_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        self.dump_value_content(&content, index == child_count - 1)?;
+        index += 1;
+
+        if show_trailing {
+            self.dump_trivia_group(
+                "TrailingTrivia",
+                &value.trailing_trivia,
+                index == child_count - 1,
+            )?;
+        }
+
+        self.end_node(false);
+        Ok(())
+    }
+
+    fn dump_value_content(&mut self, content: &ValueContent, is_last: bool) -> Result<()> {
+        match content {
+            ValueContent::Object(object) => self.dump_object(object, is_last),
+            ValueContent::Array(array) => self.dump_array(array, is_last),
+            ValueContent::Scalar(scalar) => self.dump_scalar(scalar, is_last),
+        }
+    }
+
+    fn dump_scalar(&mut self, scalar: &ScalarValue, is_last: bool) -> Result<()> {
+        match scalar {
+            ScalarValue::String(string) => {
+                let label = match string.quote_style() {
+                    QuoteStyle::DoubleQuoted => format!("String {:?}", string.body_text()),
+                    QuoteStyle::Block => format!("BlockString {:?}", string.body_text()),
+                    QuoteStyle::Unquoted => format!("UnquotedString {:?}", string.body_text()),
+                };
+                self.leaf(label, 32, is_last)
+            }
+            ScalarValue::Integer { raw, .. } => self.leaf(format!("Integer {}", raw), 35, is_last),
+            ScalarValue::Float { raw, .. } => self.leaf(format!("Float {}", raw), 35, is_last),
+            ScalarValue::Bool(true) => self.leaf("True".to_string(), 34, is_last),
+            ScalarValue::Bool(false) => self.leaf("False".to_string(), 34, is_last),
+            ScalarValue::Null => self.leaf("Null".to_string(), 34, is_last),
+        }
+    }
+
+    fn dump_trivia_group(&mut self, label: &str, trivia: &[Trivia], is_last: bool) -> Result<()> {
+        if !self.show_trivia || trivia.is_empty() {
+            return Ok(());
+        }
+
+        self.begin_node(label.to_string(), 90, false, is_last)?;
+        for (index, item) in trivia.iter().enumerate() {
+            self.dump_trivia(item, index == trivia.len() - 1)?;
+        }
+        self.end_node(false);
+        Ok(())
+    }
+
+    fn dump_trivia(&mut self, trivia: &Trivia, is_last: bool) -> Result<()> {
+        match trivia {
+            Trivia::Whitespace(text) => self.leaf(format!("Whitespace {:?}", text), 90, is_last),
+            Trivia::Newline { kind, .. } => self.leaf(format!("Newline {:?}", kind), 90, is_last),
+            Trivia::Comment(comment) => match comment.kind {
+                CommentKind::Line => {
+                    self.leaf(format!("LineComment {:?}", comment.body), 90, is_last)
+                }
+                CommentKind::Hash => {
+                    self.leaf(format!("HashComment {:?}", comment.body), 90, is_last)
+                }
+                CommentKind::Block => {
+                    self.leaf(format!("BlockComment {:?}", comment.body), 90, is_last)
+                }
+            },
+            Trivia::Comma(text) => self.leaf(format!("Comma {:?}", text), 90, is_last),
+        }
     }
 }
 
