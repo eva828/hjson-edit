@@ -115,6 +115,20 @@ fn edit_preserves_comment_shape() {
 }
 
 #[test]
+fn edit_set_preserves_footer_comment() {
+    let path = temp_path("footer_comment");
+    fs::write(&path, COMMENT_HEAVY_INPUT).unwrap();
+
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--set", "aa", "aaa"]);
+    assert!(success);
+    assert!(stdout.contains("// }"));
+    assert!(stdout.contains("// This is a footer comment"));
+    assert!(stdout.contains("aa: aaa"));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 #[ignore = "AST operations not yet implemented"]
 fn edit_object_set_and_remove() {
     let path = temp_path("object");

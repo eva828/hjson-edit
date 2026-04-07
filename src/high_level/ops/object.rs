@@ -1,7 +1,7 @@
 use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 use crate::{
-    ast::QuoteStyle,
+    ast::{AstNode, QuoteStyle, Value as AstValue},
     high_level::{
         error::HjsonEditError,
         ext::RedNodeExt,
@@ -330,7 +330,7 @@ fn set_object_child(
         inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
     }
     inserted.push(rendered_pair.into());
-    inserted.extend(copy_separator_tokens(after_slice));
+    inserted.extend(clone_green_elements(after_slice));
 
     Ok(parent
         .green()
@@ -411,7 +411,7 @@ fn set_array_child(
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
                 }
                 inserted.push(value.render_value(Some(insert_style)).into());
-                inserted.extend(copy_separator_tokens(after_slice));
+                inserted.extend(clone_green_elements(after_slice));
 
                 Ok(parent
                     .green()
@@ -428,13 +428,30 @@ fn set_array_child(
                 };
                 let separator_slice: &[NodeOrToken<RedNode, crate::RedToken>] =
                     children.get(prev_boundary + 1..insert_pos).unwrap_or(&[]);
-                let mut inserted = copy_separator_tokens(separator_slice);
+                let current_value = match &children[insert_pos] {
+                    NodeOrToken::Node(node) => node,
+                    _ => unreachable!(),
+                };
+                let current_value_ast = AstValue::cast(current_value.clone())?;
+                let suffix_len = current_value_ast
+                    .leading_trivia
+                    .len()
+                    .min(separator_slice.len());
+                let split_at = separator_slice.len().saturating_sub(suffix_len);
+                let (prefix_slice, suffix_slice) = separator_slice.split_at(split_at);
+
+                let mut inserted = clone_green_elements(prefix_slice);
                 if inserted.is_empty() {
                     inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                } else if matches!(
+                    prefix_slice.last(),
+                    Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Comma
+                ) {
+                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
                 }
                 inserted.push(value.render_value(Some(insert_style)).into());
-                inserted.extend(copy_separator_tokens(separator_slice));
+                inserted.extend(clone_green_elements(suffix_slice));
 
                 Ok(parent
                     .green()
@@ -469,7 +486,7 @@ fn set_array_child(
                 inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
             }
             inserted.push(value.render_value(Some(insert_style)).into());
-            inserted.extend(copy_separator_tokens(after_slice));
+            inserted.extend(clone_green_elements(after_slice));
 
             Ok(parent
                 .green()
@@ -528,18 +545,17 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         ])));
     };
 
-    let boundary = children
+    let start = children[..pair_pos]
         .iter()
-        .enumerate()
-        .skip(pair_pos + 1)
-        .find_map(|(idx, child)| match child {
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair => Some(idx),
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBrace => Some(idx),
-            _ => None,
+        .rposition(|child| match child {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair => true,
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::LBrace => true,
+            _ => false,
         })
-        .unwrap_or(children.len());
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
 
-    Ok(parent.green().splice_children(pair_pos..boundary, vec![]))
+    Ok(parent.green().splice_children(start..pair_pos + 1, vec![]))
 }
 
 fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -573,12 +589,17 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         })?,
     };
 
-    let boundary = match next_value_or_bracket_index(&children, value_pos) {
-        Some(idx) => idx,
-        None => children.len(),
-    };
+    let start = children[..value_pos]
+        .iter()
+        .rposition(|child| match child {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value => true,
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::LBracket => true,
+            _ => false,
+        })
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
 
-    Ok(parent.green().splice_children(value_pos..boundary, vec![]))
+    Ok(parent.green().splice_children(start..value_pos + 1, vec![]))
 }
 
 fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
@@ -681,21 +702,6 @@ fn red_bracket_index(
         .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == kind))
 }
 
-fn next_value_or_bracket_index(
-    children: &[NodeOrToken<RedNode, crate::RedToken>],
-    start: usize,
-) -> Option<usize> {
-    children
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find_map(|(idx, child)| match child {
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value => Some(idx),
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBracket => Some(idx),
-            _ => None,
-        })
-}
-
 fn copy_separator_tokens(
     separator_slice: &[NodeOrToken<RedNode, crate::RedToken>],
 ) -> Vec<GreenElement> {
@@ -710,6 +716,16 @@ fn copy_separator_tokens(
                 Some(GreenToken::new(token.kind().into(), token.text()).into())
             }
             _ => None,
+        })
+        .collect()
+}
+
+fn clone_green_elements(slice: &[NodeOrToken<RedNode, crate::RedToken>]) -> Vec<GreenElement> {
+    slice
+        .iter()
+        .map(|child| match child {
+            NodeOrToken::Node(node) => node.green().clone().into(),
+            NodeOrToken::Token(token) => GreenToken::new(token.kind().into(), token.text()).into(),
         })
         .collect()
 }
