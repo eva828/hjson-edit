@@ -129,6 +129,52 @@ fn edit_set_preserves_footer_comment() {
 }
 
 #[test]
+fn edit_remove_preserves_independent_object_comment() {
+    let path = temp_path("remove_object_comment");
+    fs::write(&path, "{\n  a: 1\n\n  // keep me\n\n  b: 2\n}\n").unwrap();
+
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--remove", "b"]);
+    assert!(success);
+    assert!(stdout.contains("// keep me"));
+    assert!(stdout.contains("a: 1"));
+    assert!(!stdout.contains("b: 2"));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_remove_preserves_independent_array_comment() {
+    let path = temp_path("remove_array_comment");
+    fs::write(&path, "[\n  1\n\n  // keep me\n\n  2\n]\n").unwrap();
+
+    let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--remove", "[1]"]);
+    assert!(success);
+    assert!(stdout.contains("// keep me"));
+    assert!(stdout.contains("1"));
+    assert!(!stdout.contains("2"));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn edit_comment_remove_preserves_independent_block() {
+    let path = temp_path("remove_comment_block");
+    fs::write(&path, "{\n  // keep me\n\n  name: value\n}\n").unwrap();
+
+    let (stdout, _, success) = run_cli(&[
+        "edit",
+        path.to_str().unwrap(),
+        "--comment-remove",
+        "name:before",
+    ]);
+    assert!(success);
+    assert!(stdout.contains("// keep me"));
+    assert!(stdout.contains("name: value"));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 #[ignore = "AST operations not yet implemented"]
 fn edit_object_set_and_remove() {
     let path = temp_path("object");

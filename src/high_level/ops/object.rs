@@ -555,6 +555,8 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         .map(|idx| idx + 1)
         .unwrap_or(0);
 
+    let start = start + protected_trivia_prefix_len(&children[start..pair_pos]);
+
     Ok(parent.green().splice_children(start..pair_pos + 1, vec![]))
 }
 
@@ -598,6 +600,8 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         })
         .map(|idx| idx + 1)
         .unwrap_or(0);
+
+    let start = start + protected_trivia_prefix_len(&children[start..value_pos]);
 
     Ok(parent.green().splice_children(start..value_pos + 1, vec![]))
 }
@@ -728,6 +732,50 @@ fn clone_green_elements(slice: &[NodeOrToken<RedNode, crate::RedToken>]) -> Vec<
             NodeOrToken::Token(token) => GreenToken::new(token.kind().into(), token.text()).into(),
         })
         .collect()
+}
+
+fn protected_trivia_prefix_len(slice: &[NodeOrToken<RedNode, crate::RedToken>]) -> usize {
+    let mut boundary = 0usize;
+    let mut index = 0usize;
+    let mut saw_comment_since_boundary = false;
+
+    while index < slice.len() {
+        match &slice[index] {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
+                saw_comment_since_boundary = true;
+                index += 1;
+            }
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
+                let mut cursor = index;
+                let mut newline_count = 0usize;
+
+                while cursor < slice.len() {
+                    match &slice[cursor] {
+                        NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
+                            newline_count += 1;
+                            cursor += 1;
+                        }
+                        NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {
+                            cursor += 1;
+                        }
+                        _ => break,
+                    }
+                }
+
+                if newline_count >= 2 && saw_comment_since_boundary {
+                    boundary = cursor;
+                    saw_comment_since_boundary = false;
+                }
+
+                index = cursor;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    boundary
 }
 
 fn resolve_quote_style(preference: StringStyle, detected: Option<QuoteStyle>) -> QuoteStyle {

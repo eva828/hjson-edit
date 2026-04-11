@@ -160,6 +160,10 @@ impl HjsonDocument {
                     return Ok(self);
                 };
 
+                let children: Vec<_> = parent.children_with_tokens().collect();
+                let protected = protected_trivia_prefix_len(&children[start..pair.node().index()]);
+                let start = start + protected;
+
                 let new_green = parent
                     .green()
                     .splice_children(start..pair.node().index(), vec![]);
@@ -349,4 +353,48 @@ fn render_comment_text(style: CommentStyle, comment: &str) -> String {
         CommentStyle::Hash => format!("# {}", comment),
         CommentStyle::Block | CommentStyle::Preserve => format!("/* {} */", comment),
     }
+}
+
+fn protected_trivia_prefix_len(slice: &[NodeOrToken<RedNode, crate::RedToken>]) -> usize {
+    let mut boundary = 0usize;
+    let mut index = 0usize;
+    let mut saw_comment_since_boundary = false;
+
+    while index < slice.len() {
+        match &slice[index] {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
+                saw_comment_since_boundary = true;
+                index += 1;
+            }
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
+                let mut cursor = index;
+                let mut newline_count = 0usize;
+
+                while cursor < slice.len() {
+                    match &slice[cursor] {
+                        NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
+                            newline_count += 1;
+                            cursor += 1;
+                        }
+                        NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {
+                            cursor += 1;
+                        }
+                        _ => break,
+                    }
+                }
+
+                if newline_count >= 2 && saw_comment_since_boundary {
+                    boundary = cursor;
+                    saw_comment_since_boundary = false;
+                }
+
+                index = cursor;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    boundary
 }
