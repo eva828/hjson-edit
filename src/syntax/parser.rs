@@ -60,6 +60,12 @@ enum ScalarContext {
     ArrayItem,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueBoundary {
+    Closed,
+    Open,
+}
+
 struct ScalarScanner<'a> {
     tokens: &'a [Token],
     start: usize,
@@ -266,7 +272,7 @@ impl Parser {
             if self.is_braceless_object_start() {
                 self.parse_braceless_object();
             } else {
-                self.parse_value(ScalarContext::Root);
+                let _ = self.parse_value(ScalarContext::Root);
             }
         }
 
@@ -393,14 +399,14 @@ impl Parser {
     }
 
     /// 値を解析
-    fn parse_value(&mut self, context: ScalarContext) {
+    fn parse_value(&mut self, context: ScalarContext) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Value.into());
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
         // 終了チェック（ストリーム終端）
         if self.is_at_end() {
             self.builder.finish_node();
-            return;
+            return ValueBoundary::Open;
         }
 
         // 現在のトークンを確認（トリビア以外）
@@ -408,9 +414,13 @@ impl Parser {
             match token_kind {
                 SyntaxKind::LBrace => {
                     self.parse_object();
+                    self.builder.finish_node();
+                    return ValueBoundary::Closed;
                 }
                 SyntaxKind::LBracket => {
                     self.parse_array();
+                    self.builder.finish_node();
+                    return ValueBoundary::Closed;
                 }
                 SyntaxKind::String
                 | SyntaxKind::BlockString
@@ -419,7 +429,11 @@ impl Parser {
                 | SyntaxKind::Float
                 | SyntaxKind::True
                 | SyntaxKind::False
-                | SyntaxKind::Null => self.parse_scalar_value(context),
+                | SyntaxKind::Null => {
+                    let boundary = self.parse_scalar_value(context);
+                    self.builder.finish_node();
+                    return boundary;
+                }
                 _ => {
                     let offset = if let Some(t) = self.current() {
                         t.offset
@@ -435,6 +449,7 @@ impl Parser {
         }
 
         self.builder.finish_node();
+        ValueBoundary::Closed
     }
 
     /// オブジェクト { ... } を解析
@@ -476,12 +491,12 @@ impl Parser {
 
             // consume trivia so it becomes sibling tokens of the upcoming Pair
             self.eat_trivia();
-            self.parse_pair();
+            let value_boundary = self.parse_pair();
 
             // Pairの後のトリビアを消費（コメントなど）
             let had_newline = self.eat_trivia_and_report_newline();
 
-            // カンマ
+            // 閉じ値の後は同一行でも次の member を許可する
             if self.at(SyntaxKind::Comma) {
                 self.bump();
 
@@ -492,6 +507,10 @@ impl Parser {
                 if self.at(SyntaxKind::RBrace) {
                     break;
                 }
+            } else if self.at(SyntaxKind::RBrace) {
+                break;
+            } else if value_boundary == ValueBoundary::Closed && self.is_object_member_start() {
+                continue;
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
                 if had_newline {
@@ -564,7 +583,7 @@ impl Parser {
 
             // 値ノードの兄弟としてトリビアを消費する
             self.eat_trivia();
-            self.parse_value(ScalarContext::ArrayItem);
+            let _ = self.parse_value(ScalarContext::ArrayItem);
 
             // 同一行に複数の値がある場合の処理（例："a" "b" "c"）
             // HJSONではカンマなしの引用符付き文字列が許可されている
@@ -638,7 +657,7 @@ impl Parser {
     }
 
     /// キー: 値 のペアを解析
-    fn parse_pair(&mut self) {
+    fn parse_pair(&mut self) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Pair.into());
         // Pairノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
@@ -661,7 +680,7 @@ impl Parser {
                 }
                 self.builder.finish_node();
                 self.builder.finish_node();
-                return;
+                return ValueBoundary::Closed;
             }
         }
 
@@ -699,33 +718,46 @@ impl Parser {
         // 値
         // ':'と値の間のトリビアを消費して、Valueノードをトリビアフリーにする
         self.eat_trivia();
-        self.parse_value(ScalarContext::ObjectValue);
+        let boundary = self.parse_value(ScalarContext::ObjectValue);
 
         self.builder.finish_node();
+        boundary
     }
 
-    fn parse_scalar_value(&mut self, context: ScalarContext) {
+    fn parse_scalar_value(&mut self, context: ScalarContext) -> ValueBoundary {
         if let Some(token) = self.current() {
-            match token.kind {
-                SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
-                SyntaxKind::UnquotedString
+            let kind = token.kind;
+            return match kind {
+                SyntaxKind::String
+                | SyntaxKind::BlockString
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
                 | SyntaxKind::True
                 | SyntaxKind::False
                 | SyntaxKind::Null => {
+                    self.bump();
+                    ValueBoundary::Closed
+                }
+                SyntaxKind::UnquotedString => {
                     let (text, consumed) =
                         ScalarScanner::new(&self.tokens, self.position, context).collect();
                     if consumed == 1 {
                         self.bump();
+                        ValueBoundary::Open
                     } else {
                         self.builder.token(SyntaxKind::UnquotedString.into(), &text);
                         self.position += consumed;
+                        ValueBoundary::Open
                     }
                 }
-                _ => self.bump(),
-            }
+                _ => {
+                    self.bump();
+                    ValueBoundary::Closed
+                }
+            };
         }
+
+        ValueBoundary::Closed
     }
 
     fn has_colon_after_key(&self) -> bool {
@@ -753,9 +785,13 @@ impl Parser {
         false
     }
 
-    /// ブレースレスルートオブジェクトの開始かチェック
+    /// オブジェクトの member 開始かチェック
     /// 引用符なしキー（UnquotedString）または引用符付きキー（String）で開始される
     fn is_braceless_object_start(&self) -> bool {
+        self.is_object_member_start()
+    }
+
+    fn is_object_member_start(&self) -> bool {
         matches!(
             self.current_kind(),
             Some(SyntaxKind::UnquotedString) | Some(SyntaxKind::String)
@@ -782,12 +818,16 @@ impl Parser {
 
             // Pairが先行トリビアを吸収しないように、トリビアを消費する
             self.eat_trivia();
-            self.parse_pair();
+            let value_boundary = self.parse_pair();
 
             let had_separator_newline = self.eat_trivia_and_report_newline();
             if self.at(SyntaxKind::Comma) {
                 self.bump();
                 self.eat_trivia();
+            } else if self.at(SyntaxKind::RBrace) {
+                break;
+            } else if value_boundary == ValueBoundary::Closed && self.is_object_member_start() {
+                continue;
             } else if !self.is_at_end() && !had_separator_newline {
                 break;
             }

@@ -1,6 +1,6 @@
 //! Parser basic tests - unified table-driven tests
 
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit};
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 
 /// Table-driven test for all root types
 #[test]
@@ -205,24 +205,46 @@ fn number_exponent_notation() {
     }
 }
 
-/// リテラル・数値の終端チェック（quoteless stringとの区別）
+/// 閉じた値の後でも同一行で次の member を読める
 #[test]
-fn literal_and_number_end_checking() {
-    // RFC: "true blue" は文字列 "true blue" で、boolean true ではない
+fn same_line_object_members_after_closed_value() {
+    let input = "n: \"nnn\", o: \"ooo\" p: \"ppp\"\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    assert_eq!(doc.get("n").unwrap(), HjsonValue::String("nnn".to_string()));
+    assert_eq!(doc.get("o").unwrap(), HjsonValue::String("ooo".to_string()));
+    assert_eq!(doc.get("p").unwrap(), HjsonValue::String("ppp".to_string()));
+    assert_eq!(doc.to_string(), input);
+}
+
+/// 予約語・数値の後ろに値が続く場合は閉じた値として扱う
+#[test]
+fn closed_scalar_suffix_requires_separator() {
     let cases = [
-        ("true_with_suffix", "key: true blue\n", "true blue"),
+        ("true_with_suffix", "key: true blue\n"),
+        ("number_with_suffix", "key: 1 minute\n"),
+        ("float_with_suffix", "key: 3.14 pi\n"),
+    ];
+
+    for (name, input) in cases {
+        assert!(HjsonDocument::parse(input).is_err(), "{} should fail", name);
+    }
+}
+
+/// unquoted string は従来どおり文字列として読める
+#[test]
+fn unquoted_suffix_strings_still_parse() {
+    let cases = [
         ("false_with_suffix", "key: falsehood\n", "falsehood"),
         ("null_with_suffix", "key: nullable\n", "nullable"),
-        ("number_with_suffix", "key: 1 minute\n", "1 minute"),
-        ("number_with_suffix2", "key: 5 times\n", "5 times"),
     ];
 
     for (name, input, expected) in cases {
         let doc = HjsonDocument::parse(input).expect(name);
         assert_eq!(
             doc.get("key").unwrap(),
-            hjson_edit::HjsonValue::String(expected.to_string()),
-            "{}: should be parsed as string, not literal/number",
+            HjsonValue::String(expected.to_string()),
+            "{}: should be parsed as string",
             name
         );
     }

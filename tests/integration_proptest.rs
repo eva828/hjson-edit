@@ -19,7 +19,7 @@ proptest! {
                 if i > 0 {
                     s.push('\n');
                 }
-                s.push_str(&format!("  {}: {}", k, v));
+                s.push_str(&format!("  {}: \"{}\"", k, v));
             }
             s.push_str("\n}");
             s
