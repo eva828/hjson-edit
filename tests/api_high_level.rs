@@ -219,6 +219,38 @@ fn invalid_path_errors() {
 }
 
 #[test]
+fn remove_last_object_member_drops_commas_and_attached_comments() {
+    let input = "{\n  keep: 1,\n\n  // keep me\n\n  remove: 2 // inline\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc.remove("remove").unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("keep: 1"));
+    assert!(output.contains("// keep me"));
+    assert!(!output.contains("remove: 2"));
+    assert!(!output.contains("inline"));
+    assert!(!output.contains("keep: 1,"));
+    assert!(HjsonDocument::parse(&output).is_ok());
+}
+
+#[test]
+fn remove_last_array_item_drops_commas_and_keeps_independent_comments() {
+    let input = "[\n  1,\n\n  // keep me\n\n  2 // inline\n]\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    let updated = doc.remove("[1]").unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("1"));
+    assert!(output.contains("// keep me"));
+    assert!(!output.contains("2"));
+    assert!(!output.contains("inline"));
+    assert!(!output.contains("1,"));
+    assert!(HjsonDocument::parse(&output).is_ok());
+}
+
+#[test]
 fn set_same_value_keeps_bytes() {
     let input = "{\n  // keep\n  name: value\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();

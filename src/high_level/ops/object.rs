@@ -545,19 +545,15 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         ])));
     };
 
-    let start = children[..pair_pos]
-        .iter()
-        .rposition(|child| match child {
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair => true,
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::LBrace => true,
-            _ => false,
-        })
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
+    let updated = remove_structural_child(
+        &children,
+        pair_pos,
+        SyntaxKind::Pair,
+        SyntaxKind::LBrace,
+        SyntaxKind::RBrace,
+    );
 
-    let start = start + protected_trivia_prefix_len(&children[start..pair_pos]);
-
-    Ok(parent.green().splice_children(start..pair_pos + 1, vec![]))
+    Ok(parent.green().splice_children(0..children.len(), updated))
 }
 
 fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -591,19 +587,15 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         })?,
     };
 
-    let start = children[..value_pos]
-        .iter()
-        .rposition(|child| match child {
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value => true,
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::LBracket => true,
-            _ => false,
-        })
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
+    let updated = remove_structural_child(
+        &children,
+        value_pos,
+        SyntaxKind::Value,
+        SyntaxKind::LBracket,
+        SyntaxKind::RBracket,
+    );
 
-    let start = start + protected_trivia_prefix_len(&children[start..value_pos]);
-
-    Ok(parent.green().splice_children(start..value_pos + 1, vec![]))
+    Ok(parent.green().splice_children(0..children.len(), updated))
 }
 
 fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
@@ -785,4 +777,108 @@ fn resolve_quote_style(preference: StringStyle, detected: Option<QuoteStyle>) ->
         StringStyle::Block => QuoteStyle::Block,
         StringStyle::Unquoted => QuoteStyle::Unquoted,
     }
+}
+
+fn remove_structural_child(
+    children: &[NodeOrToken<RedNode, crate::RedToken>],
+    target_pos: usize,
+    structural_kind: SyntaxKind,
+    opening_kind: SyntaxKind,
+    closing_kind: SyntaxKind,
+) -> Vec<GreenElement> {
+    let mut remove = vec![false; children.len()];
+    remove[target_pos] = true;
+
+    let boundary = children[..target_pos]
+        .iter()
+        .rposition(|child| match child {
+            NodeOrToken::Node(node) if node.kind() == structural_kind => true,
+            NodeOrToken::Token(token) if token.kind() == opening_kind => true,
+            _ => false,
+        })
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+
+    let right_boundary = children[target_pos + 1..]
+        .iter()
+        .position(|child| {
+            matches!(child, NodeOrToken::Node(node) if node.kind() == structural_kind)
+                || matches!(child, NodeOrToken::Token(token) if token.kind() == closing_kind)
+        })
+        .map(|idx| target_pos + 1 + idx)
+        .unwrap_or(children.len());
+
+    let target_is_last = !children[target_pos + 1..right_boundary]
+        .iter()
+        .any(|child| matches!(child, NodeOrToken::Node(node) if node.kind() == structural_kind));
+
+    let protected_prefix_len = protected_trivia_prefix_len(&children[boundary..target_pos]);
+    let comment_start = boundary + protected_prefix_len;
+
+    for idx in comment_start..target_pos {
+        match &children[idx] {
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => remove[idx] = true,
+            NodeOrToken::Token(token) if token.kind().is_comment() => remove[idx] = true,
+            _ => {}
+        }
+    }
+
+    if target_is_last {
+        if let Some(comma_pos) = children[boundary..target_pos].iter().rposition(
+            |child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma),
+        ) {
+            remove[boundary + comma_pos] = true;
+        }
+    }
+
+    let mut newline_run = 0usize;
+    for idx in target_pos + 1..right_boundary {
+        match &children[idx] {
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
+                newline_run += 1;
+            }
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {}
+            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
+                if newline_run < 2 {
+                    remove[idx] = true;
+                } else {
+                    break;
+                }
+            }
+            NodeOrToken::Token(token) if token.kind().is_comment() => {
+                if newline_run < 2 {
+                    remove[idx] = true;
+                } else {
+                    break;
+                }
+            }
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma => {
+                if newline_run < 2 {
+                    remove[idx] = true;
+                } else {
+                    break;
+                }
+            }
+            NodeOrToken::Node(node) if node.kind() == structural_kind => break,
+            NodeOrToken::Token(token) if token.kind() == closing_kind => break,
+            _ => {}
+        }
+    }
+
+    children
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, child)| {
+            if remove[idx] {
+                None
+            } else {
+                Some(match child {
+                    NodeOrToken::Node(node) => node.green().clone().into(),
+                    NodeOrToken::Token(token) => {
+                        GreenToken::new(token.kind().into(), token.text()).into()
+                    }
+                })
+            }
+        })
+        .collect()
 }

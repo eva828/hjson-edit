@@ -131,13 +131,16 @@ fn edit_set_preserves_footer_comment() {
 #[test]
 fn edit_remove_preserves_independent_object_comment() {
     let path = temp_path("remove_object_comment");
-    fs::write(&path, "{\n  a: 1\n\n  // keep me\n\n  b: 2\n}\n").unwrap();
+    fs::write(&path, "{\n  a: 1,\n\n  // keep me\n\n  b: 2 // inline\n}\n").unwrap();
 
     let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--remove", "b"]);
     assert!(success);
     assert!(stdout.contains("// keep me"));
     assert!(stdout.contains("a: 1"));
     assert!(!stdout.contains("b: 2"));
+    assert!(!stdout.contains("inline"));
+    assert!(!stdout.contains("a: 1,"));
+    assert!(HjsonDocument::parse(&stdout).is_ok());
 
     fs::remove_file(&path).ok();
 }
@@ -145,13 +148,16 @@ fn edit_remove_preserves_independent_object_comment() {
 #[test]
 fn edit_remove_preserves_independent_array_comment() {
     let path = temp_path("remove_array_comment");
-    fs::write(&path, "[\n  1\n\n  // keep me\n\n  2\n]\n").unwrap();
+    fs::write(&path, "[\n  1,\n\n  // keep me\n\n  2 // inline\n]\n").unwrap();
 
     let (stdout, _, success) = run_cli(&["edit", path.to_str().unwrap(), "--remove", "[1]"]);
     assert!(success);
     assert!(stdout.contains("// keep me"));
     assert!(stdout.contains("1"));
     assert!(!stdout.contains("2"));
+    assert!(!stdout.contains("inline"));
+    assert!(!stdout.contains("1,"));
+    assert!(HjsonDocument::parse(&stdout).is_ok());
 
     fs::remove_file(&path).ok();
 }
