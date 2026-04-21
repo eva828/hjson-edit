@@ -104,7 +104,6 @@ fn non_standard_numbers_as_strings() {
 
 /// 先頭ゼロは許可されない（RFC準拠）
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn leading_zeros_not_allowed() {
     // RFCでは "007" は不正な数値
     // HJSONは "007" を文字列として扱う実装とする

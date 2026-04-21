@@ -181,7 +181,6 @@ fn edit_comment_remove_preserves_independent_block() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn edit_object_set_and_remove() {
     let path = temp_path("object");
     fs::write(&path, r#"{"name": "test"}"#).unwrap();
@@ -204,7 +203,6 @@ fn edit_object_set_and_remove() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn edit_array_operations() {
     let path = temp_path("array");
     fs::write(&path, r#"{"items": [1, 2]}"#).unwrap();
@@ -231,7 +229,6 @@ fn edit_array_operations() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn edit_comment_operations() {
     let path = temp_path("comment");
     fs::write(&path, r#"{"key": "value"}"#).unwrap();
@@ -250,7 +247,6 @@ fn edit_comment_operations() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn edit_preserves_crlf_when_writing() {
     let path = temp_path("crlf_edit");
     fs::write(&path, "{\r\n  key: value\r\n}\r\n").unwrap();
@@ -272,7 +268,6 @@ fn edit_preserves_crlf_when_writing() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn edit_type_inference() {
     let path = temp_path("types");
     fs::write(&path, "{}").unwrap();
@@ -302,7 +297,6 @@ fn edit_type_inference() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn edit_output_options() {
     let input_path = temp_path("input");
     let output_path = temp_path("output");
@@ -352,7 +346,6 @@ fn error_cases() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn preserves_comments() {
     let path = temp_path("preserve");
     fs::write(

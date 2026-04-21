@@ -69,27 +69,26 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
-    pub fn render_value(&self, string_style: Option<QuoteStyle>) -> GreenNode {
-        let mut builder = GreenNodeBuilder::new();
-        builder.start_node(SyntaxKind::Value.into());
+    pub fn render_content(&self, string_style: Option<QuoteStyle>) -> crate::GreenElement {
         match self {
             HjsonValue::String(s) => {
                 let style = string_style.unwrap_or(QuoteStyle::DoubleQuoted);
                 let (kind, text) = render_string(s, style);
-                builder.token(kind.into(), text.as_str())
+                kind.create_token(text).into()
             }
             HjsonValue::Integer(n) => {
                 let text = n.to_string();
-                builder.token(SyntaxKind::Integer.into(), text.as_str())
+                SyntaxKind::Integer.create_token(text).into()
             }
             HjsonValue::Float(n) => {
                 let text = n.to_string();
-                builder.token(SyntaxKind::Float.into(), text.as_str())
+                SyntaxKind::Float.create_token(text).into()
             }
-            HjsonValue::Bool(true) => builder.token(SyntaxKind::True.into(), "true"),
-            HjsonValue::Bool(false) => builder.token(SyntaxKind::False.into(), "false"),
-            HjsonValue::Null => builder.token(SyntaxKind::Null.into(), "null"),
+            HjsonValue::Bool(true) => SyntaxKind::True.create_token("true").into(),
+            HjsonValue::Bool(false) => SyntaxKind::False.create_token("false").into(),
+            HjsonValue::Null => SyntaxKind::Null.create_token("null").into(),
             HjsonValue::Array(items) => {
+                let mut builder = GreenNodeBuilder::new();
                 builder.start_node(SyntaxKind::Array.into());
                 builder.token(SyntaxKind::LBracket.into(), "[");
                 for (idx, item) in items.iter().enumerate() {
@@ -100,8 +99,10 @@ impl HjsonValue {
                 }
                 builder.token(SyntaxKind::RBracket.into(), "]");
                 builder.finish_node();
+                builder.finish().into()
             }
             HjsonValue::Object(entries) => {
+                let mut builder = GreenNodeBuilder::new();
                 builder.start_node(SyntaxKind::Object.into());
                 builder.token(SyntaxKind::LBrace.into(), "{");
                 for (idx, (key, item)) in entries.iter().enumerate() {
@@ -112,8 +113,15 @@ impl HjsonValue {
                 }
                 builder.token(SyntaxKind::RBrace.into(), "}");
                 builder.finish_node();
+                builder.finish().into()
             }
         }
+    }
+
+    pub fn render_value(&self, string_style: Option<QuoteStyle>) -> GreenNode {
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::Value.into());
+        push_green_element(&mut builder, &self.render_content(string_style));
         builder.finish_node();
         builder.finish()
     }
@@ -182,4 +190,11 @@ fn push_node(builder: &mut GreenNodeBuilder<'static>, node: &GreenNode) {
         }
     }
     builder.finish_node();
+}
+
+fn push_green_element(builder: &mut GreenNodeBuilder<'static>, element: &crate::GreenElement) {
+    match element {
+        rowan::NodeOrToken::Node(node) => push_node(builder, node),
+        rowan::NodeOrToken::Token(token) => builder.token(token.kind(), token.text()),
+    }
 }

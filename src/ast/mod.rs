@@ -1,5 +1,7 @@
 use rowan::NodeOrToken;
 
+pub mod edit;
+
 use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -221,6 +223,16 @@ pub enum DocumentItem {
     Value(Value),
 }
 
+impl DocumentItem {
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        match self {
+            Self::Object(object) => object.detected_string_style(),
+            Self::Array(array) => array.detected_string_style(),
+            Self::Value(value) => value.detected_string_style(),
+        }
+    }
+}
+
 impl AstNode for Document {
     fn can_cast(kind: SyntaxKind) -> bool {
         matches!(
@@ -307,6 +319,10 @@ impl Document {
     pub fn comments(&self) -> Vec<Comment> {
         collect_comments(&self.syntax)
     }
+
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        self.item().and_then(|item| item.detected_string_style())
+    }
 }
 
 impl AstNode for Object {
@@ -380,6 +396,12 @@ impl Object {
             .into_iter()
             .find(|member| member.pair_key().as_deref() == Some(key))
     }
+
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        self.members()
+            .into_iter()
+            .find_map(|member| member.detected_string_style())
+    }
 }
 
 impl AstNode for Array {
@@ -447,6 +469,12 @@ impl Array {
     pub fn comments(&self) -> Vec<Comment> {
         collect_comments(&self.syntax)
     }
+
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        self.items()
+            .into_iter()
+            .find_map(|item| item.detected_string_style())
+    }
 }
 
 impl AstNode for Member {
@@ -501,6 +529,10 @@ impl Member {
 
     pub fn comments(&self) -> Vec<Comment> {
         collect_comments(&self.syntax)
+    }
+
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        self.value().and_then(|value| value.detected_string_style())
     }
 }
 
@@ -705,6 +737,19 @@ impl Value {
                 }
             },
         })
+    }
+
+    pub fn quote_style(&self) -> Option<QuoteStyle> {
+        self.content().ok()?.quote_style()
+    }
+
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        match self.content().ok()? {
+            ValueContent::Scalar(ScalarValue::String(string)) => Some(string.quote_style()),
+            ValueContent::Object(object) => object.detected_string_style(),
+            ValueContent::Array(array) => array.detected_string_style(),
+            ValueContent::Scalar(_) => None,
+        }
     }
 }
 

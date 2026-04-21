@@ -45,7 +45,6 @@ proptest! {
 
     /// 引用符なし文字列がパンクチュエータで始まらないこと
     #[test]
-    #[ignore = "AST operations not yet implemented"]
     fn quoteless_string_never_starts_with_punctuator(
         s in "[a-zA-Z_][a-zA-Z0-9_]{0,20}"
     ) {

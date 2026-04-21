@@ -1,9 +1,6 @@
 //! High-level API tests - unified and simplified
 //!
-//! Tests that exercise the actual AST operations are marked `#[ignore]` while the
-//! implementation is being rebuilt. `invalid_path_errors` is the only test that
-//! runs unconditionally because it exercises path *parsing* (which is already
-//! implemented), not the AST editing operations.
+//! These tests cover path parsing, value access, and edit behavior end to end.
 
 use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
 
@@ -17,7 +14,6 @@ fn expect_error(result: Result<HjsonValue, hjson_edit::HjsonEditError>) {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn get_and_set_simple() {
     let doc = HjsonDocument::parse(r#"{"name": "test", "value": 42}"#).unwrap();
 
@@ -32,7 +28,6 @@ fn get_and_set_simple() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn set_nested_path() {
     let doc = HjsonDocument::parse(r#"{"a": {"b": {"c": "value"}}}"#).unwrap();
 
@@ -44,7 +39,6 @@ fn set_nested_path() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn set_creates_missing_parents() {
     let doc = HjsonDocument::parse("root:\n{}\n").unwrap();
 
@@ -56,7 +50,6 @@ fn set_creates_missing_parents() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn remove_key() {
     let doc = HjsonDocument::parse(r#"{"keep": "a", "remove": "b"}"#).unwrap();
 
@@ -66,7 +59,6 @@ fn remove_key() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn remove_nested_key() {
     let doc = HjsonDocument::parse(r#"{"parent": {"keep": "a", "remove": "b"}}"#).unwrap();
 
@@ -79,7 +71,6 @@ fn remove_nested_key() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn array_push() {
     let doc = HjsonDocument::parse(r#"{"items": [1, 2]}"#).unwrap();
 
@@ -89,7 +80,6 @@ fn array_push() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn array_insert_at() {
     let doc = HjsonDocument::parse(r#"{"items": [1, 3]}"#).unwrap();
 
@@ -101,7 +91,6 @@ fn array_insert_at() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn array_remove_at() {
     let doc = HjsonDocument::parse(r#"{"items": [1, 2, 3]}"#).unwrap();
 
@@ -113,7 +102,6 @@ fn array_remove_at() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn array_in_object_path() {
     let doc = HjsonDocument::parse(r#"{"items": [{"name": "first"}]}"#).unwrap();
 
@@ -125,7 +113,6 @@ fn array_in_object_path() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn set_preserves_parent_newline_kind_for_inserted_entry() {
     let input = "{\n  section: {\r\n    first: 1\r\n  }\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -137,7 +124,6 @@ fn set_preserves_parent_newline_kind_for_inserted_entry() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn push_preserves_parent_newline_kind_for_inserted_entry() {
     let input = "{\n  items: [\r\n    1\r\n    2\r\n  ]\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -150,7 +136,6 @@ fn push_preserves_parent_newline_kind_for_inserted_entry() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn set_existing_key_preserves_comments() {
     let input = "{\n    // comment\n    name: app\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -165,7 +150,6 @@ fn set_existing_key_preserves_comments() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn set_nested_existing_key_preserves_comments() {
     let input = "{\n    // outer comment\n    outer: {\n        // inner comment\n        inner: old\n    }\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -188,7 +172,6 @@ fn set_nested_existing_key_preserves_comments() {
 }
 
 #[test]
-#[ignore = "AST operations not yet implemented"]
 fn set_new_key_in_existing_nested_object_preserves_comments() {
     let input = "{\n    // comment\n    outer: {\n        existing: value\n    }\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
@@ -271,4 +254,39 @@ fn set_existing_value_preserves_unrelated_bytes() {
     assert!(output.contains("other: 1"));
     assert!(output.contains("updated"));
     assert!(!output.contains("value\n  other"));
+}
+
+#[test]
+fn set_root_value_replaces_scalar() {
+    let doc = HjsonDocument::parse("old\n").unwrap();
+
+    let updated = doc.set("", "new").unwrap();
+
+    assert_eq!(updated.to_string(), "new\n");
+}
+
+#[test]
+fn set_empty_object_inserts_member() {
+    let doc = HjsonDocument::parse("{}\n").unwrap();
+
+    let updated = doc.set("name", "value").unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("name: \"value\""));
+    assert_eq!(
+        updated.get("name").unwrap(),
+        HjsonValue::String("value".into())
+    );
+    assert!(HjsonDocument::parse(&output).is_ok());
+}
+
+#[test]
+fn push_into_empty_array_inserts_item() {
+    let doc = HjsonDocument::parse("[]\n").unwrap();
+
+    let updated = doc.set("[-]", 1).unwrap();
+    let output = updated.to_string();
+
+    assert!(output.contains("1"));
+    assert!(HjsonDocument::parse(&output).is_ok());
 }

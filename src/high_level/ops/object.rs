@@ -1,7 +1,10 @@
 use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 use crate::{
-    ast::{AstNode, QuoteStyle, Value as AstValue},
+    ast::{
+        edit as ast_edit, Array as AstArray, AstNode, Object as AstObject, QuoteStyle,
+        Value as AstValue,
+    },
     high_level::{
         error::HjsonEditError,
         ext::RedNodeExt,
@@ -10,7 +13,7 @@ use crate::{
         value::HjsonValue,
         HjsonDocument,
     },
-    syntax::{GreenElement, RedNode, SyntaxKind},
+    syntax::{RedNode, SyntaxKind},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -82,7 +85,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
     }
 }
 
-fn replace_root_value(
+pub(crate) fn replace_root_value(
     root: &RedNode,
     value: &HjsonValue,
     string_style: StringStyle,
@@ -103,7 +106,7 @@ fn replace_root_value(
         .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
 }
 
-fn rebuild_tree_with_set(
+pub(crate) fn rebuild_tree_with_set(
     root: RedNode,
     path: &HjsonObjectPath,
     value: &HjsonValue,
@@ -172,7 +175,7 @@ fn rebuild_tree_with_set(
     }
 }
 
-fn rebuild_tree_with_remove(
+pub(crate) fn rebuild_tree_with_remove(
     root: RedNode,
     path: &HjsonObjectPath,
 ) -> Result<GreenNode, HjsonEditError> {
@@ -283,7 +286,10 @@ fn set_object_child(
     };
 
     let children = parent.children_with_tokens().collect::<Vec<_>>();
-    let insert_style = resolve_quote_style(string_style, detect_string_style(parent));
+    let detected = AstObject::cast(parent.clone())
+        .ok()
+        .and_then(|object| object.detected_string_style());
+    let insert_style = resolve_quote_style(string_style, detected);
     let rendered_pair = value.render_pair(key, None, Some(insert_style));
 
     if let Some((pair_pos, pair)) = children.iter().enumerate().find(|(_, child)| {
@@ -298,7 +304,8 @@ fn set_object_child(
             .splice_children(pair_pos..pair_pos + 1, vec![updated.into()]));
     }
 
-    let rbrace_pos = red_bracket_index(&children, SyntaxKind::RBrace).unwrap_or(children.len());
+    let rbrace_pos =
+        ast_edit::red_bracket_index(&children, SyntaxKind::RBrace).unwrap_or(children.len());
     let pair_positions = children
         .iter()
         .enumerate()
@@ -319,18 +326,18 @@ fn set_object_child(
             .get(prev_pair_pos + 1..last_pair_pos)
             .unwrap_or(&[])
     } else {
-        let lbrace_pos = red_bracket_index(&children, SyntaxKind::LBrace).unwrap_or(0);
+        let lbrace_pos = ast_edit::red_bracket_index(&children, SyntaxKind::LBrace).unwrap_or(0);
         children.get(lbrace_pos + 1..last_pair_pos).unwrap_or(&[])
     };
     let after_slice = children.get(last_pair_pos + 1..rbrace_pos).unwrap_or(&[]);
 
-    let mut inserted = copy_separator_tokens(before_slice);
+    let mut inserted = ast_edit::copy_separator_tokens(before_slice);
     if inserted.is_empty() {
         inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
         inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
     }
     inserted.push(rendered_pair.into());
-    inserted.extend(clone_green_elements(after_slice));
+    inserted.extend(ast_edit::clone_green_elements(after_slice));
 
     Ok(parent
         .green()
@@ -362,7 +369,10 @@ fn set_array_child(
                 .then_some(idx)
         })
         .collect::<Vec<_>>();
-    let insert_style = resolve_quote_style(string_style, detect_string_style(parent));
+    let detected = AstArray::cast(parent.clone())
+        .ok()
+        .and_then(|array| array.detected_string_style());
+    let insert_style = resolve_quote_style(string_style, detected);
 
     match seg {
         ArrayPathSegment::Index(idx) => {
@@ -382,8 +392,8 @@ fn set_array_child(
         }
         ArrayPathSegment::InsertAt(idx) => {
             if *idx >= value_positions.len() {
-                let insert_pos =
-                    red_bracket_index(&children, SyntaxKind::RBracket).unwrap_or(children.len());
+                let insert_pos = ast_edit::red_bracket_index(&children, SyntaxKind::RBracket)
+                    .unwrap_or(children.len());
                 let last_value_pos = value_positions.last().copied();
                 let Some(last_value_pos) = last_value_pos else {
                     return Ok(parent.green().splice_children(
@@ -399,19 +409,19 @@ fn set_array_child(
                         .unwrap_or(&[])
                 } else {
                     let lbracket_pos =
-                        red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
+                        ast_edit::red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
                     children
                         .get(lbracket_pos + 1..last_value_pos)
                         .unwrap_or(&[])
                 };
                 let after_slice = children.get(last_value_pos + 1..insert_pos).unwrap_or(&[]);
-                let mut inserted = copy_separator_tokens(before_slice);
+                let mut inserted = ast_edit::copy_separator_tokens(before_slice);
                 if inserted.is_empty() {
                     inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
                 }
                 inserted.push(value.render_value(Some(insert_style)).into());
-                inserted.extend(clone_green_elements(after_slice));
+                inserted.extend(ast_edit::clone_green_elements(after_slice));
 
                 Ok(parent
                     .green()
@@ -419,7 +429,7 @@ fn set_array_child(
             } else {
                 let insert_pos = value_positions[*idx];
                 let prev_boundary = if *idx == 0 {
-                    red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0)
+                    ast_edit::red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0)
                 } else {
                     value_positions
                         .get(idx.saturating_sub(1))
@@ -440,7 +450,7 @@ fn set_array_child(
                 let split_at = separator_slice.len().saturating_sub(suffix_len);
                 let (prefix_slice, suffix_slice) = separator_slice.split_at(split_at);
 
-                let mut inserted = clone_green_elements(prefix_slice);
+                let mut inserted = ast_edit::clone_green_elements(prefix_slice);
                 if inserted.is_empty() {
                     inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
@@ -451,7 +461,7 @@ fn set_array_child(
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
                 }
                 inserted.push(value.render_value(Some(insert_style)).into());
-                inserted.extend(clone_green_elements(suffix_slice));
+                inserted.extend(ast_edit::clone_green_elements(suffix_slice));
 
                 Ok(parent
                     .green()
@@ -459,8 +469,8 @@ fn set_array_child(
             }
         }
         ArrayPathSegment::Push => {
-            let insert_pos =
-                red_bracket_index(&children, SyntaxKind::RBracket).unwrap_or(children.len());
+            let insert_pos = ast_edit::red_bracket_index(&children, SyntaxKind::RBracket)
+                .unwrap_or(children.len());
             let Some(last_value_pos) = value_positions.last().copied() else {
                 return Ok(parent.green().splice_children(
                     insert_pos..insert_pos,
@@ -474,19 +484,20 @@ fn set_array_child(
                     .get(prev_value_pos + 1..last_value_pos)
                     .unwrap_or(&[])
             } else {
-                let lbracket_pos = red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
+                let lbracket_pos =
+                    ast_edit::red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
                 children
                     .get(lbracket_pos + 1..last_value_pos)
                     .unwrap_or(&[])
             };
             let after_slice = children.get(last_value_pos + 1..insert_pos).unwrap_or(&[]);
-            let mut inserted = copy_separator_tokens(before_slice);
+            let mut inserted = ast_edit::copy_separator_tokens(before_slice);
             if inserted.is_empty() {
                 inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                 inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
             }
             inserted.push(value.render_value(Some(insert_style)).into());
-            inserted.extend(clone_green_elements(after_slice));
+            inserted.extend(ast_edit::clone_green_elements(after_slice));
 
             Ok(parent
                 .green()
@@ -545,7 +556,7 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         ])));
     };
 
-    let updated = remove_structural_child(
+    let updated = ast_edit::remove_structural_child(
         &children,
         pair_pos,
         SyntaxKind::Pair,
@@ -587,7 +598,7 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         })?,
     };
 
-    let updated = remove_structural_child(
+    let updated = ast_edit::remove_structural_child(
         &children,
         value_pos,
         SyntaxKind::Value,
@@ -649,7 +660,8 @@ fn render_value_like_node(
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> GreenNode {
-    let quote_style = resolve_quote_style(string_style, detect_string_style(node));
+    let detected = ast_edit::detected_string_style_of_node(node);
+    let quote_style = resolve_quote_style(string_style, detected);
     value.render_value(Some(quote_style))
 }
 
@@ -670,106 +682,6 @@ fn replace_pair_value(
     ))
 }
 
-fn detect_string_style(node: &RedNode) -> Option<QuoteStyle> {
-    for child in node.children_with_tokens() {
-        match child {
-            NodeOrToken::Token(token) => match token.kind() {
-                SyntaxKind::String => return Some(QuoteStyle::DoubleQuoted),
-                SyntaxKind::BlockString => return Some(QuoteStyle::Block),
-                SyntaxKind::UnquotedString => return Some(QuoteStyle::Unquoted),
-                _ => {}
-            },
-            NodeOrToken::Node(node) => {
-                if let Some(style) = detect_string_style(&node) {
-                    return Some(style);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn red_bracket_index(
-    children: &[NodeOrToken<RedNode, crate::RedToken>],
-    kind: SyntaxKind,
-) -> Option<usize> {
-    children
-        .iter()
-        .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == kind))
-}
-
-fn copy_separator_tokens(
-    separator_slice: &[NodeOrToken<RedNode, crate::RedToken>],
-) -> Vec<GreenElement> {
-    separator_slice
-        .iter()
-        .filter_map(|child| match child {
-            NodeOrToken::Token(token)
-                if token.kind() == SyntaxKind::Comma
-                    || token.kind() == SyntaxKind::Whitespace
-                    || token.kind() == SyntaxKind::Newline =>
-            {
-                Some(GreenToken::new(token.kind().into(), token.text()).into())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn clone_green_elements(slice: &[NodeOrToken<RedNode, crate::RedToken>]) -> Vec<GreenElement> {
-    slice
-        .iter()
-        .map(|child| match child {
-            NodeOrToken::Node(node) => node.green().clone().into(),
-            NodeOrToken::Token(token) => GreenToken::new(token.kind().into(), token.text()).into(),
-        })
-        .collect()
-}
-
-fn protected_trivia_prefix_len(slice: &[NodeOrToken<RedNode, crate::RedToken>]) -> usize {
-    let mut boundary = 0usize;
-    let mut index = 0usize;
-    let mut saw_comment_since_boundary = false;
-
-    while index < slice.len() {
-        match &slice[index] {
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
-                saw_comment_since_boundary = true;
-                index += 1;
-            }
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
-                let mut cursor = index;
-                let mut newline_count = 0usize;
-
-                while cursor < slice.len() {
-                    match &slice[cursor] {
-                        NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
-                            newline_count += 1;
-                            cursor += 1;
-                        }
-                        NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {
-                            cursor += 1;
-                        }
-                        _ => break,
-                    }
-                }
-
-                if newline_count >= 2 && saw_comment_since_boundary {
-                    boundary = cursor;
-                    saw_comment_since_boundary = false;
-                }
-
-                index = cursor;
-            }
-            _ => {
-                index += 1;
-            }
-        }
-    }
-
-    boundary
-}
-
 fn resolve_quote_style(preference: StringStyle, detected: Option<QuoteStyle>) -> QuoteStyle {
     match preference {
         StringStyle::Preserve => detected.unwrap_or(QuoteStyle::DoubleQuoted),
@@ -777,108 +689,4 @@ fn resolve_quote_style(preference: StringStyle, detected: Option<QuoteStyle>) ->
         StringStyle::Block => QuoteStyle::Block,
         StringStyle::Unquoted => QuoteStyle::Unquoted,
     }
-}
-
-fn remove_structural_child(
-    children: &[NodeOrToken<RedNode, crate::RedToken>],
-    target_pos: usize,
-    structural_kind: SyntaxKind,
-    opening_kind: SyntaxKind,
-    closing_kind: SyntaxKind,
-) -> Vec<GreenElement> {
-    let mut remove = vec![false; children.len()];
-    remove[target_pos] = true;
-
-    let boundary = children[..target_pos]
-        .iter()
-        .rposition(|child| match child {
-            NodeOrToken::Node(node) if node.kind() == structural_kind => true,
-            NodeOrToken::Token(token) if token.kind() == opening_kind => true,
-            _ => false,
-        })
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
-
-    let right_boundary = children[target_pos + 1..]
-        .iter()
-        .position(|child| {
-            matches!(child, NodeOrToken::Node(node) if node.kind() == structural_kind)
-                || matches!(child, NodeOrToken::Token(token) if token.kind() == closing_kind)
-        })
-        .map(|idx| target_pos + 1 + idx)
-        .unwrap_or(children.len());
-
-    let target_is_last = !children[target_pos + 1..right_boundary]
-        .iter()
-        .any(|child| matches!(child, NodeOrToken::Node(node) if node.kind() == structural_kind));
-
-    let protected_prefix_len = protected_trivia_prefix_len(&children[boundary..target_pos]);
-    let comment_start = boundary + protected_prefix_len;
-
-    for idx in comment_start..target_pos {
-        match &children[idx] {
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => remove[idx] = true,
-            NodeOrToken::Token(token) if token.kind().is_comment() => remove[idx] = true,
-            _ => {}
-        }
-    }
-
-    if target_is_last {
-        if let Some(comma_pos) = children[boundary..target_pos].iter().rposition(
-            |child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma),
-        ) {
-            remove[boundary + comma_pos] = true;
-        }
-    }
-
-    let mut newline_run = 0usize;
-    for idx in target_pos + 1..right_boundary {
-        match &children[idx] {
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline => {
-                newline_run += 1;
-            }
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {}
-            NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
-                if newline_run < 2 {
-                    remove[idx] = true;
-                } else {
-                    break;
-                }
-            }
-            NodeOrToken::Token(token) if token.kind().is_comment() => {
-                if newline_run < 2 {
-                    remove[idx] = true;
-                } else {
-                    break;
-                }
-            }
-            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma => {
-                if newline_run < 2 {
-                    remove[idx] = true;
-                } else {
-                    break;
-                }
-            }
-            NodeOrToken::Node(node) if node.kind() == structural_kind => break,
-            NodeOrToken::Token(token) if token.kind() == closing_kind => break,
-            _ => {}
-        }
-    }
-
-    children
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, child)| {
-            if remove[idx] {
-                None
-            } else {
-                Some(match child {
-                    NodeOrToken::Node(node) => node.green().clone().into(),
-                    NodeOrToken::Token(token) => {
-                        GreenToken::new(token.kind().into(), token.text()).into()
-                    }
-                })
-            }
-        })
-        .collect()
 }
