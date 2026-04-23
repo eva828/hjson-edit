@@ -1,7 +1,7 @@
 use rowan::NodeOrToken;
 
 use crate::{
-    ast::{edit as ast_edit, AstNode, CommentKind, Trivia},
+    ast::{AstNode, CommentKind, Trivia},
     high_level::{
         error::HjsonEditError,
         ext::RedNodeExt,
@@ -151,20 +151,17 @@ impl HjsonDocument {
             HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
                 let pair = self.resolve_pair(&path)?;
                 let parent = pair.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+                let leading_prefix = pair.trivia_boundary.leading_protected_prefix_len;
                 let start = pair
                     .leading_trivia
                     .iter()
-                    .position(|elem| matches!(elem, Trivia::Comment(_)));
+                    .position(|elem| matches!(elem, Trivia::Comment(_)))
+                    .map(|idx| idx.max(leading_prefix))
+                    .unwrap_or(leading_prefix);
 
-                let Some(start) = start else {
+                if start >= pair.node().index() {
                     return Ok(self);
-                };
-
-                let children: Vec<_> = parent.children_with_tokens().collect();
-                let protected = ast_edit::protected_trivia_prefix_len_nodes(
-                    &children[start..pair.node().index()],
-                );
-                let start = start + protected;
+                }
 
                 let new_green = parent
                     .green()

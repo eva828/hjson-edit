@@ -2,8 +2,8 @@ use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 use crate::{
     ast::{
-        edit as ast_edit, Array as AstArray, AstNode, Object as AstObject, QuoteStyle,
-        Value as AstValue,
+        edit as ast_edit, Array as AstArray, AstNode, Document as AstDocument, Object as AstObject,
+        QuoteStyle, Trivia, Value as AstValue,
     },
     high_level::{
         error::HjsonEditError,
@@ -90,15 +90,15 @@ pub(crate) fn replace_root_value(
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> Result<GreenNode, HjsonEditError> {
+    let doc_ast = AstDocument::cast(root.clone())?;
     let child = root
-        .children()
-        .find(|child| {
-            matches!(
-                child.kind(),
-                SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
-            )
-        })
+        .children_with_tokens()
+        .nth(doc_ast.body_insert_index())
         .ok_or(HjsonEditError::ParentNotFound)?;
+    let child = match child {
+        NodeOrToken::Node(node) => node,
+        NodeOrToken::Token(_) => return Err(HjsonEditError::ParentNotFound),
+    };
     let updated_child = render_value_like_node(&child, value, string_style);
 
     Ok(root
@@ -304,8 +304,8 @@ fn set_object_child(
             .splice_children(pair_pos..pair_pos + 1, vec![updated.into()]));
     }
 
-    let rbrace_pos =
-        ast_edit::red_bracket_index(&children, SyntaxKind::RBrace).unwrap_or(children.len());
+    let object_ast = AstObject::cast(parent.clone())?;
+    let rbrace_pos = object_ast.empty_body_insert_index();
     let pair_positions = children
         .iter()
         .enumerate()
@@ -315,9 +315,10 @@ fn set_object_child(
         })
         .collect::<Vec<_>>();
     let Some(&last_pair_pos) = pair_positions.last() else {
-        return Ok(parent
-            .green()
-            .splice_children(rbrace_pos..rbrace_pos, vec![rendered_pair.into()]));
+        return Ok(parent.green().splice_children(
+            object_ast.empty_body_insert_index()..object_ast.empty_body_insert_index(),
+            vec![rendered_pair.into()],
+        ));
     };
 
     let before_slice = if pair_positions.len() >= 2 {
@@ -373,6 +374,7 @@ fn set_array_child(
         .ok()
         .and_then(|array| array.detected_string_style());
     let insert_style = resolve_quote_style(string_style, detected);
+    let array_ast = AstArray::cast(parent.clone())?;
 
     match seg {
         ArrayPathSegment::Index(idx) => {
@@ -392,8 +394,7 @@ fn set_array_child(
         }
         ArrayPathSegment::InsertAt(idx) => {
             if *idx >= value_positions.len() {
-                let insert_pos = ast_edit::red_bracket_index(&children, SyntaxKind::RBracket)
-                    .unwrap_or(children.len());
+                let insert_pos = array_ast.empty_body_insert_index();
                 let last_value_pos = value_positions.last().copied();
                 let Some(last_value_pos) = last_value_pos else {
                     return Ok(parent.green().splice_children(
@@ -469,8 +470,7 @@ fn set_array_child(
             }
         }
         ArrayPathSegment::Push => {
-            let insert_pos = ast_edit::red_bracket_index(&children, SyntaxKind::RBracket)
-                .unwrap_or(children.len());
+            let insert_pos = array_ast.append_value_index();
             let Some(last_value_pos) = value_positions.last().copied() else {
                 return Ok(parent.green().splice_children(
                     insert_pos..insert_pos,
@@ -545,10 +545,11 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         }
     };
 
-    let children = parent.children_with_tokens().collect::<Vec<_>>();
-    let pair_pos = children.iter().position(|child| {
-        matches!(child, NodeOrToken::Node(pair) if pair.kind() == SyntaxKind::Pair.into() && pair.pair_key().as_deref() == Some(key.as_str()))
-    });
+    let object_ast = AstObject::cast(parent.clone())?;
+    let members = object_ast.members();
+    let pair_pos = members
+        .iter()
+        .position(|member| member.pair_key().as_deref() == Some(key.as_str()));
 
     let Some(pair_pos) = pair_pos else {
         return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
@@ -556,15 +557,28 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         ])));
     };
 
-    let updated = ast_edit::remove_structural_child(
-        &children,
-        pair_pos,
-        SyntaxKind::Pair,
-        SyntaxKind::LBrace,
-        SyntaxKind::RBrace,
-    );
+    let pair = &members[pair_pos];
+    let mut range = pair.removal_range();
+    let mut replacement = Vec::new();
 
-    Ok(parent.green().splice_children(0..children.len(), updated))
+    if pair_pos + 1 == members.len() {
+        if pair_pos > 0
+            && matches!(
+                members[pair_pos - 1].trailing_trivia.first(),
+                Some(Trivia::Comma(_))
+            )
+        {
+            range.start = members[pair_pos - 1].post_node_index();
+        }
+
+        let prefix_len = pair
+            .trivia_boundary
+            .leading_protected_prefix_len
+            .min(pair.leading_trivia.len());
+        replacement.extend(ast_edit::render_trivia(&pair.leading_trivia[..prefix_len]));
+    }
+
+    Ok(parent.green().splice_children(range, replacement))
 }
 
 fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -577,36 +591,37 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         }
     };
 
-    let children = parent.children_with_tokens().collect::<Vec<_>>();
-    let value_positions = children
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, child)| {
-            matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value)
-                .then_some(idx)
-        })
-        .collect::<Vec<_>>();
-
-    let value_pos = match seg {
-        ArrayPathSegment::Index(idx) | ArrayPathSegment::InsertAt(idx) => {
-            value_positions.get(*idx).copied().ok_or_else(|| {
-                HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![last.clone()]))
-            })?
-        }
-        ArrayPathSegment::Push => value_positions.last().copied().ok_or_else(|| {
-            HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![last.clone()]))
-        })?,
+    let array_ast = AstArray::cast(parent.clone())?;
+    let items = array_ast.items();
+    let idx = match seg {
+        ArrayPathSegment::Index(idx) | ArrayPathSegment::InsertAt(idx) => *idx,
+        ArrayPathSegment::Push => items.len().saturating_sub(1),
     };
+    let item = items
+        .get(idx)
+        .ok_or_else(|| HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![last.clone()])))?;
 
-    let updated = ast_edit::remove_structural_child(
-        &children,
-        value_pos,
-        SyntaxKind::Value,
-        SyntaxKind::LBracket,
-        SyntaxKind::RBracket,
-    );
+    let mut range = item.removal_range();
+    let mut replacement = Vec::new();
 
-    Ok(parent.green().splice_children(0..children.len(), updated))
+    if idx + 1 == items.len() {
+        if idx > 0
+            && matches!(
+                items[idx - 1].trailing_trivia.first(),
+                Some(Trivia::Comma(_))
+            )
+        {
+            range.start = items[idx - 1].post_node_index();
+        }
+
+        let prefix_len = item
+            .trivia_boundary
+            .leading_protected_prefix_len
+            .min(item.leading_trivia.len());
+        replacement.extend(ast_edit::render_trivia(&item.leading_trivia[..prefix_len]));
+    }
+
+    Ok(parent.green().splice_children(range, replacement))
 }
 
 fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {

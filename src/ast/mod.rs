@@ -1,4 +1,5 @@
 use rowan::NodeOrToken;
+use std::ops::Range;
 
 pub mod edit;
 
@@ -75,6 +76,22 @@ pub struct Layout {
     pub depth: usize,
     pub is_last: bool,
     pub owns_trivia: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TriviaBoundary {
+    pub leading_protected_prefix_len: usize,
+    pub trailing_protected_suffix_len: usize,
+}
+
+impl TriviaBoundary {
+    pub fn owned_leading_len(self, leading_len: usize) -> usize {
+        leading_len.saturating_sub(self.leading_protected_prefix_len)
+    }
+
+    pub fn owned_trailing_len(self, trailing_len: usize) -> usize {
+        trailing_len.saturating_sub(self.trailing_protected_suffix_len)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +182,7 @@ pub struct Document {
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
+    pub body_insert_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -174,6 +192,8 @@ pub struct Object {
     pub trailing_trivia: Vec<Trivia>,
     pub braced: bool,
     pub layout: Layout,
+    pub empty_body_insert_index: usize,
+    pub body_end_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +203,8 @@ pub struct Array {
     pub trailing_trivia: Vec<Trivia>,
     pub braced: bool,
     pub layout: Layout,
+    pub empty_body_insert_index: usize,
+    pub body_end_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -193,6 +215,7 @@ pub struct Member {
     pub after_colon_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
+    pub trivia_boundary: TriviaBoundary,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -212,6 +235,7 @@ pub struct Value {
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
+    pub trivia_boundary: TriviaBoundary,
 }
 
 pub type Pair = Member;
@@ -250,12 +274,14 @@ impl AstNode for Document {
         }
 
         let layout = collect_layout(&node, true);
+        let leading_trivia = collect_root_leading_trivia(&node);
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_root_leading_trivia(&node),
+            leading_trivia: leading_trivia.clone(),
             trailing_trivia: collect_root_trailing_trivia(&node),
             layout,
+            body_insert_index: leading_trivia.len(),
         })
     }
 
@@ -268,14 +294,18 @@ impl Document {
     pub fn item(&self) -> Option<DocumentItem> {
         match self.syntax.kind() {
             SyntaxKind::Root => {
-                let child = self.syntax.children().find(|child| {
-                    !matches!(child.kind(), SyntaxKind::Comment) && !child.kind().is_trivia()
-                })?;
-                match child.kind() {
-                    SyntaxKind::Object => Some(DocumentItem::Object(Object::cast(child).ok()?)),
-                    SyntaxKind::Array => Some(DocumentItem::Array(Array::cast(child).ok()?)),
-                    SyntaxKind::Value => Some(DocumentItem::Value(Value::cast(child).ok()?)),
-                    _ => None,
+                let child = self
+                    .syntax
+                    .children_with_tokens()
+                    .nth(self.body_insert_index)?;
+                match child {
+                    NodeOrToken::Node(node) => match node.kind() {
+                        SyntaxKind::Object => Some(DocumentItem::Object(Object::cast(node).ok()?)),
+                        SyntaxKind::Array => Some(DocumentItem::Array(Array::cast(node).ok()?)),
+                        SyntaxKind::Value => Some(DocumentItem::Value(Value::cast(node).ok()?)),
+                        _ => None,
+                    },
+                    NodeOrToken::Token(_) => None,
                 }
             }
             SyntaxKind::Object => Some(DocumentItem::Object(
@@ -285,6 +315,10 @@ impl Document {
             SyntaxKind::Value => Some(DocumentItem::Value(Value::cast(self.syntax.clone()).ok()?)),
             _ => None,
         }
+    }
+
+    pub fn body_insert_index(&self) -> usize {
+        self.body_insert_index
     }
 
     pub fn object(&self) -> Option<Object> {
@@ -363,6 +397,11 @@ impl AstNode for Object {
         } else {
             collect_container_trailing_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::RBrace))
         };
+        let empty_body_insert_index = node
+            .children_with_tokens()
+            .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBrace))
+            .unwrap_or_else(|| node.children_with_tokens().count());
+        let body_end_index = empty_body_insert_index;
 
         Ok(Self {
             syntax: node.clone(),
@@ -370,6 +409,8 @@ impl AstNode for Object {
             trailing_trivia,
             braced,
             layout,
+            empty_body_insert_index,
+            body_end_index,
         })
     }
 
@@ -389,6 +430,18 @@ impl Object {
 
     pub fn comments(&self) -> Vec<Comment> {
         collect_comments(&self.syntax)
+    }
+
+    pub fn empty_body_insert_index(&self) -> usize {
+        self.empty_body_insert_index
+    }
+
+    pub fn append_member_index(&self) -> usize {
+        self.body_end_index
+    }
+
+    pub fn body_end_index(&self) -> usize {
+        self.body_end_index
     }
 
     pub fn member_by_key(&self, key: &str) -> Option<Member> {
@@ -442,6 +495,11 @@ impl AstNode for Array {
         } else {
             collect_container_trailing_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::RBracket))
         };
+        let empty_body_insert_index = node
+            .children_with_tokens()
+            .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBracket))
+            .unwrap_or_else(|| node.children_with_tokens().count());
+        let body_end_index = empty_body_insert_index;
 
         Ok(Self {
             syntax: node.clone(),
@@ -449,6 +507,8 @@ impl AstNode for Array {
             trailing_trivia,
             braced,
             layout,
+            empty_body_insert_index,
+            body_end_index,
         })
     }
 
@@ -468,6 +528,18 @@ impl Array {
 
     pub fn comments(&self) -> Vec<Comment> {
         collect_comments(&self.syntax)
+    }
+
+    pub fn empty_body_insert_index(&self) -> usize {
+        self.empty_body_insert_index
+    }
+
+    pub fn append_value_index(&self) -> usize {
+        self.body_end_index
+    }
+
+    pub fn body_end_index(&self) -> usize {
+        self.body_end_index
     }
 
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
@@ -492,14 +564,22 @@ impl AstNode for Member {
 
         let layout = collect_layout(&node, true);
         let (before_colon_trivia, after_colon_trivia) = collect_member_middle_trivia(&node);
+        let leading_trivia = collect_leading_trivia(&node, layout.owns_trivia);
+        let trailing_trivia = collect_trailing_trivia(&node, layout.owns_trivia);
+        let trivia_boundary = TriviaBoundary {
+            leading_protected_prefix_len: collect_trivia_boundary(&leading_trivia)
+                .leading_protected_prefix_len,
+            trailing_protected_suffix_len: 0,
+        };
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: collect_leading_trivia(&node, layout.owns_trivia),
+            leading_trivia,
             before_colon_trivia,
             after_colon_trivia,
-            trailing_trivia: collect_trailing_trivia(&node, layout.owns_trivia),
+            trailing_trivia,
             layout,
+            trivia_boundary,
         })
     }
 
@@ -533,6 +613,30 @@ impl Member {
 
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.value().and_then(|value| value.detected_string_style())
+    }
+
+    pub fn removal_range(&self) -> Range<usize> {
+        let owned_leading_len = self
+            .trivia_boundary
+            .owned_leading_len(self.leading_trivia.len());
+        let owned_trailing_len = self
+            .trivia_boundary
+            .owned_trailing_len(self.trailing_trivia.len());
+        let start = self.syntax.index().saturating_sub(owned_leading_len);
+        let end = self.syntax.index() + 1 + owned_trailing_len;
+        start..end
+    }
+
+    pub fn insert_before_index(&self) -> usize {
+        self.removal_range().start
+    }
+
+    pub fn insert_after_index(&self) -> usize {
+        self.removal_range().end
+    }
+
+    pub fn post_node_index(&self) -> usize {
+        self.syntax.index() + 1
     }
 }
 
@@ -656,20 +760,28 @@ impl AstNode for Value {
         let layout = collect_layout(&node, owns_trivia);
         let parent_kind = node.parent().map(|parent| parent.kind());
         let owns_value_trivia = matches!(parent_kind, Some(SyntaxKind::Array));
+        let leading_trivia = if owns_value_trivia {
+            collect_leading_trivia(&node, true)
+        } else {
+            Vec::new()
+        };
+        let trailing_trivia = if owns_value_trivia {
+            collect_trailing_trivia(&node, true)
+        } else {
+            Vec::new()
+        };
+        let trivia_boundary = TriviaBoundary {
+            leading_protected_prefix_len: collect_trivia_boundary(&leading_trivia)
+                .leading_protected_prefix_len,
+            trailing_protected_suffix_len: 0,
+        };
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia: if owns_value_trivia {
-                collect_leading_trivia(&node, true)
-            } else {
-                Vec::new()
-            },
-            trailing_trivia: if owns_value_trivia {
-                collect_trailing_trivia(&node, true)
-            } else {
-                Vec::new()
-            },
+            leading_trivia,
+            trailing_trivia,
             layout,
+            trivia_boundary,
         })
     }
 
@@ -750,6 +862,30 @@ impl Value {
             ValueContent::Array(array) => array.detected_string_style(),
             ValueContent::Scalar(_) => None,
         }
+    }
+
+    pub fn removal_range(&self) -> Range<usize> {
+        let owned_leading_len = self
+            .trivia_boundary
+            .owned_leading_len(self.leading_trivia.len());
+        let owned_trailing_len = self
+            .trivia_boundary
+            .owned_trailing_len(self.trailing_trivia.len());
+        let start = self.syntax.index().saturating_sub(owned_leading_len);
+        let end = self.syntax.index() + 1 + owned_trailing_len;
+        start..end
+    }
+
+    pub fn insert_before_index(&self) -> usize {
+        self.removal_range().start
+    }
+
+    pub fn insert_after_index(&self) -> usize {
+        self.removal_range().end
+    }
+
+    pub fn post_node_index(&self) -> usize {
+        self.syntax.index() + 1
     }
 }
 
@@ -994,6 +1130,51 @@ fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
 
     trivia.reverse();
     trivia
+}
+
+fn collect_trivia_boundary(trivia: &[Trivia]) -> TriviaBoundary {
+    let mut boundary = 0usize;
+    let mut index = 0usize;
+    let mut saw_comment_since_boundary = false;
+
+    while index < trivia.len() {
+        match &trivia[index] {
+            Trivia::Comment(_) => {
+                saw_comment_since_boundary = true;
+                index += 1;
+            }
+            Trivia::Newline { .. } => {
+                let mut cursor = index;
+                let mut newline_count = 0usize;
+
+                while cursor < trivia.len() {
+                    match &trivia[cursor] {
+                        Trivia::Newline { .. } => {
+                            newline_count += 1;
+                            cursor += 1;
+                        }
+                        Trivia::Whitespace(_) => cursor += 1,
+                        _ => break,
+                    }
+                }
+
+                if newline_count >= 2 && saw_comment_since_boundary {
+                    boundary = cursor;
+                    saw_comment_since_boundary = false;
+                }
+
+                index = cursor;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    TriviaBoundary {
+        leading_protected_prefix_len: boundary,
+        trailing_protected_suffix_len: 0,
+    }
 }
 
 fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
