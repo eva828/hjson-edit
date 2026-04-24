@@ -567,9 +567,9 @@ impl AstNode for Member {
         let leading_trivia = collect_leading_trivia(&node, layout.owns_trivia);
         let trailing_trivia = collect_trailing_trivia(&node, layout.owns_trivia);
         let trivia_boundary = TriviaBoundary {
-            leading_protected_prefix_len: collect_trivia_boundary(&leading_trivia)
-                .leading_protected_prefix_len,
-            trailing_protected_suffix_len: 0,
+            leading_protected_prefix_len: 0,
+            trailing_protected_suffix_len: collect_trivia_boundary(&trailing_trivia)
+                .trailing_protected_suffix_len,
         };
 
         Ok(Self {
@@ -771,9 +771,9 @@ impl AstNode for Value {
             Vec::new()
         };
         let trivia_boundary = TriviaBoundary {
-            leading_protected_prefix_len: collect_trivia_boundary(&leading_trivia)
-                .leading_protected_prefix_len,
-            trailing_protected_suffix_len: 0,
+            leading_protected_prefix_len: 0,
+            trailing_protected_suffix_len: collect_trivia_boundary(&trailing_trivia)
+                .trailing_protected_suffix_len,
         };
 
         Ok(Self {
@@ -1011,16 +1011,21 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
     }
 
     let mut trivia = Vec::new();
+    let mut saw_boundary_newline = false;
 
     for elem in children.iter().take(index) {
         let Some(item) = trivia_from_element(elem) else {
-            trivia.clear();
             continue;
         };
 
         match item {
-            Trivia::Comma(_) => {
+            Trivia::Comma(_) if !saw_boundary_newline => {
                 trivia.clear();
+            }
+            Trivia::Comma(_) => {}
+            Trivia::Newline { .. } if !saw_boundary_newline => {
+                trivia.clear();
+                saw_boundary_newline = true;
             }
             other => trivia.push(other),
         }
@@ -1096,7 +1101,7 @@ fn collect_trailing_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
         };
 
         match item {
-            Trivia::Whitespace(_) => continue,
+            Trivia::Whitespace(text) => trivia.push(Trivia::Whitespace(text)),
             Trivia::Comma(text) => trivia.push(Trivia::Comma(text)),
             Trivia::Comment(comment) => {
                 trivia.push(Trivia::Comment(comment));
@@ -1132,48 +1137,10 @@ fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
     trivia
 }
 
-fn collect_trivia_boundary(trivia: &[Trivia]) -> TriviaBoundary {
-    let mut boundary = 0usize;
-    let mut index = 0usize;
-    let mut saw_comment_since_boundary = false;
-
-    while index < trivia.len() {
-        match &trivia[index] {
-            Trivia::Comment(_) => {
-                saw_comment_since_boundary = true;
-                index += 1;
-            }
-            Trivia::Newline { .. } => {
-                let mut cursor = index;
-                let mut newline_count = 0usize;
-
-                while cursor < trivia.len() {
-                    match &trivia[cursor] {
-                        Trivia::Newline { .. } => {
-                            newline_count += 1;
-                            cursor += 1;
-                        }
-                        Trivia::Whitespace(_) => cursor += 1,
-                        _ => break,
-                    }
-                }
-
-                if newline_count >= 2 && saw_comment_since_boundary {
-                    boundary = cursor;
-                    saw_comment_since_boundary = false;
-                }
-
-                index = cursor;
-            }
-            _ => {
-                index += 1;
-            }
-        }
-    }
-
+fn collect_trivia_boundary(_trivia: &[Trivia]) -> TriviaBoundary {
     TriviaBoundary {
-        leading_protected_prefix_len: boundary,
-        trailing_protected_suffix_len: 0,
+        leading_protected_prefix_len: 0,
+        trailing_protected_suffix_len: 1,
     }
 }
 

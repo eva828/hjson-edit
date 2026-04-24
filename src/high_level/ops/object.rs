@@ -575,9 +575,6 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
             .leading_protected_prefix_len
             .min(pair.leading_trivia.len());
         replacement.extend(ast_edit::render_trivia(&pair.leading_trivia[..prefix_len]));
-        if matches!(pair.leading_trivia.get(prefix_len), Some(Trivia::Newline { .. })) {
-            replacement.push(SyntaxKind::Newline.create_token("\n").into());
-        }
     }
 
     Ok(parent.green().splice_children(range, replacement))
@@ -621,9 +618,6 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
             .leading_protected_prefix_len
             .min(item.leading_trivia.len());
         replacement.extend(ast_edit::render_trivia(&item.leading_trivia[..prefix_len]));
-        if matches!(item.leading_trivia.get(prefix_len), Some(Trivia::Newline { .. })) {
-            replacement.push(SyntaxKind::Newline.create_token("\n").into());
-        }
     }
 
     Ok(parent.green().splice_children(range, replacement))
