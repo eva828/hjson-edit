@@ -10,6 +10,7 @@ use crate::{
         ext::RedNodeExt,
         ops::finish_document,
         path::{ArrayPathSegment, HjsonObjectPath, ObjectPathSegment, PathSegment},
+        style::DetectNewline,
         value::HjsonValue,
         HjsonDocument,
     },
@@ -118,10 +119,10 @@ pub(crate) fn rebuild_tree_with_set(
     match resolve_parent(root.clone(), &parent_path) {
         Ok(parent) => {
             let new_parent = match parent.kind() {
-                SyntaxKind::Root => set_root_child(&parent, &last, value, string_style)?,
-                SyntaxKind::Object => set_object_child(&parent, &last, value, string_style)?,
-                SyntaxKind::Array => set_array_child(&parent, &last, value, string_style)?,
-                SyntaxKind::Value => set_value_child(&parent, &last, value, string_style)?,
+            SyntaxKind::Root => set_root_child(&parent, &last, value, string_style, false)?,
+            SyntaxKind::Object => set_object_child(&parent, &last, value, string_style, false)?,
+            SyntaxKind::Array => set_array_child(&parent, &last, value, string_style, false)?,
+            SyntaxKind::Value => set_value_child(&parent, &last, value, string_style, false)?,
                 _ => {
                     return Err(HjsonEditError::UnexpectedStructure {
                         expected: SyntaxKind::Object,
@@ -146,16 +147,34 @@ pub(crate) fn rebuild_tree_with_set(
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
             let new_parent = match ancestor.kind() {
                 SyntaxKind::Root => {
-                    set_root_child(&ancestor, missing, &nested_value, string_style)?
+                    set_root_child(
+                        &ancestor,
+                        missing,
+                        &nested_value,
+                        string_style,
+                        !path.segments()[consumed + 1..].is_empty(),
+                    )?
                 }
                 SyntaxKind::Object => {
-                    set_object_child(&ancestor, missing, &nested_value, string_style)?
+                    set_object_child(
+                        &ancestor,
+                        missing,
+                        &nested_value,
+                        string_style,
+                        !path.segments()[consumed + 1..].is_empty(),
+                    )?
                 }
                 SyntaxKind::Array => {
-                    set_array_child(&ancestor, missing, &nested_value, string_style)?
+                    set_array_child(
+                        &ancestor,
+                        missing,
+                        &nested_value,
+                        string_style,
+                        !path.segments()[consumed + 1..].is_empty(),
+                    )?
                 }
                 SyntaxKind::Value => {
-                    set_value_child(&ancestor, missing, &nested_value, string_style)?
+                    set_value_child(&ancestor, missing, &nested_value, string_style, true)?
                 }
                 _ => {
                     return Err(HjsonEditError::UnexpectedStructure {
@@ -235,6 +254,7 @@ fn set_root_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = parent
         .children()
@@ -245,7 +265,7 @@ fn set_root_child(
             )
         })
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_set(&child, last, value, string_style)?;
+    let updated_child = rebuild_child_with_set(&child, last, value, string_style, pretty_nested)?;
 
     Ok(parent
         .green()
@@ -257,12 +277,13 @@ fn set_value_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = parent
         .children()
         .find(|child| !child.kind().is_trivia())
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_set(&child, last, value, string_style)?;
+    let updated_child = rebuild_child_with_set(&child, last, value, string_style, pretty_nested)?;
 
     Ok(parent
         .green()
@@ -274,6 +295,7 @@ fn set_object_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
         PathSegment::Object(ObjectPathSegment::Key(key)) => key,
@@ -285,13 +307,12 @@ fn set_object_child(
         }
     };
 
-    let detected = AstObject::cast(parent.clone())
-        .ok()
-        .and_then(|object| object.detected_string_style());
-    let insert_style = resolve_quote_style(string_style, detected);
-    let rendered_pair = value.render_pair(key, None, Some(insert_style));
-
     let object_ast = AstObject::cast(parent.clone())?;
+    let detected = object_ast.detected_string_style();
+    let insert_style = match (string_style, detected) {
+        (StringStyle::Preserve, None) => None,
+        _ => Some(resolve_quote_style(string_style, detected)),
+    };
     if let Some(pair) = object_ast
         .members()
         .into_iter()
@@ -306,6 +327,42 @@ fn set_object_child(
 
     let insert_pos = object_ast.append_member_index();
     let mut inserted = Vec::new();
+    let indent = "  ".repeat(object_ast.layout.depth + 1);
+    let newline = parent.detect_newline().as_str().to_string();
+    let rendered_pair = if pretty_nested {
+        value.render_pair_pretty(key, None, insert_style, object_ast.layout.depth, &newline)
+    } else {
+        value.render_pair(key, None, insert_style)
+    };
+
+    if object_ast.members().is_empty() {
+        let range_start = if insert_pos > 0
+            && matches!(
+                parent.children_with_tokens().nth(insert_pos - 1),
+                Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
+            )
+        {
+            insert_pos - 1
+        } else {
+            insert_pos
+        };
+        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        inserted.push(rendered_pair.into());
+        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        if object_ast.layout.depth > 0 {
+            inserted.push(SyntaxKind::Whitespace.create_token(&"  ".repeat(object_ast.layout.depth)).into());
+        }
+        return Ok(parent.green().splice_children(range_start..insert_pos, inserted));
+    }
+
+    if pretty_nested {
+        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        inserted.push(rendered_pair.into());
+        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
+    }
 
     if let Some(last_member) = object_ast.members().last() {
         let needs_separator = last_member.trailing_trivia.iter().all(|trivia| {
@@ -327,6 +384,7 @@ fn set_array_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let seg = match last {
         PathSegment::Array(seg) => seg,
@@ -338,11 +396,12 @@ fn set_array_child(
         }
     };
 
-    let detected = AstArray::cast(parent.clone())
-        .ok()
-        .and_then(|array| array.detected_string_style());
-    let insert_style = resolve_quote_style(string_style, detected);
     let array_ast = AstArray::cast(parent.clone())?;
+    let detected = array_ast.detected_string_style();
+    let insert_style = match (string_style, detected) {
+        (StringStyle::Preserve, None) => None,
+        _ => Some(resolve_quote_style(string_style, detected)),
+    };
     let items = array_ast.items();
 
     match seg {
@@ -362,23 +421,56 @@ fn set_array_child(
             if *idx >= items.len() {
                 let insert_pos = array_ast.append_value_index();
                 let mut inserted = Vec::new();
+                let indent = "  ".repeat(array_ast.layout.depth + 1);
+                let newline = parent.detect_newline().as_str().to_string();
+                let rendered_value = if pretty_nested {
+                    value.render_value_pretty(insert_style, array_ast.layout.depth, &newline)
+                } else {
+                    value.render_value(insert_style)
+                };
 
-                if let Some(last_value) = items.last() {
-                    let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
-                        !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
+                if items.is_empty() {
+                    let range_start = if insert_pos > 0
+                        && matches!(
+                            parent.children_with_tokens().nth(insert_pos - 1),
+                            Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
+                        )
+                    {
+                        insert_pos - 1
+                    } else {
+                        insert_pos
+                    };
+                    inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+                    inserted.push(rendered_value.into());
+                    inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+                    return Ok(parent.green().splice_children(range_start..insert_pos, inserted));
+                }
+
+                if pretty_nested {
+                    inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+                    inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+                    inserted.push(rendered_value.into());
+                    inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+                    inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+                    return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
+                }
+
+    if let Some(last_value) = items.last() {
+        let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
+            !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
                     });
                     if needs_separator {
                         inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                         inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
                     }
                 }
-                inserted.push(value.render_value(Some(insert_style)).into());
+                inserted.push(rendered_value.into());
 
                 Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
-                let inserted = vec![value.render_value(Some(insert_style)).into()];
+                let inserted = vec![value.render_value(insert_style).into()];
 
                 Ok(parent
                     .green()
@@ -389,6 +481,14 @@ fn set_array_child(
             let insert_pos = array_ast.append_value_index();
             let mut inserted = Vec::new();
 
+            if items.is_empty() {
+                let newline = parent.detect_newline().as_str().to_string();
+                inserted.push(SyntaxKind::Whitespace.create_token("  ").into());
+                inserted.push(value.render_value(insert_style).into());
+                inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+                return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
+            }
+
             if let Some(last_value) = items.last() {
                 let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
                     !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
@@ -398,7 +498,7 @@ fn set_array_child(
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
                 }
             }
-            inserted.push(value.render_value(Some(insert_style)).into());
+            inserted.push(value.render_value(insert_style).into());
 
             Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
         }
@@ -475,6 +575,9 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
             .leading_protected_prefix_len
             .min(pair.leading_trivia.len());
         replacement.extend(ast_edit::render_trivia(&pair.leading_trivia[..prefix_len]));
+        if matches!(pair.leading_trivia.get(prefix_len), Some(Trivia::Newline { .. })) {
+            replacement.push(SyntaxKind::Newline.create_token("\n").into());
+        }
     }
 
     Ok(parent.green().splice_children(range, replacement))
@@ -518,6 +621,9 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
             .leading_protected_prefix_len
             .min(item.leading_trivia.len());
         replacement.extend(ast_edit::render_trivia(&item.leading_trivia[..prefix_len]));
+        if matches!(item.leading_trivia.get(prefix_len), Some(Trivia::Newline { .. })) {
+            replacement.push(SyntaxKind::Newline.create_token("\n").into());
+        }
     }
 
     Ok(parent.green().splice_children(range, replacement))
@@ -544,11 +650,12 @@ fn rebuild_child_with_set(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     match child.kind() {
-        SyntaxKind::Object => set_object_child(child, last, value, string_style),
-        SyntaxKind::Array => set_array_child(child, last, value, string_style),
-        SyntaxKind::Value => set_value_child(child, last, value, string_style),
+        SyntaxKind::Object => set_object_child(child, last, value, string_style, pretty_nested),
+        SyntaxKind::Array => set_array_child(child, last, value, string_style, pretty_nested),
+        SyntaxKind::Value => set_value_child(child, last, value, string_style, pretty_nested),
         _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
             last.clone(),
         ]))),

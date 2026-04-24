@@ -72,7 +72,13 @@ impl HjsonValue {
     pub fn render_content(&self, string_style: Option<QuoteStyle>) -> crate::GreenElement {
         match self {
             HjsonValue::String(s) => {
-                let style = string_style.unwrap_or(QuoteStyle::DoubleQuoted);
+                let style = string_style.unwrap_or_else(|| {
+                    if is_simple_unquoted_text(s) {
+                        QuoteStyle::Unquoted
+                    } else {
+                        QuoteStyle::DoubleQuoted
+                    }
+                });
                 let (kind, text) = render_string(s, style);
                 kind.create_token(text).into()
             }
@@ -126,6 +132,72 @@ impl HjsonValue {
         builder.finish()
     }
 
+    pub fn render_value_pretty(
+        &self,
+        string_style: Option<QuoteStyle>,
+        depth: usize,
+        newline: &str,
+    ) -> GreenNode {
+        match self {
+            HjsonValue::Array(items) => {
+                let mut builder = GreenNodeBuilder::new();
+                builder.start_node(SyntaxKind::Value.into());
+                builder.start_node(SyntaxKind::Array.into());
+                builder.token(SyntaxKind::LBracket.into(), "[");
+                if items.is_empty() {
+                    builder.token(SyntaxKind::RBracket.into(), "]");
+                } else {
+                    builder.token(SyntaxKind::Newline.into(), newline);
+                    for (idx, item) in items.iter().enumerate() {
+                        let indent_text = indent(depth + 1);
+                        builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
+                        push_node(&mut builder, &item.render_value_pretty(string_style, depth + 1, newline));
+                        if idx + 1 != items.len() {
+                            builder.token(SyntaxKind::Newline.into(), newline);
+                        }
+                    }
+                    builder.token(SyntaxKind::Newline.into(), newline);
+                    let indent_text = indent(depth);
+                    builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
+                    builder.token(SyntaxKind::RBracket.into(), "]");
+                }
+                builder.finish_node();
+                builder.finish_node();
+                builder.finish()
+            }
+            HjsonValue::Object(entries) => {
+                let mut builder = GreenNodeBuilder::new();
+                builder.start_node(SyntaxKind::Value.into());
+                builder.start_node(SyntaxKind::Object.into());
+                builder.token(SyntaxKind::LBrace.into(), "{");
+                if entries.is_empty() {
+                    builder.token(SyntaxKind::RBrace.into(), "}");
+                } else {
+                    builder.token(SyntaxKind::Newline.into(), newline);
+                    for (idx, (key, item)) in entries.iter().enumerate() {
+                        let indent_text = indent(depth + 1);
+                        builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
+                        push_node(
+                            &mut builder,
+                            &item.render_pair_pretty(key, None, string_style, depth + 1, newline),
+                        );
+                        if idx + 1 != entries.len() {
+                            builder.token(SyntaxKind::Newline.into(), newline);
+                        }
+                    }
+                    builder.token(SyntaxKind::Newline.into(), newline);
+                    let indent_text = indent(depth);
+                    builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
+                    builder.token(SyntaxKind::RBrace.into(), "}");
+                }
+                builder.finish_node();
+                builder.finish_node();
+                builder.finish()
+            }
+            _ => self.render_value(string_style),
+        }
+    }
+
     pub fn render_pair(
         &self,
         key: &str,
@@ -154,6 +226,36 @@ impl HjsonValue {
         builder.finish()
     }
 
+    pub fn render_pair_pretty(
+        &self,
+        key: &str,
+        key_style: Option<QuoteStyle>,
+        string_style: Option<QuoteStyle>,
+        depth: usize,
+        newline: &str,
+    ) -> GreenNode {
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::Pair.into());
+        builder.start_node(SyntaxKind::Key.into());
+        let (key_kind, key_text) = render_string(
+            key,
+            key_style.unwrap_or_else(|| {
+                if is_simple_unquoted_text(key) {
+                    QuoteStyle::Unquoted
+                } else {
+                    QuoteStyle::DoubleQuoted
+                }
+            }),
+        );
+        builder.token(key_kind.into(), key_text.as_str());
+        builder.finish_node();
+        builder.token(SyntaxKind::Colon.into(), ":");
+        builder.token(SyntaxKind::Whitespace.into(), " ");
+        push_node(&mut builder, &self.render_value_pretty(string_style, depth + 1, newline));
+        builder.finish_node();
+        builder.finish()
+    }
+
     pub fn render_scalar(&self, string_style: Option<QuoteStyle>) -> GreenNode {
         self.render_value(string_style)
     }
@@ -168,6 +270,10 @@ fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
         QuoteStyle::Block => (SyntaxKind::BlockString, format!("'''{}'''", text)),
         QuoteStyle::Unquoted => (SyntaxKind::UnquotedString, text.to_string()),
     }
+}
+
+fn indent(depth: usize) -> String {
+    "  ".repeat(depth)
 }
 
 fn is_simple_unquoted_text(text: &str) -> bool {

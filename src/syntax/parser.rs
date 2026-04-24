@@ -461,6 +461,14 @@ impl Parser {
 
         // 空のオブジェクトかチェック
         if self.at(SyntaxKind::RBrace) {
+            self.eat_trivia();
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        self.eat_trivia();
+        if self.at(SyntaxKind::RBrace) {
             self.bump();
             self.builder.finish_node();
             return;
@@ -558,6 +566,14 @@ impl Parser {
         self.bump();
 
         // 空の配列かチェック
+        if self.at(SyntaxKind::RBracket) {
+            self.eat_trivia();
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        self.eat_trivia();
         if self.at(SyntaxKind::RBracket) {
             self.bump();
             self.builder.finish_node();
