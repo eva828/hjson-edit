@@ -376,24 +376,19 @@ impl AstNode for Object {
             node.parent().map(|parent| parent.kind()),
             Some(SyntaxKind::Root)
         );
+        let is_root_child = matches!(node.parent().map(|parent| parent.kind()), Some(SyntaxKind::Root));
         let layout = collect_layout(&node, owns_trivia);
         let braced = matches!(
             node.children().next().map(|child| child.kind()),
             Some(SyntaxKind::LBrace)
         );
-        let leading_trivia = if matches!(
-            node.parent().map(|parent| parent.kind()),
-            Some(SyntaxKind::Root)
-        ) {
-            collect_root_leading_trivia(&node)
+        let leading_trivia = if is_root_child {
+            Vec::new()
         } else {
             collect_container_leading_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::LBrace))
         };
-        let trailing_trivia = if matches!(
-            node.parent().map(|parent| parent.kind()),
-            Some(SyntaxKind::Root)
-        ) {
-            collect_root_trailing_trivia(&node)
+        let trailing_trivia = if is_root_child {
+            Vec::new()
         } else {
             collect_container_trailing_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::RBrace))
         };
@@ -474,24 +469,19 @@ impl AstNode for Array {
             node.parent().map(|parent| parent.kind()),
             Some(SyntaxKind::Root)
         );
+        let is_root_child = matches!(node.parent().map(|parent| parent.kind()), Some(SyntaxKind::Root));
         let layout = collect_layout(&node, owns_trivia);
         let braced = matches!(
             node.children().next().map(|child| child.kind()),
             Some(SyntaxKind::LBracket)
         );
-        let leading_trivia = if matches!(
-            node.parent().map(|parent| parent.kind()),
-            Some(SyntaxKind::Root)
-        ) {
-            collect_root_leading_trivia(&node)
+        let leading_trivia = if is_root_child {
+            Vec::new()
         } else {
             collect_container_leading_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::LBracket))
         };
-        let trailing_trivia = if matches!(
-            node.parent().map(|parent| parent.kind()),
-            Some(SyntaxKind::Root)
-        ) {
-            collect_root_trailing_trivia(&node)
+        let trailing_trivia = if is_root_child {
+            Vec::new()
         } else {
             collect_container_trailing_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::RBracket))
         };

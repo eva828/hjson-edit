@@ -268,10 +268,11 @@ impl Parser {
         self.builder.start_node(SyntaxKind::Root.into());
 
         if !self.is_at_end() {
-            self.eat_trivia();
             if self.is_braceless_object_start() {
+                self.eat_root_header_trivia_for_braceless_object();
                 self.parse_braceless_object();
             } else {
+                self.eat_trivia();
                 let _ = self.parse_value(ScalarContext::Root);
             }
         }
@@ -383,6 +384,49 @@ impl Parser {
             }
         }
         had_newline
+    }
+
+    fn eat_root_header_trivia_for_braceless_object(&mut self) {
+        let start = self.position;
+        let mut cursor = self.position;
+        let mut last_newline = None;
+
+        while let Some(token) = self.tokens.get(cursor) {
+            if !token.kind.is_trivia() {
+                break;
+            }
+            if token.kind == SyntaxKind::Newline {
+                last_newline = Some(cursor);
+            }
+            cursor += 1;
+        }
+
+        if cursor == start {
+            return;
+        }
+
+        let mut consume_until = cursor;
+
+        if let Some(newline_index) = last_newline {
+            let trailing_start = newline_index + 1;
+            let trailing = &self.tokens[trailing_start..cursor];
+            if !trailing.is_empty()
+                && trailing
+                    .iter()
+                    .all(|token| token.kind == SyntaxKind::Whitespace)
+            {
+                consume_until = trailing_start;
+            }
+        } else if self.tokens[start..cursor]
+            .iter()
+            .all(|token| token.kind == SyntaxKind::Whitespace)
+        {
+            consume_until = start;
+        }
+
+        while self.position < consume_until {
+            self.bump_trivia();
+        }
     }
 
     /// 次の非トリビアトークンの種類を取得

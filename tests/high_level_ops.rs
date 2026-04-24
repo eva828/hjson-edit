@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 
 use hjson_edit::{
+    ast::Trivia,
     high_level::{
         ops::{
             comment::{CommentStyle, HjsonDocumentCommentEdit},
@@ -242,4 +243,41 @@ fn remove_last_item_drops_previous_comma() {
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.remove("remove").unwrap();
     assert_eq!(updated.to_string(), expected);
+}
+
+#[test]
+fn braceless_root_first_member_owns_indent_after_header_trivia() {
+    let input = "// This is a header comment\r\n\r\n// {\r\n    a: aaa,\r\n    b: bbb\r\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let ast = doc.ast().unwrap();
+
+    assert!(matches!(ast.leading_trivia.last(), Some(Trivia::Newline { .. })));
+    assert!(!matches!(
+        ast.leading_trivia.last(),
+        Some(Trivia::Whitespace(_))
+    ));
+
+    let object = ast.object().unwrap();
+    let members = object.members();
+    assert!(matches!(
+        members.first().and_then(|member| member.leading_trivia.first()),
+        Some(Trivia::Whitespace(indent)) if indent == "    "
+    ));
+}
+
+#[test]
+fn braceless_root_single_line_indent_is_not_document_leading_trivia() {
+    let input = "    a: 1\n  b: 2\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let ast = doc.ast().unwrap();
+    assert!(ast.leading_trivia.is_empty());
+
+    let object = ast.object().unwrap();
+    let members = object.members();
+    assert!(matches!(
+        members.first().and_then(|member| member.leading_trivia.first()),
+        Some(Trivia::Whitespace(indent)) if indent == "    "
+    ));
 }
