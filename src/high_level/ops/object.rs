@@ -3,7 +3,7 @@ use rowan::{GreenNode, GreenToken, NodeOrToken};
 use crate::{
     ast::{
         edit as ast_edit, Array as AstArray, AstNode, Document as AstDocument, Object as AstObject,
-        QuoteStyle, Trivia, Value as AstValue,
+        QuoteStyle, Trivia,
     },
     high_level::{
         error::HjsonEditError,
@@ -285,64 +285,41 @@ fn set_object_child(
         }
     };
 
-    let children = parent.children_with_tokens().collect::<Vec<_>>();
     let detected = AstObject::cast(parent.clone())
         .ok()
         .and_then(|object| object.detected_string_style());
     let insert_style = resolve_quote_style(string_style, detected);
     let rendered_pair = value.render_pair(key, None, Some(insert_style));
 
-    if let Some((pair_pos, pair)) = children.iter().enumerate().find(|(_, child)| {
-        matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair && node.pair_key().as_deref() == Some(key.as_str()))
-    }) {
-        let updated = match pair {
-            NodeOrToken::Node(node) => replace_pair_value(node, value, string_style)?,
-            _ => unreachable!(),
-        };
+    let object_ast = AstObject::cast(parent.clone())?;
+    if let Some(pair) = object_ast
+        .members()
+        .into_iter()
+        .find(|member| member.pair_key().as_deref() == Some(key.as_str()))
+    {
+        let pair_node = pair.syntax().clone();
+        let updated = replace_pair_value(&pair_node, value, string_style)?;
         return Ok(parent
             .green()
-            .splice_children(pair_pos..pair_pos + 1, vec![updated.into()]));
+            .splice_children(pair_node.index()..pair_node.index() + 1, vec![updated.into()]));
     }
 
-    let object_ast = AstObject::cast(parent.clone())?;
-    let rbrace_pos = object_ast.empty_body_insert_index();
-    let pair_positions = children
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, child)| {
-            matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Pair)
-                .then_some(idx)
-        })
-        .collect::<Vec<_>>();
-    let Some(&last_pair_pos) = pair_positions.last() else {
-        return Ok(parent.green().splice_children(
-            object_ast.empty_body_insert_index()..object_ast.empty_body_insert_index(),
-            vec![rendered_pair.into()],
-        ));
-    };
+    let insert_pos = object_ast.append_member_index();
+    let mut inserted = Vec::new();
 
-    let before_slice = if pair_positions.len() >= 2 {
-        let prev_pair_pos = pair_positions[pair_positions.len() - 2];
-        children
-            .get(prev_pair_pos + 1..last_pair_pos)
-            .unwrap_or(&[])
-    } else {
-        let lbrace_pos = ast_edit::red_bracket_index(&children, SyntaxKind::LBrace).unwrap_or(0);
-        children.get(lbrace_pos + 1..last_pair_pos).unwrap_or(&[])
-    };
-    let after_slice = children.get(last_pair_pos + 1..rbrace_pos).unwrap_or(&[]);
-
-    let mut inserted = ast_edit::copy_separator_tokens(before_slice);
-    if inserted.is_empty() {
-        inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+    if let Some(last_member) = object_ast.members().last() {
+        let needs_separator = last_member.trailing_trivia.iter().all(|trivia| {
+            !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
+        });
+        if needs_separator {
+            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+        }
     }
+
     inserted.push(rendered_pair.into());
-    inserted.extend(ast_edit::clone_green_elements(after_slice));
 
-    Ok(parent
-        .green()
-        .splice_children(last_pair_pos + 1..rbrace_pos, inserted))
+    Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
 }
 
 fn set_array_child(
@@ -361,147 +338,69 @@ fn set_array_child(
         }
     };
 
-    let children = parent.children_with_tokens().collect::<Vec<_>>();
-    let value_positions = children
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, child)| {
-            matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value)
-                .then_some(idx)
-        })
-        .collect::<Vec<_>>();
     let detected = AstArray::cast(parent.clone())
         .ok()
         .and_then(|array| array.detected_string_style());
     let insert_style = resolve_quote_style(string_style, detected);
     let array_ast = AstArray::cast(parent.clone())?;
+    let items = array_ast.items();
 
     match seg {
         ArrayPathSegment::Index(idx) => {
-            let Some(value_pos) = value_positions.get(*idx).copied() else {
+            let Some(current_value) = items.get(*idx) else {
                 return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
                     last.clone(),
                 ])));
             };
-            let current_value = match &children[value_pos] {
-                NodeOrToken::Node(node) => node,
-                _ => unreachable!(),
-            };
-            let updated = render_value_like_node(current_value, value, string_style);
-            Ok(parent
-                .green()
-                .splice_children(value_pos..value_pos + 1, vec![updated.into()]))
+            let updated = render_value_like_node(current_value.syntax(), value, string_style);
+            Ok(parent.green().splice_children(
+                current_value.syntax().index()..current_value.syntax().index() + 1,
+                vec![updated.into()],
+            ))
         }
         ArrayPathSegment::InsertAt(idx) => {
-            if *idx >= value_positions.len() {
-                let insert_pos = array_ast.empty_body_insert_index();
-                let last_value_pos = value_positions.last().copied();
-                let Some(last_value_pos) = last_value_pos else {
-                    return Ok(parent.green().splice_children(
-                        insert_pos..insert_pos,
-                        vec![value.render_value(Some(insert_style)).into()],
-                    ));
-                };
+            if *idx >= items.len() {
+                let insert_pos = array_ast.append_value_index();
+                let mut inserted = Vec::new();
 
-                let before_slice = if value_positions.len() >= 2 {
-                    let prev_value_pos = value_positions[value_positions.len() - 2];
-                    children
-                        .get(prev_value_pos + 1..last_value_pos)
-                        .unwrap_or(&[])
-                } else {
-                    let lbracket_pos =
-                        ast_edit::red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
-                    children
-                        .get(lbracket_pos + 1..last_value_pos)
-                        .unwrap_or(&[])
-                };
-                let after_slice = children.get(last_value_pos + 1..insert_pos).unwrap_or(&[]);
-                let mut inserted = ast_edit::copy_separator_tokens(before_slice);
-                if inserted.is_empty() {
-                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                if let Some(last_value) = items.last() {
+                    let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
+                        !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
+                    });
+                    if needs_separator {
+                        inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                    }
                 }
                 inserted.push(value.render_value(Some(insert_style)).into());
-                inserted.extend(ast_edit::clone_green_elements(after_slice));
 
-                Ok(parent
-                    .green()
-                    .splice_children(last_value_pos + 1..insert_pos, inserted))
+                Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
             } else {
-                let insert_pos = value_positions[*idx];
-                let prev_boundary = if *idx == 0 {
-                    ast_edit::red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0)
-                } else {
-                    value_positions
-                        .get(idx.saturating_sub(1))
-                        .copied()
-                        .unwrap_or(0)
-                };
-                let separator_slice: &[NodeOrToken<RedNode, crate::RedToken>] =
-                    children.get(prev_boundary + 1..insert_pos).unwrap_or(&[]);
-                let current_value = match &children[insert_pos] {
-                    NodeOrToken::Node(node) => node,
-                    _ => unreachable!(),
-                };
-                let current_value_ast = AstValue::cast(current_value.clone())?;
-                let suffix_len = current_value_ast
-                    .leading_trivia
-                    .len()
-                    .min(separator_slice.len());
-                let split_at = separator_slice.len().saturating_sub(suffix_len);
-                let (prefix_slice, suffix_slice) = separator_slice.split_at(split_at);
-
-                let mut inserted = ast_edit::clone_green_elements(prefix_slice);
-                if inserted.is_empty() {
-                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-                } else if matches!(
-                    prefix_slice.last(),
-                    Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Comma
-                ) {
-                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-                }
-                inserted.push(value.render_value(Some(insert_style)).into());
-                inserted.extend(ast_edit::clone_green_elements(suffix_slice));
+                let target_value = &items[*idx];
+                let insert_pos = target_value.insert_before_index();
+                let inserted = vec![value.render_value(Some(insert_style)).into()];
 
                 Ok(parent
                     .green()
-                    .splice_children(prev_boundary + 1..insert_pos, inserted))
+                    .splice_children(insert_pos..insert_pos, inserted))
             }
         }
         ArrayPathSegment::Push => {
             let insert_pos = array_ast.append_value_index();
-            let Some(last_value_pos) = value_positions.last().copied() else {
-                return Ok(parent.green().splice_children(
-                    insert_pos..insert_pos,
-                    vec![value.render_value(Some(insert_style)).into()],
-                ));
-            };
+            let mut inserted = Vec::new();
 
-            let before_slice = if value_positions.len() >= 2 {
-                let prev_value_pos = value_positions[value_positions.len() - 2];
-                children
-                    .get(prev_value_pos + 1..last_value_pos)
-                    .unwrap_or(&[])
-            } else {
-                let lbracket_pos =
-                    ast_edit::red_bracket_index(&children, SyntaxKind::LBracket).unwrap_or(0);
-                children
-                    .get(lbracket_pos + 1..last_value_pos)
-                    .unwrap_or(&[])
-            };
-            let after_slice = children.get(last_value_pos + 1..insert_pos).unwrap_or(&[]);
-            let mut inserted = ast_edit::copy_separator_tokens(before_slice);
-            if inserted.is_empty() {
-                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+            if let Some(last_value) = items.last() {
+                let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
+                    !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
+                });
+                if needs_separator {
+                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                }
             }
             inserted.push(value.render_value(Some(insert_style)).into());
-            inserted.extend(ast_edit::clone_green_elements(after_slice));
 
-            Ok(parent
-                .green()
-                .splice_children(last_value_pos + 1..insert_pos, inserted))
+            Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
         }
     }
 }
