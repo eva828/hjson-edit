@@ -1012,22 +1012,36 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
 
     let mut trivia = Vec::new();
     let mut saw_boundary_newline = false;
+    let mut prev_has_trailing = false;
 
     for elem in children.iter().take(index) {
         let Some(item) = trivia_from_element(elem) else {
+            trivia.clear();
+            saw_boundary_newline = false;
+            prev_has_trailing = matches!(elem.kind(), SyntaxKind::Pair | SyntaxKind::Value);
             continue;
         };
 
         match item {
-            Trivia::Comma(_) if !saw_boundary_newline => {
+            Trivia::Comma(_) => {
                 trivia.clear();
+                saw_boundary_newline = false;
+                prev_has_trailing = false;
             }
-            Trivia::Comma(_) => {}
+            Trivia::Newline { .. } if prev_has_trailing && !saw_boundary_newline => {
+                trivia.clear();
+                saw_boundary_newline = true;
+                prev_has_trailing = false;
+            }
             Trivia::Newline { .. } if !saw_boundary_newline => {
                 trivia.clear();
                 saw_boundary_newline = true;
+                prev_has_trailing = false;
             }
-            other => trivia.push(other),
+            other => {
+                trivia.push(other);
+                prev_has_trailing = false;
+            }
         }
     }
 
