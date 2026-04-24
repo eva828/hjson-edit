@@ -374,25 +374,25 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 string_style,
             } => {
                 let style = string_style.unwrap_or(StringStyle::Preserve);
-                doc = HjsonDocumentObjectEdit::set(doc.string_style(style), path, value)?;
+                doc = doc.string_style(style).set(path, value)?;
             }
             EditOp::Remove { path } => {
-                doc = HjsonDocumentObjectEdit::remove(doc, path)?;
+                doc = doc.remove(path)?;
             }
             EditOp::CommentSet { path, text } => {
-                doc = HjsonDocumentCommentEdit::set(doc, path, text)?;
+                doc = doc.set_comment(path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
                 // getとsetを使ってappendを実装
-                let existing = HjsonDocumentCommentEdit::get(&doc, path.clone())?;
+                let existing = doc.get_comment(path.clone())?;
                 let new_comment = match existing {
                     Some(existing) => format!("{}\n{}", existing, text),
                     None => text,
                 };
-                doc = HjsonDocumentCommentEdit::set(doc, path, new_comment)?;
+                doc = doc.set_comment(path, new_comment)?;
             }
             EditOp::CommentRemove { path } => {
-                doc = HjsonDocumentCommentEdit::remove(doc, path)?;
+                doc = doc.remove_comment(path)?;
             }
         }
     }

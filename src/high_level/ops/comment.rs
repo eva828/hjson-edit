@@ -22,21 +22,21 @@ pub enum CommentStyle {
 }
 
 pub trait HjsonDocumentCommentEdit {
-    fn get(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;
-    fn set(
+    fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;
+    fn set_comment(
         self,
         path: HjsonCommentPath,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError>
+    fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
 
 impl HjsonDocumentCommentEdit for HjsonDocument {
-    fn get(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError> {
+    fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError> {
         Ok(match path {
             HjsonCommentPath::Header => extract_document_comment(self, true),
             HjsonCommentPath::Footer => extract_document_comment(self, false),
@@ -60,7 +60,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
         })
     }
 
-    fn set(
+    fn set_comment(
         mut self,
         path: HjsonCommentPath,
         comment: impl Into<String>,
@@ -117,7 +117,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
         }
     }
 
-    fn remove(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
+    fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
         self.remove_comment_by_path(path)
     }
 }
