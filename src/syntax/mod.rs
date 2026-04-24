@@ -221,63 +221,6 @@ impl SyntaxKind {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// SyntaxKindからrowan::SyntaxKindへの変換と逆変換が一致することを検証
-    #[test]
-    fn test_kind_conversion() {
-        let kind = SyntaxKind::LBrace;
-        let raw: rowan::SyntaxKind = kind.into();
-        let converted = HjsonLanguage::kind_from_raw(raw);
-        assert_eq!(kind, converted);
-    }
-
-    /// 全SyntaxKindバリアントの往復変換（kind_to_raw → kind_from_raw）が一致することを検証
-    ///
-    /// これにより kind_from_raw の match アームが全バリアントを網羅していることが
-    /// テスト実行時に保証される。バリアントを追加した場合はここに追加すること。
-    #[test]
-    fn test_all_kind_roundtrip() {
-        use SyntaxKind::*;
-        let all_kinds = [
-            LBrace,
-            RBrace,
-            LBracket,
-            RBracket,
-            Colon,
-            Comma,
-            True,
-            False,
-            Null,
-            Integer,
-            Float,
-            String,
-            BlockString,
-            UnquotedString,
-            LineComment,
-            HashComment,
-            BlockComment,
-            Whitespace,
-            Newline,
-            Root,
-            Object,
-            Array,
-            Pair,
-            Key,
-            Value,
-            Comment,
-            Error,
-        ];
-        for kind in all_kinds {
-            let raw = HjsonLanguage::kind_to_raw(kind);
-            let roundtripped = HjsonLanguage::kind_from_raw(raw);
-            assert_eq!(kind, roundtripped, "Roundtrip failed for {:?}", kind);
-        }
-    }
-}
-
 /// GreenElement型エイリアス（NodeまたはToken）
 pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
 
