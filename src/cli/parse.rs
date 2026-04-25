@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use hjson_edit::{
-    ast::{CommentKind, Document, DocumentItem, QuoteStyle, ScalarValue, Trivia, ValueContent},
+    ast::{
+        ArrayItem, CommentKind, DelimiterStyle, Document, DocumentItem, QuoteStyle, ScalarValue,
+        Trivia, ValueContent,
+    },
     high_level::HjsonDocument,
     RedNode, RedToken, SyntaxKind,
 };
@@ -340,10 +343,9 @@ impl AstTreeViewBuilder {
     }
 
     fn dump_object(&mut self, object: &hjson_edit::ast::Object, is_last: bool) -> Result<()> {
-        let label = if object.braced {
-            "Object".to_string()
-        } else {
-            "Object (braceless)".to_string()
+        let label = match object.delimiter_style {
+            DelimiterStyle::Braced => "Object".to_string(),
+            DelimiterStyle::Braceless => "Object (braceless)".to_string(),
         };
         self.begin_node(label, 36, false, is_last)?;
 
@@ -380,10 +382,9 @@ impl AstTreeViewBuilder {
     }
 
     fn dump_array(&mut self, array: &hjson_edit::ast::Array, is_last: bool) -> Result<()> {
-        let label = if array.braced {
-            "Array".to_string()
-        } else {
-            "Array (braceless)".to_string()
+        let label = match array.delimiter_style {
+            DelimiterStyle::Braced => "Array".to_string(),
+            DelimiterStyle::Braceless => "Array (braceless)".to_string(),
         };
         self.begin_node(label, 35, false, is_last)?;
 
@@ -403,7 +404,7 @@ impl AstTreeViewBuilder {
         }
 
         for item in &items {
-            self.dump_value(item, index == child_count - 1)?;
+            self.dump_array_item(item, index == child_count - 1)?;
             index += 1;
         }
 
@@ -411,6 +412,39 @@ impl AstTreeViewBuilder {
             self.dump_trivia_group(
                 "TrailingTrivia",
                 &array.trailing_trivia,
+                index == child_count - 1,
+            )?;
+        }
+
+        self.end_node(false);
+        Ok(())
+    }
+
+    fn dump_array_item(&mut self, item: &ArrayItem, is_last: bool) -> Result<()> {
+        self.begin_node("ArrayItem", 93, false, is_last)?;
+
+        let value = item.value()?;
+        let show_leading = self.show_trivia && !item.leading_trivia.is_empty();
+        let show_trailing = self.show_trivia && !item.trailing_trivia.is_empty();
+        let child_count = show_leading as usize + 1 + show_trailing as usize;
+        let mut index = 0;
+
+        if show_leading {
+            self.dump_trivia_group(
+                "LeadingTrivia",
+                &item.leading_trivia,
+                index == child_count - 1,
+            )?;
+            index += 1;
+        }
+
+        self.dump_value(&value, index == child_count - 1)?;
+        index += 1;
+
+        if show_trailing {
+            self.dump_trivia_group(
+                "TrailingTrivia",
+                &item.trailing_trivia,
                 index == child_count - 1,
             )?;
         }
@@ -497,30 +531,7 @@ impl AstTreeViewBuilder {
         self.begin_node("Value", 36, false, is_last)?;
 
         let content = value.content()?;
-        let show_leading = self.show_trivia && !value.leading_trivia.is_empty();
-        let show_trailing = self.show_trivia && !value.trailing_trivia.is_empty();
-        let child_count = show_leading as usize + 1 + show_trailing as usize;
-        let mut index = 0;
-
-        if show_leading {
-            self.dump_trivia_group(
-                "LeadingTrivia",
-                &value.leading_trivia,
-                index == child_count - 1,
-            )?;
-            index += 1;
-        }
-
-        self.dump_value_content(&content, index == child_count - 1)?;
-        index += 1;
-
-        if show_trailing {
-            self.dump_trivia_group(
-                "TrailingTrivia",
-                &value.trailing_trivia,
-                index == child_count - 1,
-            )?;
-        }
+        self.dump_value_content(&content, true)?;
 
         self.end_node(false);
         Ok(())
@@ -619,7 +630,7 @@ impl SyntaxKindDebugExt for SyntaxKind {
             | SyntaxKind::Root
             | SyntaxKind::Object
             | SyntaxKind::Array
-            | SyntaxKind::Pair
+            | SyntaxKind::Member
             | _ => 37,
         }
     }

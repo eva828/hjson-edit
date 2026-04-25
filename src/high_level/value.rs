@@ -112,7 +112,7 @@ impl HjsonValue {
                 builder.start_node(SyntaxKind::Object.into());
                 builder.token(SyntaxKind::LBrace.into(), "{");
                 for (idx, (key, item)) in entries.iter().enumerate() {
-                    push_node(&mut builder, &item.render_pair(key, None, string_style));
+                    push_node(&mut builder, &item.render_member(key, None, string_style));
                     if idx + 1 != entries.len() {
                         builder.token(SyntaxKind::Comma.into(), ",");
                     }
@@ -179,7 +179,7 @@ impl HjsonValue {
                         builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
                         push_node(
                             &mut builder,
-                            &item.render_pair_pretty(key, None, string_style, depth + 1, newline),
+                            &item.render_member_pretty(key, None, string_style, depth + 1, newline),
                         );
                         if idx + 1 != entries.len() {
                             builder.token(SyntaxKind::Newline.into(), newline);
@@ -198,14 +198,14 @@ impl HjsonValue {
         }
     }
 
-    pub fn render_pair(
+    pub fn render_member(
         &self,
         key: &str,
         key_style: Option<QuoteStyle>,
         string_style: Option<QuoteStyle>,
     ) -> GreenNode {
         let mut builder = GreenNodeBuilder::new();
-        builder.start_node(SyntaxKind::Pair.into());
+        builder.start_node(SyntaxKind::Member.into());
         builder.start_node(SyntaxKind::Key.into());
         let (key_kind, key_text) = render_string(
             key,
@@ -226,7 +226,7 @@ impl HjsonValue {
         builder.finish()
     }
 
-    pub fn render_pair_pretty(
+    pub fn render_member_pretty(
         &self,
         key: &str,
         key_style: Option<QuoteStyle>,
@@ -235,7 +235,7 @@ impl HjsonValue {
         newline: &str,
     ) -> GreenNode {
         let mut builder = GreenNodeBuilder::new();
-        builder.start_node(SyntaxKind::Pair.into());
+        builder.start_node(SyntaxKind::Member.into());
         builder.start_node(SyntaxKind::Key.into());
         let (key_kind, key_text) = render_string(
             key,

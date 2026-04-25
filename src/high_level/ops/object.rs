@@ -301,7 +301,7 @@ fn set_object_child(
         PathSegment::Object(ObjectPathSegment::Key(key)) => key,
         _ => {
             return Err(HjsonEditError::UnexpectedStructure {
-                expected: SyntaxKind::Pair,
+                expected: SyntaxKind::Member,
                 found: SyntaxKind::Object,
             })
         }
@@ -313,26 +313,26 @@ fn set_object_child(
         (StringStyle::Preserve, None) => None,
         _ => Some(resolve_quote_style(string_style, detected)),
     };
-    if let Some(pair) = object_ast
+    if let Some(member) = object_ast
         .members()
         .into_iter()
-        .find(|member| member.pair_key().as_deref() == Some(key.as_str()))
+        .find(|member| member.member_key().as_deref() == Some(key.as_str()))
     {
-        let pair_node = pair.syntax().clone();
-        let updated = replace_pair_value(&pair_node, value, string_style)?;
+        let member_node = member.syntax().clone();
+        let updated = replace_member_value(&member_node, value, string_style)?;
         return Ok(parent
             .green()
-            .splice_children(pair_node.index()..pair_node.index() + 1, vec![updated.into()]));
+            .splice_children(member_node.index()..member_node.index() + 1, vec![updated.into()]));
     }
 
     let insert_pos = object_ast.append_member_index();
     let mut inserted = Vec::new();
     let indent = "  ".repeat(object_ast.layout.depth + 1);
     let newline = parent.detect_newline().as_str().to_string();
-    let rendered_pair = if pretty_nested {
-        value.render_pair_pretty(key, None, insert_style, object_ast.layout.depth, &newline)
+    let rendered_member = if pretty_nested {
+        value.render_member_pretty(key, None, insert_style, object_ast.layout.depth, &newline)
     } else {
-        value.render_pair(key, None, insert_style)
+        value.render_member(key, None, insert_style)
     };
 
     if object_ast.members().is_empty() {
@@ -347,7 +347,7 @@ fn set_object_child(
             insert_pos
         };
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        inserted.push(rendered_pair.into());
+        inserted.push(rendered_member.into());
         inserted.push(SyntaxKind::Newline.create_token(&newline).into());
         if object_ast.layout.depth > 0 {
             inserted.push(SyntaxKind::Whitespace.create_token(&"  ".repeat(object_ast.layout.depth)).into());
@@ -358,7 +358,7 @@ fn set_object_child(
     if pretty_nested {
         inserted.push(SyntaxKind::Newline.create_token(&newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        inserted.push(rendered_pair.into());
+        inserted.push(rendered_member.into());
         inserted.push(SyntaxKind::Newline.create_token(&newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
@@ -374,7 +374,7 @@ fn set_object_child(
         }
     }
 
-    inserted.push(rendered_pair.into());
+    inserted.push(rendered_member.into());
 
     Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
 }
@@ -546,35 +546,35 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
 
     let object_ast = AstObject::cast(parent.clone())?;
     let members = object_ast.members();
-    let pair_pos = members
+    let member_pos = members
         .iter()
-        .position(|member| member.pair_key().as_deref() == Some(key.as_str()));
+        .position(|member| member.member_key().as_deref() == Some(key.as_str()));
 
-    let Some(pair_pos) = pair_pos else {
+    let Some(member_pos) = member_pos else {
         return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
             last.clone(),
         ])));
     };
 
-    let pair = &members[pair_pos];
-    let mut range = pair.removal_range();
+    let member = &members[member_pos];
+    let mut range = member.removal_range();
     let mut replacement = Vec::new();
 
-    if pair_pos + 1 == members.len() {
-        if pair_pos > 0
+    if member_pos + 1 == members.len() {
+        if member_pos > 0
             && matches!(
-                members[pair_pos - 1].trailing_trivia.first(),
+                members[member_pos - 1].trailing_trivia.first(),
                 Some(Trivia::Comma(_))
             )
         {
-            range.start = members[pair_pos - 1].post_node_index();
+            range.start = members[member_pos - 1].post_node_index();
         }
 
-        let prefix_len = pair
+        let prefix_len = member
             .trivia_boundary
             .leading_protected_prefix_len
-            .min(pair.leading_trivia.len());
-        replacement.extend(ast_edit::render_trivia(&pair.leading_trivia[..prefix_len]));
+            .min(member.leading_trivia.len());
+        replacement.extend(ast_edit::render_trivia(&member.leading_trivia[..prefix_len]));
     }
 
     Ok(parent.green().splice_children(range, replacement))
@@ -680,18 +680,18 @@ fn render_value_like_node(
     value.render_value(Some(quote_style))
 }
 
-fn replace_pair_value(
-    pair: &RedNode,
+fn replace_member_value(
+    member: &RedNode,
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> Result<GreenNode, HjsonEditError> {
-    let value_child = pair
+    let value_child = member
         .children()
         .find(|child| child.kind() == SyntaxKind::Value)
         .ok_or(HjsonEditError::ParentNotFound)?;
     let updated_value = render_value_like_node(&value_child, value, string_style);
 
-    Ok(pair.green().splice_children(
+    Ok(member.green().splice_children(
         value_child.index()..value_child.index() + 1,
         vec![updated_value.into()],
     ))

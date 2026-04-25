@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use hjson_edit::{
-    ast::Trivia,
+    ast::{DelimiterStyle, Trivia},
     high_level::{
         ops::{
             comment::{CommentStyle, HjsonDocumentCommentEdit},
@@ -280,4 +280,15 @@ fn braceless_root_single_line_indent_is_not_document_leading_trivia() {
         members.first().and_then(|member| member.leading_trivia.first()),
         Some(Trivia::Whitespace(indent)) if indent == "    "
     ));
+}
+
+#[test]
+fn braceless_root_object_uses_braceless_delimiter_style() {
+    let input = "name: app\nport: 8080\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let ast = doc.ast().unwrap();
+    let object = ast.object().unwrap();
+
+    assert_eq!(object.delimiter_style, DelimiterStyle::Braceless);
 }

@@ -38,7 +38,7 @@ pub fn detected_string_style_of_node(node: &RedNode) -> Option<QuoteStyle> {
         SyntaxKind::Value => Value::cast(node.clone())
             .ok()
             .and_then(|value| value.quote_style()),
-        SyntaxKind::Pair => Member::cast(node.clone())
+        SyntaxKind::Member => Member::cast(node.clone())
             .ok()
             .and_then(|member| member.detected_string_style()),
         _ => None,

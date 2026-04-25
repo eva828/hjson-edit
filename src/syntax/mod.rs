@@ -51,7 +51,7 @@ pub enum SyntaxKind {
     // 値
     Object,
     Array,
-    Pair, // キー: 値
+    Member, // キー: 値
     Key,
     Value,
 
@@ -105,7 +105,7 @@ impl Language for HjsonLanguage {
             19 => SyntaxKind::Root,
             20 => SyntaxKind::Object,
             21 => SyntaxKind::Array,
-            22 => SyntaxKind::Pair,
+            22 => SyntaxKind::Member,
             23 => SyntaxKind::Key,
             24 => SyntaxKind::Value,
             25 => SyntaxKind::Comment,
@@ -201,7 +201,7 @@ impl SyntaxKind {
         use SyntaxKind::*;
         matches!(
             self,
-            Root | Object | Array | Pair | Key | Value | Comment | Error
+            Root | Object | Array | Member | Key | Value | Comment | Error
         )
     }
 

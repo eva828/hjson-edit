@@ -12,7 +12,7 @@ pub trait RedNodeExt {
     fn document_start_node(&self) -> RedNode;
     fn container_depth(&self) -> usize;
     fn extract_key(&self) -> Option<String>;
-    fn pair_key(&self) -> Option<String>;
+    fn member_key(&self) -> Option<String>;
     fn node_to_value(&self) -> Result<HjsonValue, HjsonEditError>;
     fn to_hjson_value(&self) -> Result<HjsonValue, HjsonEditError> {
         self.node_to_value()
@@ -35,13 +35,13 @@ impl RedNodeExt for RedNode {
 
         match segment {
             PathSegment::Object(segment) if self.kind() == SyntaxKind::Object => self
-                .children_by_kind(SyntaxKind::Pair)
-                .find(|pair| {
-                    pair.children_by_kind(SyntaxKind::Key)
+                .children_by_kind(SyntaxKind::Member)
+                .find(|member| {
+                    member.children_by_kind(SyntaxKind::Key)
                         .find_map(|key| key.extract_key())
                         .is_some_and(|key| segment.match_key(&key))
                 })
-                .and_then(|pair| pair.children_by_kind(SyntaxKind::Value).next()),
+                .and_then(|member| member.children_by_kind(SyntaxKind::Value).next()),
             PathSegment::Array(segment) if self.kind() == SyntaxKind::Array => {
                 let mut values = self.children_by_kind(SyntaxKind::Value);
                 match segment {
@@ -64,9 +64,9 @@ impl RedNodeExt for RedNode {
 
         while let Some(parent) = current.parent() {
             match parent.kind() {
-                SyntaxKind::Pair => {
+                SyntaxKind::Member => {
                     segments.push(PathSegment::Object(ObjectPathSegment::Key(
-                        parent.pair_key().unwrap_or_default(),
+                        parent.member_key().unwrap_or_default(),
                     )));
                 }
                 SyntaxKind::Array => {
@@ -123,7 +123,7 @@ impl RedNodeExt for RedNode {
         })
     }
 
-    fn pair_key(&self) -> Option<String> {
+    fn member_key(&self) -> Option<String> {
         self.children_by_kind(SyntaxKind::Key)
             .find_map(|key| key.extract_key())
     }
@@ -186,16 +186,16 @@ impl RedNodeExt for RedNode {
                 }),
             SyntaxKind::Object => {
                 let mut entries = Vec::new();
-                for pair in self
+                for member in self
                     .children()
-                    .filter(|child| child.kind() == SyntaxKind::Pair)
+                    .filter(|child| child.kind() == SyntaxKind::Member)
                 {
-                    let key = pair
+                    let key = member
                         .children()
                         .find(|child| child.kind() == SyntaxKind::Key)
                         .and_then(|key| key.extract_key())
                         .ok_or(HjsonEditError::ParentNotFound)?;
-                    let value = pair
+                    let value = member
                         .children()
                         .find(|child| child.kind() == SyntaxKind::Value)
                         .ok_or(HjsonEditError::ParentNotFound)?;

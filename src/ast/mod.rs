@@ -190,10 +190,16 @@ pub struct Object {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
-    pub braced: bool,
+    pub delimiter_style: DelimiterStyle,
     pub layout: Layout,
     pub empty_body_insert_index: usize,
     pub body_end_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelimiterStyle {
+    Braced,
+    Braceless,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -201,7 +207,7 @@ pub struct Array {
     syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
-    pub braced: bool,
+    pub delimiter_style: DelimiterStyle,
     pub layout: Layout,
     pub empty_body_insert_index: usize,
     pub body_end_index: usize,
@@ -232,13 +238,17 @@ pub struct Key {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Value {
     syntax: RedNode,
+    pub layout: Layout,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrayItem {
+    syntax: RedNode,
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
     pub trivia_boundary: TriviaBoundary,
 }
-
-pub type Pair = Member;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocumentItem {
@@ -378,19 +388,16 @@ impl AstNode for Object {
         );
         let is_root_child = matches!(node.parent().map(|parent| parent.kind()), Some(SyntaxKind::Root));
         let layout = collect_layout(&node, owns_trivia);
-        let braced = matches!(
-            node.children().next().map(|child| child.kind()),
-            Some(SyntaxKind::LBrace)
-        );
+        let delimiter_style = detect_delimiter_style(&node, SyntaxKind::LBrace);
         let leading_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_leading_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::LBrace))
+            collect_container_leading_trivia(&node, SyntaxKind::Member, SyntaxKind::LBrace, SyntaxKind::RBrace)
         };
         let trailing_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_trailing_trivia(&node, SyntaxKind::Object, Some(SyntaxKind::RBrace))
+            collect_container_trailing_trivia(&node, SyntaxKind::Member, SyntaxKind::LBrace, SyntaxKind::RBrace)
         };
         let empty_body_insert_index = node
             .children_with_tokens()
@@ -402,7 +409,7 @@ impl AstNode for Object {
             syntax: node.clone(),
             leading_trivia,
             trailing_trivia,
-            braced,
+            delimiter_style,
             layout,
             empty_body_insert_index,
             body_end_index,
@@ -418,7 +425,7 @@ impl Object {
     pub fn members(&self) -> Vec<Member> {
         self.syntax
             .children()
-            .filter(|child| child.kind() == SyntaxKind::Pair)
+            .filter(|child| child.kind() == SyntaxKind::Member)
             .filter_map(|child| Member::cast(child).ok())
             .collect()
     }
@@ -442,7 +449,7 @@ impl Object {
     pub fn member_by_key(&self, key: &str) -> Option<Member> {
         self.members()
             .into_iter()
-            .find(|member| member.pair_key().as_deref() == Some(key))
+            .find(|member| member.member_key().as_deref() == Some(key))
     }
 
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
@@ -471,19 +478,16 @@ impl AstNode for Array {
         );
         let is_root_child = matches!(node.parent().map(|parent| parent.kind()), Some(SyntaxKind::Root));
         let layout = collect_layout(&node, owns_trivia);
-        let braced = matches!(
-            node.children().next().map(|child| child.kind()),
-            Some(SyntaxKind::LBracket)
-        );
+        let delimiter_style = detect_delimiter_style(&node, SyntaxKind::LBracket);
         let leading_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_leading_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::LBracket))
+            collect_container_leading_trivia(&node, SyntaxKind::Value, SyntaxKind::LBracket, SyntaxKind::RBracket)
         };
         let trailing_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_trailing_trivia(&node, SyntaxKind::Array, Some(SyntaxKind::RBracket))
+            collect_container_trailing_trivia(&node, SyntaxKind::Value, SyntaxKind::LBracket, SyntaxKind::RBracket)
         };
         let empty_body_insert_index = node
             .children_with_tokens()
@@ -495,7 +499,7 @@ impl AstNode for Array {
             syntax: node.clone(),
             leading_trivia,
             trailing_trivia,
-            braced,
+            delimiter_style,
             layout,
             empty_body_insert_index,
             body_end_index,
@@ -508,11 +512,18 @@ impl AstNode for Array {
 }
 
 impl Array {
-    pub fn items(&self) -> Vec<Value> {
+    pub fn items(&self) -> Vec<ArrayItem> {
         self.syntax
             .children()
             .filter(|child| child.kind() == SyntaxKind::Value)
-            .filter_map(|child| Value::cast(child).ok())
+            .filter_map(|child| ArrayItem::cast(child).ok())
+            .collect()
+    }
+
+    pub fn values(&self) -> Vec<Value> {
+        self.items()
+            .into_iter()
+            .filter_map(|item| item.value().ok())
             .collect()
     }
 
@@ -533,7 +544,7 @@ impl Array {
     }
 
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
-        self.items()
+        self.values()
             .into_iter()
             .find_map(|item| item.detected_string_style())
     }
@@ -541,13 +552,13 @@ impl Array {
 
 impl AstNode for Member {
     fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::Pair
+        kind == SyntaxKind::Member
     }
 
     fn cast(node: RedNode) -> Result<Self, HjsonEditError> {
         if !Self::can_cast(node.kind()) {
             return Err(HjsonEditError::UnexpectedStructure {
-                expected: SyntaxKind::Pair,
+                expected: SyntaxKind::Member,
                 found: node.kind(),
             });
         }
@@ -593,7 +604,7 @@ impl Member {
             .and_then(|child| Value::cast(child).ok())
     }
 
-    pub fn pair_key(&self) -> Option<String> {
+    pub fn member_key(&self) -> Option<String> {
         self.key().and_then(|key| key.body_text())
     }
 
@@ -748,30 +759,10 @@ impl AstNode for Value {
             Some(SyntaxKind::Root)
         );
         let layout = collect_layout(&node, owns_trivia);
-        let parent_kind = node.parent().map(|parent| parent.kind());
-        let owns_value_trivia = matches!(parent_kind, Some(SyntaxKind::Array));
-        let leading_trivia = if owns_value_trivia {
-            collect_leading_trivia(&node, true)
-        } else {
-            Vec::new()
-        };
-        let trailing_trivia = if owns_value_trivia {
-            collect_trailing_trivia(&node, true)
-        } else {
-            Vec::new()
-        };
-        let trivia_boundary = TriviaBoundary {
-            leading_protected_prefix_len: 0,
-            trailing_protected_suffix_len: collect_trivia_boundary(&trailing_trivia)
-                .trailing_protected_suffix_len,
-        };
 
         Ok(Self {
             syntax: node.clone(),
-            leading_trivia,
-            trailing_trivia,
             layout,
-            trivia_boundary,
         })
     }
 
@@ -853,6 +844,60 @@ impl Value {
             ValueContent::Scalar(_) => None,
         }
     }
+}
+
+impl AstNode for ArrayItem {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::Value
+    }
+
+    fn cast(node: RedNode) -> Result<Self, HjsonEditError> {
+        if !Self::can_cast(node.kind()) {
+            return Err(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Value,
+                found: node.kind(),
+            });
+        }
+
+        let parent_kind = node.parent().map(|parent| parent.kind());
+        if !matches!(parent_kind, Some(SyntaxKind::Array)) {
+            return Err(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Array,
+                found: parent_kind.unwrap_or(SyntaxKind::Root),
+            });
+        }
+
+        let layout = collect_layout(&node, true);
+        let leading_trivia = collect_leading_trivia(&node, true);
+        let trailing_trivia = collect_trailing_trivia(&node, true);
+        let trivia_boundary = TriviaBoundary {
+            leading_protected_prefix_len: 0,
+            trailing_protected_suffix_len: collect_trivia_boundary(&trailing_trivia)
+                .trailing_protected_suffix_len,
+        };
+
+        Ok(Self {
+            syntax: node,
+            leading_trivia,
+            trailing_trivia,
+            layout,
+            trivia_boundary,
+        })
+    }
+
+    fn syntax(&self) -> &RedNode {
+        &self.syntax
+    }
+}
+
+impl ArrayItem {
+    pub fn value(&self) -> Result<Value, HjsonEditError> {
+        Value::cast(self.syntax.clone())
+    }
+
+    pub fn detected_string_style(&self) -> Option<QuoteStyle> {
+        self.value().ok()?.detected_string_style()
+    }
 
     pub fn removal_range(&self) -> Range<usize> {
         let owned_leading_len = self
@@ -926,62 +971,80 @@ fn collect_comment_trivia(node: &RedNode) -> Option<CommentTrivia> {
 
 fn collect_container_leading_trivia(
     node: &RedNode,
-    structural_kind: SyntaxKind,
-    opening: Option<SyntaxKind>,
+    item_kind: SyntaxKind,
+    opening_token_kind: SyntaxKind,
+    closing_token_kind: SyntaxKind,
 ) -> Vec<Trivia> {
     let children = node.children_with_tokens().collect::<Vec<_>>();
-    let start = opening
-        .and_then(|kind| {
-            children
-                .iter()
-                .position(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == kind))
-        })
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
+    let open_index = children
+        .iter()
+        .position(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == opening_token_kind));
 
-    let mut trivia = Vec::new();
-    for elem in children.iter().skip(start) {
-        match elem {
-            NodeOrToken::Node(node) if node.kind() == structural_kind => break,
-            _ => {
-                if let Some(item) = trivia_from_element(elem) {
-                    trivia.push(item);
-                }
-            }
-        }
-    }
+    let start = open_index.map_or(0, |idx| idx + 1);
+    let end = children
+        .iter()
+        .rposition(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == closing_token_kind))
+        .unwrap_or(children.len());
 
-    trivia
+    let first_item_index = children[start..end]
+        .iter()
+        .position(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == item_kind))
+        .map(|relative| start + relative);
+
+    let leading_end = first_item_index.unwrap_or(end);
+    collect_trivia_slice(&children[start..leading_end])
 }
 
 fn collect_container_trailing_trivia(
     node: &RedNode,
-    structural_kind: SyntaxKind,
-    closing: Option<SyntaxKind>,
+    item_kind: SyntaxKind,
+    opening_token_kind: SyntaxKind,
+    closing_token_kind: SyntaxKind,
 ) -> Vec<Trivia> {
     let children = node.children_with_tokens().collect::<Vec<_>>();
-    let end = closing
-        .and_then(|kind| {
-            children
-                .iter()
-                .rposition(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == kind))
-        })
-        .unwrap_or(children.len());
-
     let start = children
         .iter()
-        .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == structural_kind))
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
+        .position(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == opening_token_kind))
+        .map_or(0, |idx| idx + 1);
+    let end = children
+        .iter()
+        .rposition(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == closing_token_kind))
+        .unwrap_or(children.len());
 
+    let last_item_index = children[start..end]
+        .iter()
+        .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == item_kind))
+        .map(|relative| start + relative);
+
+    let trailing_start = last_item_index.map_or(start, |idx| idx + 1);
+    collect_trivia_slice(&children[trailing_start..end])
+}
+
+fn collect_trivia_slice(slice: &[NodeOrToken<RedNode, RedToken>]) -> Vec<Trivia> {
     let mut trivia = Vec::new();
-    for elem in children.iter().skip(start).take(end.saturating_sub(start)) {
+    for elem in slice {
         if let Some(item) = trivia_from_element(elem) {
             trivia.push(item);
         }
     }
-
     trivia
+}
+
+fn detect_delimiter_style(node: &RedNode, opening_token_kind: SyntaxKind) -> DelimiterStyle {
+    let is_braced = node
+        .children_with_tokens()
+        .find_map(|elem| match elem {
+            NodeOrToken::Token(token) if token.kind().is_trivia() => None,
+            NodeOrToken::Token(token) => Some(token.kind() == opening_token_kind),
+            NodeOrToken::Node(_) => Some(false),
+        })
+        .unwrap_or(false);
+
+    if is_braced {
+        DelimiterStyle::Braced
+    } else {
+        DelimiterStyle::Braceless
+    }
 }
 
 fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
@@ -1008,7 +1071,7 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
         let Some(item) = trivia_from_element(elem) else {
             trivia.clear();
             saw_boundary_newline = false;
-            prev_has_trailing = matches!(elem.kind(), SyntaxKind::Pair | SyntaxKind::Value);
+            prev_has_trailing = matches!(elem.kind(), SyntaxKind::Member | SyntaxKind::Value);
             continue;
         };
 

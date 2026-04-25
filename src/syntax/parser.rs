@@ -536,16 +536,16 @@ impl Parser {
             }
 
             // トリビアがあっても at() はトリビアをスキップして確認するため、
-            // ここでは parse_pair の直前に先行するトリビアを消費しておく。
+            // ここでは parse_member の直前に先行するトリビアを消費しておく。
             if self.at(SyntaxKind::RBrace) || self.is_at_end() {
                 break;
             }
 
-            // consume trivia so it becomes sibling tokens of the upcoming Pair
+            // consume trivia so it becomes sibling tokens of the upcoming Member
             self.eat_trivia();
-            let value_boundary = self.parse_pair();
+            let value_boundary = self.parse_member();
 
-            // Pairの後のトリビアを消費（コメントなど）
+            // Memberの後のトリビアを消費（コメントなど）
             let had_newline = self.eat_trivia_and_report_newline();
 
             // 閉じ値の後は同一行でも次の member を許可する
@@ -717,9 +717,9 @@ impl Parser {
     }
 
     /// キー: 値 のペアを解析
-    fn parse_pair(&mut self) -> ValueBoundary {
-        self.builder.start_node(SyntaxKind::Pair.into());
-        // Pairノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
+    fn parse_member(&mut self) -> ValueBoundary {
+        self.builder.start_node(SyntaxKind::Member.into());
+        // Memberノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
         // キー
         self.builder.start_node(SyntaxKind::Key.into());
@@ -876,9 +876,9 @@ impl Parser {
                 break;
             }
 
-            // Pairが先行トリビアを吸収しないように、トリビアを消費する
+            // Memberが先行トリビアを吸収しないように、トリビアを消費する
             self.eat_trivia();
-            let value_boundary = self.parse_pair();
+            let value_boundary = self.parse_member();
 
             let had_separator_newline = self.eat_trivia_and_report_newline();
             if self.at(SyntaxKind::Comma) {
