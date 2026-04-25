@@ -584,27 +584,9 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
     };
 
     let member = &members[member_pos];
-    let mut range = member.removal_range();
-    let mut replacement = Vec::new();
-
-    if member_pos + 1 == members.len() {
-        if member_pos > 0
-            && matches!(
-                members[member_pos - 1].trailing_trivia.first(),
-                Some(Trivia::Comma(_))
-            )
-        {
-            range.start = members[member_pos - 1].post_node_index();
-        }
-
-        let prefix_len = member
-            .trivia_boundary
-            .leading_protected_prefix_len
-            .min(member.leading_trivia.len());
-        replacement.extend(ast_edit::render_trivia(&member.leading_trivia[..prefix_len]));
-    }
-
-    Ok(parent.green().splice_children(range, replacement))
+    Ok(parent
+        .green()
+        .splice_children(member.removal_range(), Vec::new()))
 }
 
 fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -627,27 +609,9 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         .get(idx)
         .ok_or_else(|| HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![last.clone()])))?;
 
-    let mut range = item.removal_range();
-    let mut replacement = Vec::new();
-
-    if idx + 1 == items.len() {
-        if idx > 0
-            && matches!(
-                items[idx - 1].trailing_trivia.first(),
-                Some(Trivia::Comma(_))
-            )
-        {
-            range.start = items[idx - 1].post_node_index();
-        }
-
-        let prefix_len = item
-            .trivia_boundary
-            .leading_protected_prefix_len
-            .min(item.leading_trivia.len());
-        replacement.extend(ast_edit::render_trivia(&item.leading_trivia[..prefix_len]));
-    }
-
-    Ok(parent.green().splice_children(range, replacement))
+    Ok(parent
+        .green()
+        .splice_children(item.removal_range(), Vec::new()))
 }
 
 fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {

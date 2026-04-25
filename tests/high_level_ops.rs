@@ -76,13 +76,13 @@ fn set_adds_nested_object_member() {
 #[test]
 fn remove_object_and_array_members() {
     let object_input = "{\n  server: { host: localhost, port: 8080 }\n}\n";
-    let object_expected = "{\n  server: { host: localhost }\n}\n";
+    let object_expected = "{\n  server: { host: localhost, }\n}\n";
     let object_doc = HjsonDocument::parse(object_input).unwrap();
     let object_updated = object_doc.remove("server.port").unwrap();
     assert_eq!(object_updated.to_string(), object_expected);
 
     let array_input = "{\n  items: [1, 2, 3]\n}\n";
-    let array_expected = "{\n  items: [1, 2]\n}\n";
+    let array_expected = "{\n  items: [1, 2,]\n}\n";
     let array_doc = HjsonDocument::parse(array_input).unwrap();
     let array_updated = array_doc.remove("items[-]").unwrap();
     assert_eq!(array_updated.to_string(), array_expected);
@@ -236,9 +236,9 @@ fn set_existing_key_preserves_comments() {
 }
 
 #[test]
-fn remove_last_item_drops_previous_comma() {
+fn remove_last_item_preserves_previous_comma() {
     let input = "{\n  keep: 1,\n  remove: 2\n}\n";
-    let expected = "{\n  keep: 1\n}\n";
+    let expected = "{\n  keep: 1,\n\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.remove("remove").unwrap();
