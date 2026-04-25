@@ -26,6 +26,13 @@ pub enum StringStyle {
     Unquoted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AppendMode {
+    #[default]
+    BeforeFooter,
+    AfterComments,
+}
+
 pub trait HjsonDocumentObjectEdit {
     fn get(&self, path: impl AsRef<str>) -> Result<HjsonValue, HjsonEditError>;
     fn set(
@@ -57,6 +64,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         path: impl AsRef<str>,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError> {
+        let append_mode = self.current_append_mode();
         let path_str = path.as_ref().to_string();
         let path = HjsonObjectPath::parse(path_str.clone())?;
         let value = value.into();
@@ -72,7 +80,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         let updated = if path.depth() == 0 {
             replace_root_value(&root, &value, string_style)?
         } else {
-            rebuild_tree_with_set(root.clone(), &path, &value, string_style)?
+            rebuild_tree_with_set(root.clone(), &path, &value, string_style, append_mode)?
         };
 
         Ok(finish_document(self, updated))
@@ -112,6 +120,7 @@ pub(crate) fn rebuild_tree_with_set(
     path: &HjsonObjectPath,
     value: &HjsonValue,
     string_style: StringStyle,
+    append_mode: AppendMode,
 ) -> Result<GreenNode, HjsonEditError> {
     let (parent_path, last) = path
         .split_last()
@@ -119,10 +128,10 @@ pub(crate) fn rebuild_tree_with_set(
     match resolve_parent(root.clone(), &parent_path) {
         Ok(parent) => {
             let new_parent = match parent.kind() {
-            SyntaxKind::Root => set_root_child(&parent, &last, value, string_style, false)?,
-            SyntaxKind::Object => set_object_child(&parent, &last, value, string_style, false)?,
-            SyntaxKind::Array => set_array_child(&parent, &last, value, string_style, false)?,
-            SyntaxKind::Value => set_value_child(&parent, &last, value, string_style, false)?,
+            SyntaxKind::Root => set_root_child(&parent, &last, value, string_style, append_mode, false)?,
+            SyntaxKind::Object => set_object_child(&parent, &last, value, string_style, append_mode, false)?,
+            SyntaxKind::Array => set_array_child(&parent, &last, value, string_style, append_mode, false)?,
+            SyntaxKind::Value => set_value_child(&parent, &last, value, string_style, append_mode, false)?,
                 _ => {
                     return Err(HjsonEditError::UnexpectedStructure {
                         expected: SyntaxKind::Object,
@@ -152,6 +161,7 @@ pub(crate) fn rebuild_tree_with_set(
                         missing,
                         &nested_value,
                         string_style,
+                        append_mode,
                         !path.segments()[consumed + 1..].is_empty(),
                     )?
                 }
@@ -161,6 +171,7 @@ pub(crate) fn rebuild_tree_with_set(
                         missing,
                         &nested_value,
                         string_style,
+                        append_mode,
                         !path.segments()[consumed + 1..].is_empty(),
                     )?
                 }
@@ -170,11 +181,12 @@ pub(crate) fn rebuild_tree_with_set(
                         missing,
                         &nested_value,
                         string_style,
+                        append_mode,
                         !path.segments()[consumed + 1..].is_empty(),
                     )?
                 }
                 SyntaxKind::Value => {
-                    set_value_child(&ancestor, missing, &nested_value, string_style, true)?
+                    set_value_child(&ancestor, missing, &nested_value, string_style, append_mode, true)?
                 }
                 _ => {
                     return Err(HjsonEditError::UnexpectedStructure {
@@ -254,6 +266,7 @@ fn set_root_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    append_mode: AppendMode,
     pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = parent
@@ -265,7 +278,8 @@ fn set_root_child(
             )
         })
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_set(&child, last, value, string_style, pretty_nested)?;
+    let updated_child =
+        rebuild_child_with_set(&child, last, value, string_style, append_mode, pretty_nested)?;
 
     Ok(parent
         .green()
@@ -277,13 +291,15 @@ fn set_value_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    append_mode: AppendMode,
     pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = parent
         .children()
         .find(|child| !child.kind().is_trivia())
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_set(&child, last, value, string_style, pretty_nested)?;
+    let updated_child =
+        rebuild_child_with_set(&child, last, value, string_style, append_mode, pretty_nested)?;
 
     Ok(parent
         .green()
@@ -295,6 +311,7 @@ fn set_object_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    append_mode: AppendMode,
     pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
@@ -325,7 +342,10 @@ fn set_object_child(
             .splice_children(member_node.index()..member_node.index() + 1, vec![updated.into()]));
     }
 
-    let insert_pos = object_ast.append_member_index();
+    let insert_pos = match append_mode {
+        AppendMode::BeforeFooter => object_ast.append_member_index_before_footer(),
+        AppendMode::AfterComments => object_ast.append_member_index_after_comments(),
+    };
     let mut inserted = Vec::new();
     let indent = "  ".repeat(object_ast.layout.depth + 1);
     let newline = parent.detect_newline().as_str().to_string();
@@ -384,6 +404,7 @@ fn set_array_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    append_mode: AppendMode,
     pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     let seg = match last {
@@ -419,7 +440,10 @@ fn set_array_child(
         }
         ArrayPathSegment::InsertAt(idx) => {
             if *idx >= items.len() {
-                let insert_pos = array_ast.append_value_index();
+                let insert_pos = match append_mode {
+                    AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
+                    AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
+                };
                 let mut inserted = Vec::new();
                 let indent = "  ".repeat(array_ast.layout.depth + 1);
                 let newline = parent.detect_newline().as_str().to_string();
@@ -478,7 +502,10 @@ fn set_array_child(
             }
         }
         ArrayPathSegment::Push => {
-            let insert_pos = array_ast.append_value_index();
+            let insert_pos = match append_mode {
+                AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
+                AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
+            };
             let mut inserted = Vec::new();
 
             if items.is_empty() {
@@ -644,12 +671,19 @@ fn rebuild_child_with_set(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
+    append_mode: AppendMode,
     pretty_nested: bool,
 ) -> Result<GreenNode, HjsonEditError> {
     match child.kind() {
-        SyntaxKind::Object => set_object_child(child, last, value, string_style, pretty_nested),
-        SyntaxKind::Array => set_array_child(child, last, value, string_style, pretty_nested),
-        SyntaxKind::Value => set_value_child(child, last, value, string_style, pretty_nested),
+        SyntaxKind::Object => {
+            set_object_child(child, last, value, string_style, append_mode, pretty_nested)
+        }
+        SyntaxKind::Array => {
+            set_array_child(child, last, value, string_style, append_mode, pretty_nested)
+        }
+        SyntaxKind::Value => {
+            set_value_child(child, last, value, string_style, append_mode, pretty_nested)
+        }
         _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
             last.clone(),
         ]))),

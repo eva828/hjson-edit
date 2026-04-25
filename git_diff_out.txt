@@ -1,0 +1,406 @@
+diff --git a/src/ast/mod.rs b/src/ast/mod.rs
+index 847d296..e78ea98 100644
+--- a/src/ast/mod.rs
++++ b/src/ast/mod.rs
+@@ -439,6 +439,27 @@ impl Object {
+     }
+ 
+     pub fn append_member_index(&self) -> usize {
++        self.append_member_index_before_footer()
++    }
++
++    pub fn append_member_index_before_footer(&self) -> usize {
++        if self.delimiter_style == DelimiterStyle::Braceless {
++            let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
++            return children
++                .iter()
++                .rposition(|child| matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Member))
++                .map(|idx| idx + 1)
++                .unwrap_or(self.empty_body_insert_index);
++        }
++
++        self.body_end_index
++    }
++
++    pub fn append_member_index_after_comments(&self) -> usize {
++        if self.delimiter_style == DelimiterStyle::Braceless {
++            return self.syntax.children_with_tokens().count();
++        }
++
+         self.body_end_index
+     }
+ 
+@@ -536,6 +557,27 @@ impl Array {
+     }
+ 
+     pub fn append_value_index(&self) -> usize {
++        self.append_value_index_before_footer()
++    }
++
++    pub fn append_value_index_before_footer(&self) -> usize {
++        if self.delimiter_style == DelimiterStyle::Braceless {
++            let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
++            return children
++                .iter()
++                .rposition(|child| matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value))
++                .map(|idx| idx + 1)
++                .unwrap_or(self.empty_body_insert_index);
++        }
++
++        self.body_end_index
++    }
++
++    pub fn append_value_index_after_comments(&self) -> usize {
++        if self.delimiter_style == DelimiterStyle::Braceless {
++            return self.syntax.children_with_tokens().count();
++        }
++
+         self.body_end_index
+     }
+ 
+diff --git a/src/high_level/mod.rs b/src/high_level/mod.rs
+index 119dcf7..754febd 100644
+--- a/src/high_level/mod.rs
++++ b/src/high_level/mod.rs
+@@ -14,7 +14,7 @@ use crate::ast as semantic_ast;
+ use crate::ast::AstNode;
+ use crate::high_level::error::HjsonEditError;
+ use crate::high_level::ops::comment::CommentStyle;
+-use crate::high_level::ops::object::StringStyle;
++use crate::high_level::ops::object::{AppendMode, StringStyle};
+ use crate::high_level::style::DetectNewline;
+ use crate::syntax::lexer::Lexer;
+ use crate::syntax::parser::Parser;
+@@ -27,6 +27,7 @@ pub struct HjsonDocument {
+     root: RedNode,
+     string_style: StringStyle,
+     comment_style: CommentStyle,
++    append_mode: AppendMode,
+     newline: String,
+ }
+ 
+@@ -59,6 +60,7 @@ impl HjsonDocument {
+             root,
+             string_style: StringStyle::default(),
+             comment_style: CommentStyle::default(),
++            append_mode: AppendMode::default(),
+             newline: input.detect_newline().as_str().to_string(),
+         })
+     }
+@@ -73,6 +75,11 @@ impl HjsonDocument {
+         self
+     }
+ 
++    pub fn append_mode(mut self, mode: AppendMode) -> Self {
++        self.append_mode = mode;
++        self
++    }
++
+     pub fn current_string_style(&self) -> StringStyle {
+         self.string_style
+     }
+@@ -81,6 +88,10 @@ impl HjsonDocument {
+         self.comment_style
+     }
+ 
++    pub fn current_append_mode(&self) -> AppendMode {
++        self.append_mode
++    }
++
+     pub fn current_newline(&self) -> &str {
+         &self.newline
+     }
+diff --git a/src/high_level/ops/mod.rs b/src/high_level/ops/mod.rs
+index 57f8e67..ce70384 100644
+--- a/src/high_level/ops/mod.rs
++++ b/src/high_level/ops/mod.rs
+@@ -10,6 +10,7 @@ pub(crate) fn finish_document(doc: HjsonDocument, root: GreenNode) -> HjsonDocum
+         root: RedNode::new_root(root),
+         string_style: doc.current_string_style(),
+         comment_style: doc.current_comment_style(),
++        append_mode: doc.current_append_mode(),
+         newline: doc.current_newline().to_string(),
+     }
+ }
+diff --git a/src/high_level/ops/object.rs b/src/high_level/ops/object.rs
+index b8b358e..595d71d 100644
+--- a/src/high_level/ops/object.rs
++++ b/src/high_level/ops/object.rs
+@@ -26,6 +26,13 @@ pub enum StringStyle {
+     Unquoted,
+ }
+ 
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
++pub enum AppendMode {
++    #[default]
++    BeforeFooter,
++    AfterComments,
++}
++
+ pub trait HjsonDocumentObjectEdit {
+     fn get(&self, path: impl AsRef<str>) -> Result<HjsonValue, HjsonEditError>;
+     fn set(
+@@ -33,6 +40,14 @@ pub trait HjsonDocumentObjectEdit {
+         path: impl AsRef<str>,
+         value: impl Into<HjsonValue>,
+     ) -> Result<Self, HjsonEditError>
++    where
++        Self: Sized;
++    fn set_with_mode(
++        self,
++        path: impl AsRef<str>,
++        value: impl Into<HjsonValue>,
++        append_mode: AppendMode,
++    ) -> Result<Self, HjsonEditError>
+     where
+         Self: Sized;
+     fn remove(self, path: impl AsRef<str>) -> Result<Self, HjsonEditError>
+@@ -56,6 +71,16 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
+         self,
+         path: impl AsRef<str>,
+         value: impl Into<HjsonValue>,
++    ) -> Result<Self, HjsonEditError> {
++        let append_mode = self.current_append_mode();
++        self.set_with_mode(path, value, append_mode)
++    }
++
++    fn set_with_mode(
++        self,
++        path: impl AsRef<str>,
++        value: impl Into<HjsonValue>,
++        append_mode: AppendMode,
+     ) -> Result<Self, HjsonEditError> {
+         let path_str = path.as_ref().to_string();
+         let path = HjsonObjectPath::parse(path_str.clone())?;
+@@ -72,7 +97,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
+         let updated = if path.depth() == 0 {
+             replace_root_value(&root, &value, string_style)?
+         } else {
+-            rebuild_tree_with_set(root.clone(), &path, &value, string_style)?
++            rebuild_tree_with_set(root.clone(), &path, &value, string_style, append_mode)?
+         };
+ 
+         Ok(finish_document(self, updated))
+@@ -112,6 +137,7 @@ pub(crate) fn rebuild_tree_with_set(
+     path: &HjsonObjectPath,
+     value: &HjsonValue,
+     string_style: StringStyle,
++    append_mode: AppendMode,
+ ) -> Result<GreenNode, HjsonEditError> {
+     let (parent_path, last) = path
+         .split_last()
+@@ -119,10 +145,10 @@ pub(crate) fn rebuild_tree_with_set(
+     match resolve_parent(root.clone(), &parent_path) {
+         Ok(parent) => {
+             let new_parent = match parent.kind() {
+-            SyntaxKind::Root => set_root_child(&parent, &last, value, string_style, false)?,
+-            SyntaxKind::Object => set_object_child(&parent, &last, value, string_style, false)?,
+-            SyntaxKind::Array => set_array_child(&parent, &last, value, string_style, false)?,
+-            SyntaxKind::Value => set_value_child(&parent, &last, value, string_style, false)?,
++            SyntaxKind::Root => set_root_child(&parent, &last, value, string_style, append_mode, false)?,
++            SyntaxKind::Object => set_object_child(&parent, &last, value, string_style, append_mode, false)?,
++            SyntaxKind::Array => set_array_child(&parent, &last, value, string_style, append_mode, false)?,
++            SyntaxKind::Value => set_value_child(&parent, &last, value, string_style, append_mode, false)?,
+                 _ => {
+                     return Err(HjsonEditError::UnexpectedStructure {
+                         expected: SyntaxKind::Object,
+@@ -152,6 +178,7 @@ pub(crate) fn rebuild_tree_with_set(
+                         missing,
+                         &nested_value,
+                         string_style,
++                        append_mode,
+                         !path.segments()[consumed + 1..].is_empty(),
+                     )?
+                 }
+@@ -161,6 +188,7 @@ pub(crate) fn rebuild_tree_with_set(
+                         missing,
+                         &nested_value,
+                         string_style,
++                        append_mode,
+                         !path.segments()[consumed + 1..].is_empty(),
+                     )?
+                 }
+@@ -170,11 +198,12 @@ pub(crate) fn rebuild_tree_with_set(
+                         missing,
+                         &nested_value,
+                         string_style,
++                        append_mode,
+                         !path.segments()[consumed + 1..].is_empty(),
+                     )?
+                 }
+                 SyntaxKind::Value => {
+-                    set_value_child(&ancestor, missing, &nested_value, string_style, true)?
++                    set_value_child(&ancestor, missing, &nested_value, string_style, append_mode, true)?
+                 }
+                 _ => {
+                     return Err(HjsonEditError::UnexpectedStructure {
+@@ -254,6 +283,7 @@ fn set_root_child(
+     last: &PathSegment,
+     value: &HjsonValue,
+     string_style: StringStyle,
++    append_mode: AppendMode,
+     pretty_nested: bool,
+ ) -> Result<GreenNode, HjsonEditError> {
+     let child = parent
+@@ -265,7 +295,8 @@ fn set_root_child(
+             )
+         })
+         .ok_or(HjsonEditError::ParentNotFound)?;
+-    let updated_child = rebuild_child_with_set(&child, last, value, string_style, pretty_nested)?;
++    let updated_child =
++        rebuild_child_with_set(&child, last, value, string_style, append_mode, pretty_nested)?;
+ 
+     Ok(parent
+         .green()
+@@ -277,13 +308,15 @@ fn set_value_child(
+     last: &PathSegment,
+     value: &HjsonValue,
+     string_style: StringStyle,
++    append_mode: AppendMode,
+     pretty_nested: bool,
+ ) -> Result<GreenNode, HjsonEditError> {
+     let child = parent
+         .children()
+         .find(|child| !child.kind().is_trivia())
+         .ok_or(HjsonEditError::ParentNotFound)?;
+-    let updated_child = rebuild_child_with_set(&child, last, value, string_style, pretty_nested)?;
++    let updated_child =
++        rebuild_child_with_set(&child, last, value, string_style, append_mode, pretty_nested)?;
+ 
+     Ok(parent
+         .green()
+@@ -295,6 +328,7 @@ fn set_object_child(
+     last: &PathSegment,
+     value: &HjsonValue,
+     string_style: StringStyle,
++    append_mode: AppendMode,
+     pretty_nested: bool,
+ ) -> Result<GreenNode, HjsonEditError> {
+     let key = match last {
+@@ -325,7 +359,10 @@ fn set_object_child(
+             .splice_children(member_node.index()..member_node.index() + 1, vec![updated.into()]));
+     }
+ 
+-    let insert_pos = object_ast.append_member_index();
++    let insert_pos = match append_mode {
++        AppendMode::BeforeFooter => object_ast.append_member_index_before_footer(),
++        AppendMode::AfterComments => object_ast.append_member_index_after_comments(),
++    };
+     let mut inserted = Vec::new();
+     let indent = "  ".repeat(object_ast.layout.depth + 1);
+     let newline = parent.detect_newline().as_str().to_string();
+@@ -384,6 +421,7 @@ fn set_array_child(
+     last: &PathSegment,
+     value: &HjsonValue,
+     string_style: StringStyle,
++    append_mode: AppendMode,
+     pretty_nested: bool,
+ ) -> Result<GreenNode, HjsonEditError> {
+     let seg = match last {
+@@ -419,7 +457,10 @@ fn set_array_child(
+         }
+         ArrayPathSegment::InsertAt(idx) => {
+             if *idx >= items.len() {
+-                let insert_pos = array_ast.append_value_index();
++                let insert_pos = match append_mode {
++                    AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
++                    AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
++                };
+                 let mut inserted = Vec::new();
+                 let indent = "  ".repeat(array_ast.layout.depth + 1);
+                 let newline = parent.detect_newline().as_str().to_string();
+@@ -478,7 +519,10 @@ fn set_array_child(
+             }
+         }
+         ArrayPathSegment::Push => {
+-            let insert_pos = array_ast.append_value_index();
++            let insert_pos = match append_mode {
++                AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
++                AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
++            };
+             let mut inserted = Vec::new();
+ 
+             if items.is_empty() {
+@@ -644,12 +688,19 @@ fn rebuild_child_with_set(
+     last: &PathSegment,
+     value: &HjsonValue,
+     string_style: StringStyle,
++    append_mode: AppendMode,
+     pretty_nested: bool,
+ ) -> Result<GreenNode, HjsonEditError> {
+     match child.kind() {
+-        SyntaxKind::Object => set_object_child(child, last, value, string_style, pretty_nested),
+-        SyntaxKind::Array => set_array_child(child, last, value, string_style, pretty_nested),
+-        SyntaxKind::Value => set_value_child(child, last, value, string_style, pretty_nested),
++        SyntaxKind::Object => {
++            set_object_child(child, last, value, string_style, append_mode, pretty_nested)
++        }
++        SyntaxKind::Array => {
++            set_array_child(child, last, value, string_style, append_mode, pretty_nested)
++        }
++        SyntaxKind::Value => {
++            set_value_child(child, last, value, string_style, append_mode, pretty_nested)
++        }
+         _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+             last.clone(),
+         ]))),
+diff --git a/src/lib.rs b/src/lib.rs
+index a435653..fa5576b 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -18,7 +18,7 @@ pub use format::{FormatConfig, Formatter};
+ pub use high_level::{
+     error::HjsonEditError,
+     ops::comment::CommentStyle,
+-    ops::object::{HjsonDocumentObjectEdit, StringStyle},
++    ops::object::{AppendMode, HjsonDocumentObjectEdit, StringStyle},
+     path::{ArrayPathSegment, ObjectPathSegment, PathSegment},
+     value::HjsonValue,
+     HjsonDocument,
+diff --git a/tests/high_level_ops.rs b/tests/high_level_ops.rs
+index 12262ee..c93a61a 100644
+--- a/tests/high_level_ops.rs
++++ b/tests/high_level_ops.rs
+@@ -5,7 +5,7 @@ use hjson_edit::{
+     high_level::{
+         ops::{
+             comment::{CommentStyle, HjsonDocumentCommentEdit},
+-            object::{HjsonDocumentObjectEdit, StringStyle},
++            object::{AppendMode, HjsonDocumentObjectEdit, StringStyle},
+         },
+         path::HjsonCommentPath,
+         HjsonDocument,
+@@ -292,3 +292,33 @@ fn braceless_root_object_uses_braceless_delimiter_style() {
+ 
+     assert_eq!(object.delimiter_style, DelimiterStyle::Braceless);
+ }
++
++#[test]
++fn set_append_before_footer_inserts_member_above_braceless_footer_comment() {
++    let input = "name: app\n# footer\n";
++
++    let doc = HjsonDocument::parse(input).unwrap();
++    let updated = doc
++        .set_with_mode("port", 8080, AppendMode::BeforeFooter)
++        .unwrap();
++    let output = updated.to_string();
++
++    let port_pos = output.find("port: 8080").unwrap();
++    let footer_pos = output.find("# footer").unwrap();
++    assert!(port_pos < footer_pos, "output was: {output:?}");
++}
++
++#[test]
++fn set_append_after_comments_inserts_member_below_braceless_footer_comment() {
++    let input = "name: app\n# footer\n";
++
++    let doc = HjsonDocument::parse(input).unwrap();
++    let updated = doc
++        .set_with_mode("port", 8080, AppendMode::AfterComments)
++        .unwrap();
++    let output = updated.to_string();
++
++    let port_pos = output.find("port: 8080").unwrap();
++    let footer_pos = output.find("# footer").unwrap();
++    assert!(port_pos > footer_pos, "output was: {output:?}");
++}

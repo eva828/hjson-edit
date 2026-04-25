@@ -18,7 +18,7 @@ pub use format::{FormatConfig, Formatter};
 pub use high_level::{
     error::HjsonEditError,
     ops::comment::CommentStyle,
-    ops::object::{HjsonDocumentObjectEdit, StringStyle},
+    ops::object::{AppendMode, HjsonDocumentObjectEdit, StringStyle},
     path::{ArrayPathSegment, ObjectPathSegment, PathSegment},
     value::HjsonValue,
     HjsonDocument,

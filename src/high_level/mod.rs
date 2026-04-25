@@ -14,7 +14,7 @@ use crate::ast as semantic_ast;
 use crate::ast::AstNode;
 use crate::high_level::error::HjsonEditError;
 use crate::high_level::ops::comment::CommentStyle;
-use crate::high_level::ops::object::StringStyle;
+use crate::high_level::ops::object::{AppendMode, StringStyle};
 use crate::high_level::style::DetectNewline;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
@@ -27,6 +27,7 @@ pub struct HjsonDocument {
     root: RedNode,
     string_style: StringStyle,
     comment_style: CommentStyle,
+    append_mode: AppendMode,
     newline: String,
 }
 
@@ -59,6 +60,7 @@ impl HjsonDocument {
             root,
             string_style: StringStyle::default(),
             comment_style: CommentStyle::default(),
+            append_mode: AppendMode::default(),
             newline: input.detect_newline().as_str().to_string(),
         })
     }
@@ -73,12 +75,21 @@ impl HjsonDocument {
         self
     }
 
+    pub fn append_mode(mut self, mode: AppendMode) -> Self {
+        self.append_mode = mode;
+        self
+    }
+
     pub fn current_string_style(&self) -> StringStyle {
         self.string_style
     }
 
     pub fn current_comment_style(&self) -> CommentStyle {
         self.comment_style
+    }
+
+    pub fn current_append_mode(&self) -> AppendMode {
+        self.append_mode
     }
 
     pub fn current_newline(&self) -> &str {

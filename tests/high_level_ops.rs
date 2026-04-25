@@ -5,7 +5,7 @@ use hjson_edit::{
     high_level::{
         ops::{
             comment::{CommentStyle, HjsonDocumentCommentEdit},
-            object::{HjsonDocumentObjectEdit, StringStyle},
+            object::{AppendMode, HjsonDocumentObjectEdit, StringStyle},
         },
         path::HjsonCommentPath,
         HjsonDocument,
@@ -291,4 +291,34 @@ fn braceless_root_object_uses_braceless_delimiter_style() {
     let object = ast.object().unwrap();
 
     assert_eq!(object.delimiter_style, DelimiterStyle::Braceless);
+}
+
+#[test]
+fn set_append_before_footer_inserts_member_above_braceless_footer_comment() {
+    let input = "name: app\n# footer\n";
+
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .append_mode(AppendMode::BeforeFooter);
+    let updated = doc.set("port", 8080).unwrap();
+    let output = updated.to_string();
+
+    let port_pos = output.find("port: 8080").unwrap();
+    let footer_pos = output.find("# footer").unwrap();
+    assert!(port_pos < footer_pos, "output was: {output:?}");
+}
+
+#[test]
+fn set_append_after_comments_inserts_member_below_braceless_footer_comment() {
+    let input = "name: app\n# footer\n";
+
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .append_mode(AppendMode::AfterComments);
+    let updated = doc.set("port", 8080).unwrap();
+    let output = updated.to_string();
+
+    let port_pos = output.find("port: 8080").unwrap();
+    let footer_pos = output.find("# footer").unwrap();
+    assert!(port_pos > footer_pos, "output was: {output:?}");
 }

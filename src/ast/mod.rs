@@ -439,6 +439,27 @@ impl Object {
     }
 
     pub fn append_member_index(&self) -> usize {
+        self.append_member_index_before_footer()
+    }
+
+    pub fn append_member_index_before_footer(&self) -> usize {
+        if self.delimiter_style == DelimiterStyle::Braceless {
+            let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
+            return children
+                .iter()
+                .rposition(|child| matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Member))
+                .map(|idx| idx + 1)
+                .unwrap_or(self.empty_body_insert_index);
+        }
+
+        self.body_end_index
+    }
+
+    pub fn append_member_index_after_comments(&self) -> usize {
+        if self.delimiter_style == DelimiterStyle::Braceless {
+            return self.syntax.children_with_tokens().count();
+        }
+
         self.body_end_index
     }
 
@@ -536,6 +557,27 @@ impl Array {
     }
 
     pub fn append_value_index(&self) -> usize {
+        self.append_value_index_before_footer()
+    }
+
+    pub fn append_value_index_before_footer(&self) -> usize {
+        if self.delimiter_style == DelimiterStyle::Braceless {
+            let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
+            return children
+                .iter()
+                .rposition(|child| matches!(child, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Value))
+                .map(|idx| idx + 1)
+                .unwrap_or(self.empty_body_insert_index);
+        }
+
+        self.body_end_index
+    }
+
+    pub fn append_value_index_after_comments(&self) -> usize {
+        if self.delimiter_style == DelimiterStyle::Braceless {
+            return self.syntax.children_with_tokens().count();
+        }
+
         self.body_end_index
     }
 
