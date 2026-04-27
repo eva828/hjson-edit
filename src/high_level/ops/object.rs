@@ -586,7 +586,7 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
     let member = &members[member_pos];
     Ok(parent
         .green()
-        .splice_children(member.removal_range(), Vec::new()))
+        .splice_children(member.span_range(), Vec::new()))
 }
 
 fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -611,7 +611,7 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
 
     Ok(parent
         .green()
-        .splice_children(item.removal_range(), Vec::new()))
+        .splice_children(item.span_range(), Vec::new()))
 }
 
 fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {

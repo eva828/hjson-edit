@@ -78,22 +78,6 @@ pub struct Layout {
     pub owns_trivia: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct TriviaBoundary {
-    pub leading_protected_prefix_len: usize,
-    pub trailing_protected_suffix_len: usize,
-}
-
-impl TriviaBoundary {
-    pub fn owned_leading_len(self, leading_len: usize) -> usize {
-        leading_len.saturating_sub(self.leading_protected_prefix_len)
-    }
-
-    pub fn owned_trailing_len(self, trailing_len: usize) -> usize {
-        trailing_len.saturating_sub(self.trailing_protected_suffix_len)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringValue {
     raw: String,
@@ -221,7 +205,6 @@ pub struct Member {
     pub after_colon_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
-    pub trivia_boundary: TriviaBoundary,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,7 +230,6 @@ pub struct ArrayItem {
     pub leading_trivia: Vec<Trivia>,
     pub trailing_trivia: Vec<Trivia>,
     pub layout: Layout,
-    pub trivia_boundary: TriviaBoundary,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -609,11 +591,6 @@ impl AstNode for Member {
         let (before_colon_trivia, after_colon_trivia) = collect_member_middle_trivia(&node);
         let leading_trivia = collect_leading_trivia(&node, layout.owns_trivia);
         let trailing_trivia = collect_trailing_trivia(&node, layout.owns_trivia);
-        let trivia_boundary = TriviaBoundary {
-            leading_protected_prefix_len: 0,
-            trailing_protected_suffix_len: collect_trivia_boundary(&trailing_trivia)
-                .trailing_protected_suffix_len,
-        };
 
         Ok(Self {
             syntax: node.clone(),
@@ -622,7 +599,6 @@ impl AstNode for Member {
             after_colon_trivia,
             trailing_trivia,
             layout,
-            trivia_boundary,
         })
     }
 
@@ -658,24 +634,21 @@ impl Member {
         self.value().and_then(|value| value.detected_string_style())
     }
 
-    pub fn removal_range(&self) -> Range<usize> {
-        let owned_leading_len = self
-            .trivia_boundary
-            .owned_leading_len(self.leading_trivia.len());
-        let owned_trailing_len = self
-            .trivia_boundary
-            .owned_trailing_len(self.trailing_trivia.len());
-        let start = self.syntax.index().saturating_sub(owned_leading_len);
-        let end = self.syntax.index() + 1 + owned_trailing_len;
+    pub fn span_range(&self) -> Range<usize> {
+        let start = self
+            .syntax
+            .index()
+            .saturating_sub(self.leading_trivia.len());
+        let end = self.syntax.index() + 1 + self.trailing_trivia.len();
         start..end
     }
 
     pub fn insert_before_index(&self) -> usize {
-        self.removal_range().start
+        self.span_range().start
     }
 
     pub fn insert_after_index(&self) -> usize {
-        self.removal_range().end
+        self.span_range().end
     }
 
     pub fn post_node_index(&self) -> usize {
@@ -912,18 +885,12 @@ impl AstNode for ArrayItem {
         let layout = collect_layout(&node, true);
         let leading_trivia = collect_leading_trivia(&node, true);
         let trailing_trivia = collect_trailing_trivia(&node, true);
-        let trivia_boundary = TriviaBoundary {
-            leading_protected_prefix_len: 0,
-            trailing_protected_suffix_len: collect_trivia_boundary(&trailing_trivia)
-                .trailing_protected_suffix_len,
-        };
 
         Ok(Self {
             syntax: node,
             leading_trivia,
             trailing_trivia,
             layout,
-            trivia_boundary,
         })
     }
 
@@ -941,24 +908,21 @@ impl ArrayItem {
         self.value().ok()?.detected_string_style()
     }
 
-    pub fn removal_range(&self) -> Range<usize> {
-        let owned_leading_len = self
-            .trivia_boundary
-            .owned_leading_len(self.leading_trivia.len());
-        let owned_trailing_len = self
-            .trivia_boundary
-            .owned_trailing_len(self.trailing_trivia.len());
-        let start = self.syntax.index().saturating_sub(owned_leading_len);
-        let end = self.syntax.index() + 1 + owned_trailing_len;
+    pub fn span_range(&self) -> Range<usize> {
+        let start = self
+            .syntax
+            .index()
+            .saturating_sub(self.leading_trivia.len());
+        let end = self.syntax.index() + 1 + self.trailing_trivia.len();
         start..end
     }
 
     pub fn insert_before_index(&self) -> usize {
-        self.removal_range().start
+        self.span_range().start
     }
 
     pub fn insert_after_index(&self) -> usize {
-        self.removal_range().end
+        self.span_range().end
     }
 
     pub fn post_node_index(&self) -> usize {
@@ -1244,13 +1208,6 @@ fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
 
     trivia.reverse();
     trivia
-}
-
-fn collect_trivia_boundary(_trivia: &[Trivia]) -> TriviaBoundary {
-    TriviaBoundary {
-        leading_protected_prefix_len: 0,
-        trailing_protected_suffix_len: 1,
-    }
 }
 
 fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
