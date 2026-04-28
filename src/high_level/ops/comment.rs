@@ -87,7 +87,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                     .ok_or(HjsonEditError::ParentNotFound)?;
 
                 let newline =
-                    SyntaxKind::Newline.create_token(self.root().detect_newline().as_str());
+                    SyntaxKind::Newline.create_token(self.current_root().detect_newline().as_str());
                 let indent =
                     SyntaxKind::Whitespace.create_token(&detect_indent_for_member(&member));
                 let comment_node =
@@ -145,7 +145,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 
 impl HjsonDocument {
     fn resolve_member(&self, path: &HjsonObjectPath) -> Result<Member, HjsonEditError> {
-        let mut target = self.root().clone().document_start_node();
+        let mut target = self.current_root().clone().document_start_node();
         for segment in path.segments() {
             target = target
                 .child(segment)
@@ -239,9 +239,9 @@ fn insert_document_comment(
 ) -> Result<HjsonDocument, HjsonEditError> {
     let style = resolve_comment_style(doc.current_comment_style(), &comment, existing_style);
     let rendered = render_comment_text(style, &comment);
-    let newline = doc.root().detect_newline().as_str().to_string();
+    let newline = doc.current_root().detect_newline().as_str().to_string();
 
-    let root = doc.root().clone();
+    let root = doc.current_root().clone();
     let comment_node = SyntaxKind::Comment
         .create_node(vec![kind_from_style(style).create_token(&rendered).into()]);
     let header_newline = SyntaxKind::Newline.create_token(&newline);
@@ -268,7 +268,7 @@ fn insert_document_comment(
 }
 
 fn remove_document_comment(doc: &mut HjsonDocument, header: bool) -> Result<(), HjsonEditError> {
-    let root = doc.root().clone();
+    let root = doc.current_root().clone();
     let children: Vec<_> = root.children_with_tokens().collect();
 
     let range = if header {

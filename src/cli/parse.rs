@@ -34,7 +34,7 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
                 tree_view.dump_document(&ast, true)?;
                 print!("{}", tree_view.buf);
             } else {
-                let red = document.root();
+                let red = document.current_root();
 
                 let console_config = ConsoleConfig::new(simple, color_mode);
                 let mut tree_view = TreeViewBuilder::new(console_config, show_trivia);

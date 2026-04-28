@@ -20,6 +20,7 @@ use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
 use crate::RedNode;
 use line_index::LineIndex;
+use rowan::GreenNode;
 
 /// HJSONドキュメント
 #[derive(Debug, Clone)]
@@ -80,6 +81,13 @@ impl HjsonDocument {
         self
     }
 
+    pub(crate) fn root(self, root: GreenNode) -> HjsonDocument {
+        HjsonDocument {
+            root: RedNode::new_root(root),
+            ..self
+        }
+    }
+
     pub fn current_string_style(&self) -> StringStyle {
         self.string_style
     }
@@ -96,7 +104,7 @@ impl HjsonDocument {
         &self.newline
     }
 
-    pub fn root(&self) -> &RedNode {
+    pub(crate) fn current_root(&self) -> &RedNode {
         &self.root
     }
 

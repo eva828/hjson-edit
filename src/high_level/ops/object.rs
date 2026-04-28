@@ -8,7 +8,6 @@ use crate::{
     high_level::{
         error::HjsonEditError,
         ext::RedNodeExt,
-        ops::finish_document,
         path::{ArrayPathSegment, HjsonObjectPath, ObjectPathSegment, PathSegment},
         style::DetectNewline,
         value::HjsonValue,
@@ -50,7 +49,7 @@ pub trait HjsonDocumentObjectEdit {
 impl HjsonDocumentObjectEdit for HjsonDocument {
     fn get(&self, path: impl AsRef<str>) -> Result<HjsonValue, HjsonEditError> {
         let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
-        let root = self.root().clone().document_start_node();
+        let root = self.current_root().clone().document_start_node();
         let node = path.segments().iter().try_fold(root, |current, segment| {
             current
                 .child(segment)
@@ -75,7 +74,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
             }
         }
 
-        let root = self.root().clone();
+        let root = self.current_root().clone();
         let string_style = self.current_string_style();
         let updated = if path.depth() == 0 {
             replace_root_value(&root, &value, string_style)?
@@ -83,14 +82,14 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
             rebuild_tree_with_set(root.clone(), &path, &value, string_style, append_mode)?
         };
 
-        Ok(finish_document(self, updated))
+        Ok(self.root(updated))
     }
 
     fn remove(self, path: impl AsRef<str>) -> Result<Self, HjsonEditError> {
         let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
-        let root = self.root().clone();
+        let root = self.current_root().clone();
         let updated = rebuild_tree_with_remove(root.clone(), &path)?;
-        Ok(finish_document(self, updated))
+        Ok(self.root(updated))
     }
 }
 
