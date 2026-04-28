@@ -133,4 +133,3 @@ pub fn clone_green_elements(slice: &[NodeOrToken<RedNode, RedToken>]) -> Vec<Gre
         })
         .collect()
 }
-

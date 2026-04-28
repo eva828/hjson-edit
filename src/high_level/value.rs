@@ -151,7 +151,10 @@ impl HjsonValue {
                     for (idx, item) in items.iter().enumerate() {
                         let indent_text = indent(depth + 1);
                         builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
-                        push_node(&mut builder, &item.render_value_pretty(string_style, depth + 1, newline));
+                        push_node(
+                            &mut builder,
+                            &item.render_value_pretty(string_style, depth + 1, newline),
+                        );
                         if idx + 1 != items.len() {
                             builder.token(SyntaxKind::Newline.into(), newline);
                         }
@@ -251,7 +254,10 @@ impl HjsonValue {
         builder.finish_node();
         builder.token(SyntaxKind::Colon.into(), ":");
         builder.token(SyntaxKind::Whitespace.into(), " ");
-        push_node(&mut builder, &self.render_value_pretty(string_style, depth + 1, newline));
+        push_node(
+            &mut builder,
+            &self.render_value_pretty(string_style, depth + 1, newline),
+        );
         builder.finish_node();
         builder.finish()
     }

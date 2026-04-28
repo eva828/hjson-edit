@@ -81,7 +81,10 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                     resolve_comment_style(self.current_comment_style(), &comment, existing_style);
                 let rendered = render_comment_text(resolved_style, &comment);
                 let member = self.resolve_member(&path)?;
-                let parent = member.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+                let parent = member
+                    .node()
+                    .parent()
+                    .ok_or(HjsonEditError::ParentNotFound)?;
 
                 let newline =
                     SyntaxKind::Newline.create_token(self.root().detect_newline().as_str());
@@ -113,7 +116,10 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                     resolve_comment_style(self.current_comment_style(), &comment, existing_style);
                 let rendered = render_comment_text(resolved_style, &comment);
                 let member = self.resolve_member(&path)?;
-                let parent = member.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+                let parent = member
+                    .node()
+                    .parent()
+                    .ok_or(HjsonEditError::ParentNotFound)?;
 
                 let space = SyntaxKind::Whitespace.create_token(" ");
                 let comment_node =
@@ -122,10 +128,9 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                         .into()]);
 
                 let index = member.node().index() + 1;
-                let new_green = parent.green().splice_children(
-                    index..index,
-                    vec![space.into(), comment_node.into()],
-                );
+                let new_green = parent
+                    .green()
+                    .splice_children(index..index, vec![space.into(), comment_node.into()]);
                 let new_root = parent.replace_with(new_green);
                 self.root = RedNode::new_root(new_root);
                 Ok(self)
@@ -166,7 +171,10 @@ impl HjsonDocument {
             }
             HjsonCommentPath::Before(path) => {
                 let member = self.resolve_member(&path)?;
-                let parent = member.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+                let parent = member
+                    .node()
+                    .parent()
+                    .ok_or(HjsonEditError::ParentNotFound)?;
 
                 let Some(start_rel) = member
                     .leading_trivia
@@ -191,7 +199,10 @@ impl HjsonDocument {
             }
             HjsonCommentPath::Inline(path) => {
                 let member = self.resolve_member(&path)?;
-                let parent = member.node().parent().ok_or(HjsonEditError::ParentNotFound)?;
+                let parent = member
+                    .node()
+                    .parent()
+                    .ok_or(HjsonEditError::ParentNotFound)?;
 
                 let Some(comment_rel) = member
                     .trailing_trivia

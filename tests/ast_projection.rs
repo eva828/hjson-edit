@@ -17,18 +17,14 @@ fn nested_braced_object_uses_braced_delimiter_and_keeps_edge_trivia_separate() {
     };
 
     assert_eq!(nested_object.delimiter_style, DelimiterStyle::Braced);
-    assert!(
-        !nested_object
-            .leading_trivia
-            .iter()
-            .any(|trivia| matches!(trivia, Trivia::Whitespace(text) if text == "      "))
-    );
-    assert!(
-        !nested_object
-            .trailing_trivia
-            .iter()
-            .any(|trivia| matches!(trivia, Trivia::Whitespace(text) if text == "      "))
-    );
+    assert!(!nested_object
+        .leading_trivia
+        .iter()
+        .any(|trivia| matches!(trivia, Trivia::Whitespace(text) if text == "      ")));
+    assert!(!nested_object
+        .trailing_trivia
+        .iter()
+        .any(|trivia| matches!(trivia, Trivia::Whitespace(text) if text == "      ")));
 }
 
 #[test]
@@ -50,16 +46,14 @@ fn root_scalar_trivia_is_owned_by_document_not_value() {
     let ast = doc.ast().unwrap();
 
     assert!(matches!(ast.item(), Some(DocumentItem::Value(_))));
-    assert!(
-        ast.leading_trivia
-            .iter()
-            .any(|trivia| matches!(trivia, Trivia::Comment(_)))
-    );
-    assert!(
-        ast.trailing_trivia
-            .iter()
-            .any(|trivia| matches!(trivia, Trivia::Comment(_)))
-    );
+    assert!(ast
+        .leading_trivia
+        .iter()
+        .any(|trivia| matches!(trivia, Trivia::Comment(_))));
+    assert!(ast
+        .trailing_trivia
+        .iter()
+        .any(|trivia| matches!(trivia, Trivia::Comment(_))));
 
     let value = ast.value().unwrap();
     match value.content().unwrap() {
@@ -78,9 +72,10 @@ fn array_item_owns_item_trivia_and_exposes_value() {
     let items = array.items();
 
     assert_eq!(items.len(), 2);
-    assert!(items[0].leading_trivia.iter().any(|trivia| {
-        matches!(trivia, Trivia::Comment(comment) if comment.body == "first")
-    }));
+    assert!(items[0]
+        .leading_trivia
+        .iter()
+        .any(|trivia| { matches!(trivia, Trivia::Comment(comment) if comment.body == "first") }));
 
     match items[0].value().unwrap().content().unwrap() {
         ValueContent::Scalar(ScalarValue::Integer { raw, .. }) => assert_eq!(raw, "1"),

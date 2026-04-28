@@ -128,10 +128,18 @@ pub(crate) fn rebuild_tree_with_set(
     match resolve_parent(root.clone(), &parent_path) {
         Ok(parent) => {
             let new_parent = match parent.kind() {
-            SyntaxKind::Root => set_root_child(&parent, &last, value, string_style, append_mode, false)?,
-            SyntaxKind::Object => set_object_child(&parent, &last, value, string_style, append_mode, false)?,
-            SyntaxKind::Array => set_array_child(&parent, &last, value, string_style, append_mode, false)?,
-            SyntaxKind::Value => set_value_child(&parent, &last, value, string_style, append_mode, false)?,
+                SyntaxKind::Root => {
+                    set_root_child(&parent, &last, value, string_style, append_mode, false)?
+                }
+                SyntaxKind::Object => {
+                    set_object_child(&parent, &last, value, string_style, append_mode, false)?
+                }
+                SyntaxKind::Array => {
+                    set_array_child(&parent, &last, value, string_style, append_mode, false)?
+                }
+                SyntaxKind::Value => {
+                    set_value_child(&parent, &last, value, string_style, append_mode, false)?
+                }
                 _ => {
                     return Err(HjsonEditError::UnexpectedStructure {
                         expected: SyntaxKind::Object,
@@ -155,39 +163,38 @@ pub(crate) fn rebuild_tree_with_set(
             let missing = &path.segments()[consumed];
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
             let new_parent = match ancestor.kind() {
-                SyntaxKind::Root => {
-                    set_root_child(
-                        &ancestor,
-                        missing,
-                        &nested_value,
-                        string_style,
-                        append_mode,
-                        !path.segments()[consumed + 1..].is_empty(),
-                    )?
-                }
-                SyntaxKind::Object => {
-                    set_object_child(
-                        &ancestor,
-                        missing,
-                        &nested_value,
-                        string_style,
-                        append_mode,
-                        !path.segments()[consumed + 1..].is_empty(),
-                    )?
-                }
-                SyntaxKind::Array => {
-                    set_array_child(
-                        &ancestor,
-                        missing,
-                        &nested_value,
-                        string_style,
-                        append_mode,
-                        !path.segments()[consumed + 1..].is_empty(),
-                    )?
-                }
-                SyntaxKind::Value => {
-                    set_value_child(&ancestor, missing, &nested_value, string_style, append_mode, true)?
-                }
+                SyntaxKind::Root => set_root_child(
+                    &ancestor,
+                    missing,
+                    &nested_value,
+                    string_style,
+                    append_mode,
+                    !path.segments()[consumed + 1..].is_empty(),
+                )?,
+                SyntaxKind::Object => set_object_child(
+                    &ancestor,
+                    missing,
+                    &nested_value,
+                    string_style,
+                    append_mode,
+                    !path.segments()[consumed + 1..].is_empty(),
+                )?,
+                SyntaxKind::Array => set_array_child(
+                    &ancestor,
+                    missing,
+                    &nested_value,
+                    string_style,
+                    append_mode,
+                    !path.segments()[consumed + 1..].is_empty(),
+                )?,
+                SyntaxKind::Value => set_value_child(
+                    &ancestor,
+                    missing,
+                    &nested_value,
+                    string_style,
+                    append_mode,
+                    true,
+                )?,
                 _ => {
                     return Err(HjsonEditError::UnexpectedStructure {
                         expected: SyntaxKind::Object,
@@ -278,8 +285,14 @@ fn set_root_child(
             )
         })
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child =
-        rebuild_child_with_set(&child, last, value, string_style, append_mode, pretty_nested)?;
+    let updated_child = rebuild_child_with_set(
+        &child,
+        last,
+        value,
+        string_style,
+        append_mode,
+        pretty_nested,
+    )?;
 
     Ok(parent
         .green()
@@ -298,8 +311,14 @@ fn set_value_child(
         .children()
         .find(|child| !child.kind().is_trivia())
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child =
-        rebuild_child_with_set(&child, last, value, string_style, append_mode, pretty_nested)?;
+    let updated_child = rebuild_child_with_set(
+        &child,
+        last,
+        value,
+        string_style,
+        append_mode,
+        pretty_nested,
+    )?;
 
     Ok(parent
         .green()
@@ -337,9 +356,10 @@ fn set_object_child(
     {
         let member_node = member.syntax().clone();
         let updated = replace_member_value(&member_node, value, string_style)?;
-        return Ok(parent
-            .green()
-            .splice_children(member_node.index()..member_node.index() + 1, vec![updated.into()]));
+        return Ok(parent.green().splice_children(
+            member_node.index()..member_node.index() + 1,
+            vec![updated.into()],
+        ));
     }
 
     let insert_pos = match append_mode {
@@ -360,8 +380,7 @@ fn set_object_child(
             && matches!(
                 parent.children_with_tokens().nth(insert_pos - 1),
                 Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
-            )
-        {
+            ) {
             insert_pos - 1
         } else {
             insert_pos
@@ -370,9 +389,15 @@ fn set_object_child(
         inserted.push(rendered_member.into());
         inserted.push(SyntaxKind::Newline.create_token(&newline).into());
         if object_ast.layout.depth > 0 {
-            inserted.push(SyntaxKind::Whitespace.create_token(&"  ".repeat(object_ast.layout.depth)).into());
+            inserted.push(
+                SyntaxKind::Whitespace
+                    .create_token(&"  ".repeat(object_ast.layout.depth))
+                    .into(),
+            );
         }
-        return Ok(parent.green().splice_children(range_start..insert_pos, inserted));
+        return Ok(parent
+            .green()
+            .splice_children(range_start..insert_pos, inserted));
     }
 
     if pretty_nested {
@@ -381,13 +406,16 @@ fn set_object_child(
         inserted.push(rendered_member.into());
         inserted.push(SyntaxKind::Newline.create_token(&newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
+        return Ok(parent
+            .green()
+            .splice_children(insert_pos..insert_pos, inserted));
     }
 
     if let Some(last_member) = object_ast.members().last() {
-        let needs_separator = last_member.trailing_trivia.iter().all(|trivia| {
-            !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
-        });
+        let needs_separator = last_member
+            .trailing_trivia
+            .iter()
+            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
         if needs_separator {
             inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
             inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
@@ -396,7 +424,9 @@ fn set_object_child(
 
     inserted.push(rendered_member.into());
 
-    Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
+    Ok(parent
+        .green()
+        .splice_children(insert_pos..insert_pos, inserted))
 }
 
 fn set_array_child(
@@ -458,8 +488,7 @@ fn set_array_child(
                         && matches!(
                             parent.children_with_tokens().nth(insert_pos - 1),
                             Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
-                        )
-                    {
+                        ) {
                         insert_pos - 1
                     } else {
                         insert_pos
@@ -467,7 +496,9 @@ fn set_array_child(
                     inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
                     inserted.push(rendered_value.into());
                     inserted.push(SyntaxKind::Newline.create_token(&newline).into());
-                    return Ok(parent.green().splice_children(range_start..insert_pos, inserted));
+                    return Ok(parent
+                        .green()
+                        .splice_children(range_start..insert_pos, inserted));
                 }
 
                 if pretty_nested {
@@ -476,13 +507,16 @@ fn set_array_child(
                     inserted.push(rendered_value.into());
                     inserted.push(SyntaxKind::Newline.create_token(&newline).into());
                     inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-                    return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
+                    return Ok(parent
+                        .green()
+                        .splice_children(insert_pos..insert_pos, inserted));
                 }
 
-    if let Some(last_value) = items.last() {
-        let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
-            !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
-                    });
+                if let Some(last_value) = items.last() {
+                    let needs_separator = last_value
+                        .trailing_trivia
+                        .iter()
+                        .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
                     if needs_separator {
                         inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                         inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
@@ -490,7 +524,9 @@ fn set_array_child(
                 }
                 inserted.push(rendered_value.into());
 
-                Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
+                Ok(parent
+                    .green()
+                    .splice_children(insert_pos..insert_pos, inserted))
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
@@ -513,13 +549,16 @@ fn set_array_child(
                 inserted.push(SyntaxKind::Whitespace.create_token("  ").into());
                 inserted.push(value.render_value(insert_style).into());
                 inserted.push(SyntaxKind::Newline.create_token(&newline).into());
-                return Ok(parent.green().splice_children(insert_pos..insert_pos, inserted));
+                return Ok(parent
+                    .green()
+                    .splice_children(insert_pos..insert_pos, inserted));
             }
 
             if let Some(last_value) = items.last() {
-                let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
-                    !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
-                });
+                let needs_separator = last_value
+                    .trailing_trivia
+                    .iter()
+                    .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
                 if needs_separator {
                     inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
                     inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
@@ -527,7 +566,9 @@ fn set_array_child(
             }
             inserted.push(value.render_value(insert_style).into());
 
-            Ok(parent.green().splice_children(insert_pos..insert_pos, inserted))
+            Ok(parent
+                .green()
+                .splice_children(insert_pos..insert_pos, inserted))
         }
     }
 }

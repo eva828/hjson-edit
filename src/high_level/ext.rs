@@ -37,7 +37,8 @@ impl RedNodeExt for RedNode {
             PathSegment::Object(segment) if self.kind() == SyntaxKind::Object => self
                 .children_by_kind(SyntaxKind::Member)
                 .find(|member| {
-                    member.children_by_kind(SyntaxKind::Key)
+                    member
+                        .children_by_kind(SyntaxKind::Key)
                         .find_map(|key| key.extract_key())
                         .is_some_and(|key| segment.match_key(&key))
                 })

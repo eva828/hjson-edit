@@ -368,18 +368,31 @@ impl AstNode for Object {
             node.parent().map(|parent| parent.kind()),
             Some(SyntaxKind::Root)
         );
-        let is_root_child = matches!(node.parent().map(|parent| parent.kind()), Some(SyntaxKind::Root));
+        let is_root_child = matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        );
         let layout = collect_layout(&node, owns_trivia);
         let delimiter_style = detect_delimiter_style(&node, SyntaxKind::LBrace);
         let leading_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_leading_trivia(&node, SyntaxKind::Member, SyntaxKind::LBrace, SyntaxKind::RBrace)
+            collect_container_leading_trivia(
+                &node,
+                SyntaxKind::Member,
+                SyntaxKind::LBrace,
+                SyntaxKind::RBrace,
+            )
         };
         let trailing_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_trailing_trivia(&node, SyntaxKind::Member, SyntaxKind::LBrace, SyntaxKind::RBrace)
+            collect_container_trailing_trivia(
+                &node,
+                SyntaxKind::Member,
+                SyntaxKind::LBrace,
+                SyntaxKind::RBrace,
+            )
         };
         let empty_body_insert_index = node
             .children_with_tokens()
@@ -479,18 +492,31 @@ impl AstNode for Array {
             node.parent().map(|parent| parent.kind()),
             Some(SyntaxKind::Root)
         );
-        let is_root_child = matches!(node.parent().map(|parent| parent.kind()), Some(SyntaxKind::Root));
+        let is_root_child = matches!(
+            node.parent().map(|parent| parent.kind()),
+            Some(SyntaxKind::Root)
+        );
         let layout = collect_layout(&node, owns_trivia);
         let delimiter_style = detect_delimiter_style(&node, SyntaxKind::LBracket);
         let leading_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_leading_trivia(&node, SyntaxKind::Value, SyntaxKind::LBracket, SyntaxKind::RBracket)
+            collect_container_leading_trivia(
+                &node,
+                SyntaxKind::Value,
+                SyntaxKind::LBracket,
+                SyntaxKind::RBracket,
+            )
         };
         let trailing_trivia = if is_root_child {
             Vec::new()
         } else {
-            collect_container_trailing_trivia(&node, SyntaxKind::Value, SyntaxKind::LBracket, SyntaxKind::RBracket)
+            collect_container_trailing_trivia(
+                &node,
+                SyntaxKind::Value,
+                SyntaxKind::LBracket,
+                SyntaxKind::RBracket,
+            )
         };
         let empty_body_insert_index = node
             .children_with_tokens()
@@ -982,14 +1008,16 @@ fn collect_container_leading_trivia(
     closing_token_kind: SyntaxKind,
 ) -> Vec<Trivia> {
     let children = node.children_with_tokens().collect::<Vec<_>>();
-    let open_index = children
-        .iter()
-        .position(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == opening_token_kind));
+    let open_index = children.iter().position(
+        |elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == opening_token_kind),
+    );
 
     let start = open_index.map_or(0, |idx| idx + 1);
     let end = children
         .iter()
-        .rposition(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == closing_token_kind))
+        .rposition(
+            |elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == closing_token_kind),
+        )
         .unwrap_or(children.len());
 
     let first_item_index = children[start..end]
@@ -1010,11 +1038,15 @@ fn collect_container_trailing_trivia(
     let children = node.children_with_tokens().collect::<Vec<_>>();
     let start = children
         .iter()
-        .position(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == opening_token_kind))
+        .position(
+            |elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == opening_token_kind),
+        )
         .map_or(0, |idx| idx + 1);
     let end = children
         .iter()
-        .rposition(|elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == closing_token_kind))
+        .rposition(
+            |elem| matches!(elem, NodeOrToken::Token(token) if token.kind() == closing_token_kind),
+        )
         .unwrap_or(children.len());
 
     let last_item_index = children[start..end]

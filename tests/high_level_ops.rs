@@ -104,19 +104,31 @@ fn set_respects_explicit_string_styles() {
     let input = "{\n  name: \"app\"\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.string_style(StringStyle::Preserve).set("name", "api").unwrap();
+    let updated = doc
+        .string_style(StringStyle::Preserve)
+        .set("name", "api")
+        .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: \"api\"\n}\n");
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.string_style(StringStyle::DoubleQuoted).set("name", "api").unwrap();
+    let updated = doc
+        .string_style(StringStyle::DoubleQuoted)
+        .set("name", "api")
+        .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: \"api\"\n}\n");
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.string_style(StringStyle::Block).set("name", "api").unwrap();
+    let updated = doc
+        .string_style(StringStyle::Block)
+        .set("name", "api")
+        .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: '''api'''\n}\n");
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.string_style(StringStyle::Unquoted).set("name", "api").unwrap();
+    let updated = doc
+        .string_style(StringStyle::Unquoted)
+        .set("name", "api")
+        .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: api\n}\n");
 }
 
@@ -124,19 +136,25 @@ fn set_respects_explicit_string_styles() {
 fn header_comments_use_requested_style() {
     let input = "{\n  name: app\n}\n";
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Line);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Line);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "top")
         .unwrap();
     assert_eq!(updated.to_string(), "// top\n{\n  name: app\n}\n");
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Hash);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Hash);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "top")
         .unwrap();
     assert_eq!(updated.to_string(), "# top\n{\n  name: app\n}\n");
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Block);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Block);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "top")
         .unwrap();
@@ -147,7 +165,9 @@ fn header_comments_use_requested_style() {
 fn header_comment_can_be_removed() {
     let input = "{\n  name: app\n}\n";
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Line);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Line);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "top")
         .unwrap();
@@ -169,7 +189,9 @@ fn header_comment_can_be_removed() {
 fn before_comment_is_inserted_before_the_member() {
     let input = "{\n  name: app\n}\n";
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Line);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Line);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from("name:before").unwrap(), "note")
         .unwrap();
@@ -181,7 +203,9 @@ fn before_comment_is_inserted_before_the_member() {
 fn inline_comment_is_rendered_after_the_value() {
     let input = "{\n  name: app\n}\n";
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Line);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Line);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from("name:inline").unwrap(), "note")
         .unwrap();
@@ -193,7 +217,9 @@ fn inline_comment_is_rendered_after_the_value() {
 fn footer_comment_is_appended_after_the_document() {
     let input = "{\n  name: app\n}\n";
 
-    let doc = HjsonDocument::parse(input).unwrap().comment_style(CommentStyle::Hash);
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Hash);
     let updated = doc
         .set_comment(HjsonCommentPath::try_from(":footer").unwrap(), "done")
         .unwrap();
@@ -263,7 +289,10 @@ fn braceless_root_first_member_owns_indent_after_header_trivia() {
     let doc = HjsonDocument::parse(input).unwrap();
     let ast = doc.ast().unwrap();
 
-    assert!(matches!(ast.leading_trivia.last(), Some(Trivia::Newline { .. })));
+    assert!(matches!(
+        ast.leading_trivia.last(),
+        Some(Trivia::Newline { .. })
+    ));
     assert!(!matches!(
         ast.leading_trivia.last(),
         Some(Trivia::Whitespace(_))
