@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::{
     high_level::{ext::RedNodeExt, path::HjsonObjectPath},
-    HjsonEditError, RedNode,
+    HjsonDocument, HjsonEditError, RedNode,
 };
 
 pub struct PathWalker<'a> {
@@ -41,5 +41,11 @@ impl<'a> Iterator for PathWalker<'a> {
             }
             Err(_) => Some(child),
         }
+    }
+}
+
+impl<'a> HjsonDocument {
+    pub fn walker(&'a self, path: &'a HjsonObjectPath) -> PathWalker<'a> {
+        PathWalker::new(self.root.clone(), path)
     }
 }

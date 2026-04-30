@@ -49,12 +49,10 @@ pub trait HjsonDocumentObjectEdit {
 impl HjsonDocumentObjectEdit for HjsonDocument {
     fn get(&self, path: impl AsRef<str>) -> Result<HjsonValue, HjsonEditError> {
         let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
-        let root = self.current_root().clone().document_start_node();
-        let node = path.segments().iter().try_fold(root, |current, segment| {
-            current
-                .child(segment)
-                .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))
-        })?;
+        let node = self
+            .walker(&path)
+            .last()
+            .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))??;
         node.node_to_value()
     }
 
@@ -64,8 +62,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError> {
         let append_mode = self.current_append_mode();
-        let path_str = path.as_ref().to_string();
-        let path = HjsonObjectPath::parse(path_str.clone())?;
+        let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
         let value = value.into();
 
         if let Ok(current) = self.get(&path_str) {
