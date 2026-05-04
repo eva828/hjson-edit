@@ -1,8 +1,6 @@
 use rowan::NodeOrToken;
 use std::ops::Range;
 
-pub mod edit;
-
 use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 use crate::syntax::NewlineKind;
 
@@ -1299,4 +1297,25 @@ fn strip_block_comment(text: &str) -> String {
         .unwrap_or(text)
         .trim()
         .to_string()
+}
+
+pub fn detected_string_style_of_node(node: &RedNode) -> Option<QuoteStyle> {
+    match node.kind() {
+        SyntaxKind::Root => Document::cast(node.clone())
+            .ok()
+            .and_then(|doc| doc.detected_string_style()),
+        SyntaxKind::Object => Object::cast(node.clone())
+            .ok()
+            .and_then(|object| object.detected_string_style()),
+        SyntaxKind::Array => Array::cast(node.clone())
+            .ok()
+            .and_then(|array| array.detected_string_style()),
+        SyntaxKind::Value => Value::cast(node.clone())
+            .ok()
+            .and_then(|value| value.quote_style()),
+        SyntaxKind::Member => Member::cast(node.clone())
+            .ok()
+            .and_then(|member| member.detected_string_style()),
+        _ => None,
+    }
 }

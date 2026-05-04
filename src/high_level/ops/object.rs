@@ -2,8 +2,8 @@ use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 use crate::{
     ast::{
-        edit as ast_edit, Array as AstArray, AstNode, Document as AstDocument, Object as AstObject,
-        QuoteStyle, Trivia,
+        detected_string_style_of_node, Array as AstArray, AstNode, Document as AstDocument,
+        Object as AstObject, QuoteStyle, Trivia,
     },
     high_level::{
         error::HjsonEditError,
@@ -706,7 +706,7 @@ fn render_value_like_node(
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> GreenNode {
-    let detected = ast_edit::detected_string_style_of_node(node);
+    let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
     value.render_value(Some(quote_style))
 }
