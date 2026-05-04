@@ -43,7 +43,7 @@ pub trait HjsonDocumentObjectEdit {
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
-        let node = resolve_parent(self.current_root().clone(), &path)?;
+        let node = resolve_parent(self.syntax_root().clone(), &path)?;
         node.node_to_value()
     }
 
@@ -58,7 +58,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
             }
         }
 
-        let root = self.current_root().clone();
+        let root = self.syntax_root().clone();
         let string_style = self.current_string_style();
         let updated = if path.depth() == 0 {
             replace_root_value(&root, &value, string_style)?
@@ -70,7 +70,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
     }
 
     fn remove(self, path: HjsonObjectPath) -> Result<Self, HjsonEditError> {
-        let root = self.current_root().clone();
+        let root = self.syntax_root().clone();
         let updated = rebuild_tree_with_remove(root.clone(), &path)?;
         Ok(self.root(updated))
     }

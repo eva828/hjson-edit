@@ -88,15 +88,15 @@ impl HjsonDocument {
         }
     }
 
-    pub fn current_string_style(&self) -> StringStyle {
+    pub(crate) fn current_string_style(&self) -> StringStyle {
         self.string_style
     }
 
-    pub fn current_comment_style(&self) -> CommentStyle {
+    pub(crate) fn current_comment_style(&self) -> CommentStyle {
         self.comment_style
     }
 
-    pub fn current_append_mode(&self) -> AppendMode {
+    pub(crate) fn current_append_mode(&self) -> AppendMode {
         self.append_mode
     }
 
@@ -104,7 +104,7 @@ impl HjsonDocument {
         &self.newline
     }
 
-    pub fn current_root(&self) -> &RedNode {
+    pub fn syntax_root(&self) -> &RedNode {
         &self.root
     }
 

@@ -143,7 +143,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 
 impl HjsonDocument {
     fn resolve_member(&self, path: &HjsonObjectPath) -> Result<Member, HjsonEditError> {
-        let mut target = self.current_root().clone().document_start_node();
+        let mut target = self.syntax_root().clone().document_start_node();
         for segment in path.segments() {
             target = target
                 .child(segment)
@@ -239,7 +239,7 @@ fn insert_document_comment(
     let rendered = render_comment_text(style, &comment);
     let newline = doc.current_newline().to_string();
 
-    let root = doc.current_root().clone();
+    let root = doc.syntax_root().clone();
     let comment_node = SyntaxKind::Comment
         .create_node(vec![kind_from_style(style).create_token(&rendered).into()]);
     let header_newline = SyntaxKind::Newline.create_token(&newline);
@@ -266,7 +266,7 @@ fn insert_document_comment(
 }
 
 fn remove_document_comment(doc: &mut HjsonDocument, header: bool) -> Result<(), HjsonEditError> {
-    let root = doc.current_root().clone();
+    let root = doc.syntax_root().clone();
     let children: Vec<_> = root.children_with_tokens().collect();
 
     let range = if header {
