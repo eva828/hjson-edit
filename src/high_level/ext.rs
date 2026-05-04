@@ -1,22 +1,16 @@
 use rowan::NodeOrToken;
 
 use crate::{
-    high_level::{error::HjsonEditError, path::HjsonObjectPath, value::HjsonValue},
+    high_level::{error::HjsonEditError, value::HjsonValue},
     ArrayPathSegment, ObjectPathSegment, PathSegment, RedNode, SyntaxKind,
 };
 
-pub trait RedNodeExt {
+pub(crate) trait RedNodeExt {
     fn children_by_kind(&self, kind: SyntaxKind) -> impl Iterator<Item = RedNode>;
     fn child(&self, path: &PathSegment) -> Option<RedNode>;
-    fn path(&self) -> HjsonObjectPath;
     fn document_start_node(&self) -> RedNode;
-    fn container_depth(&self) -> usize;
     fn extract_key(&self) -> Option<String>;
-    fn member_key(&self) -> Option<String>;
     fn node_to_value(&self) -> Result<HjsonValue, HjsonEditError>;
-    fn to_hjson_value(&self) -> Result<HjsonValue, HjsonEditError> {
-        self.node_to_value()
-    }
 }
 
 impl RedNodeExt for RedNode {
@@ -58,33 +52,6 @@ impl RedNodeExt for RedNode {
         }
     }
 
-    fn path(&self) -> HjsonObjectPath {
-        let mut segments = Vec::new();
-        let mut current = self.clone();
-
-        while let Some(parent) = current.parent() {
-            match parent.kind() {
-                SyntaxKind::Member => {
-                    segments.push(PathSegment::Object(ObjectPathSegment::Key(
-                        parent.member_key().unwrap_or_default(),
-                    )));
-                }
-                SyntaxKind::Array => {
-                    let index = parent
-                        .children_by_kind(SyntaxKind::Value)
-                        .position(|c| c == current)
-                        .unwrap_or(0);
-                    segments.push(PathSegment::Array(ArrayPathSegment::Index(index)));
-                }
-                _ => {}
-            }
-            current = parent;
-        }
-
-        segments.reverse();
-        HjsonObjectPath::new(segments)
-    }
-
     fn document_start_node(&self) -> RedNode {
         if self.kind() == SyntaxKind::Root {
             self.children()
@@ -93,20 +60,6 @@ impl RedNodeExt for RedNode {
         } else {
             self.clone()
         }
-    }
-
-    fn container_depth(&self) -> usize {
-        let mut depth = 0;
-        let mut current = self.parent();
-
-        while let Some(parent) = current {
-            if matches!(parent.kind(), SyntaxKind::Object | SyntaxKind::Array) {
-                depth += 1;
-            }
-            current = parent.parent();
-        }
-
-        depth
     }
 
     fn extract_key(&self) -> Option<String> {
@@ -121,11 +74,6 @@ impl RedNodeExt for RedNode {
             }
             _ => None,
         })
-    }
-
-    fn member_key(&self) -> Option<String> {
-        self.children_by_kind(SyntaxKind::Key)
-            .find_map(|key| key.extract_key())
     }
 
     fn node_to_value(&self) -> Result<HjsonValue, HjsonEditError> {
