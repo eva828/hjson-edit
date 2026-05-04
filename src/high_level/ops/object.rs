@@ -451,6 +451,12 @@ fn set_array_child(
     };
     let items = array_ast.items();
 
+    // Normalize Push to InsertAt at the end
+    let seg = match seg {
+        ArrayPathSegment::Push => &ArrayPathSegment::InsertAt(items.len()),
+        other => other,
+    };
+
     match seg {
         ArrayPathSegment::Index(idx) => {
             let Some(current_value) = items.get(*idx) else {
@@ -470,14 +476,14 @@ fn set_array_child(
                     AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
                     AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
                 };
-                let mut inserted = Vec::new();
-                let indent = "  ".repeat(array_ast.layout.depth + 1);
-                let newline = newline.to_string();
-                let rendered_value = if pretty_nested {
-                    value.render_value_pretty(insert_style, array_ast.layout.depth, &newline)
-                } else {
-                    value.render_value(insert_style)
-                };
+                let inserted = build_append_array_elements(
+                    parent,
+                    &array_ast,
+                    value,
+                    insert_style,
+                    pretty_nested,
+                    newline,
+                )?;
 
                 if items.is_empty() {
                     let range_start = if insert_pos > 0
@@ -489,36 +495,10 @@ fn set_array_child(
                     } else {
                         insert_pos
                     };
-                    inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-                    inserted.push(rendered_value.into());
-                    inserted.push(SyntaxKind::Newline.create_token(&newline).into());
                     return Ok(parent
                         .green()
                         .splice_children(range_start..insert_pos, inserted));
                 }
-
-                if pretty_nested {
-                    inserted.push(SyntaxKind::Newline.create_token(&newline).into());
-                    inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-                    inserted.push(rendered_value.into());
-                    inserted.push(SyntaxKind::Newline.create_token(&newline).into());
-                    inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-                    return Ok(parent
-                        .green()
-                        .splice_children(insert_pos..insert_pos, inserted));
-                }
-
-                if let Some(last_value) = items.last() {
-                    let needs_separator = last_value
-                        .trailing_trivia
-                        .iter()
-                        .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-                    if needs_separator {
-                        inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-                    }
-                }
-                inserted.push(rendered_value.into());
 
                 Ok(parent
                     .green()
@@ -533,40 +513,58 @@ fn set_array_child(
                     .splice_children(insert_pos..insert_pos, inserted))
             }
         }
-        ArrayPathSegment::Push => {
-            let insert_pos = match append_mode {
-                AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
-                AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
-            };
-            let mut inserted = Vec::new();
+        ArrayPathSegment::Push => unreachable!("Push should have been normalized"),
+    }
+}
 
-            if items.is_empty() {
-                let newline = newline.to_string();
-                inserted.push(SyntaxKind::Whitespace.create_token("  ").into());
-                inserted.push(value.render_value(insert_style).into());
-                inserted.push(SyntaxKind::Newline.create_token(&newline).into());
-                return Ok(parent
-                    .green()
-                    .splice_children(insert_pos..insert_pos, inserted));
-            }
+fn build_append_array_elements(
+    _parent: &RedNode,
+    array_ast: &AstArray,
+    value: &HjsonValue,
+    insert_style: Option<QuoteStyle>,
+    pretty_nested: bool,
+    newline: &str,
+) -> Result<Vec<crate::GreenElement>, HjsonEditError> {
+    let mut inserted = Vec::new();
+    let items = array_ast.items();
+    let indent = "  ".repeat(array_ast.layout.depth + 1);
+    let newline = newline.to_string();
 
-            if let Some(last_value) = items.last() {
-                let needs_separator = last_value
-                    .trailing_trivia
-                    .iter()
-                    .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-                if needs_separator {
-                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-                }
-            }
-            inserted.push(value.render_value(insert_style).into());
+    let rendered_value = if pretty_nested {
+        value.render_value_pretty(insert_style, array_ast.layout.depth, &newline)
+    } else {
+        value.render_value(insert_style)
+    };
 
-            Ok(parent
-                .green()
-                .splice_children(insert_pos..insert_pos, inserted))
+    if items.is_empty() {
+        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        inserted.push(rendered_value.into());
+        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        return Ok(inserted);
+    }
+
+    if pretty_nested {
+        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        inserted.push(rendered_value.into());
+        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        return Ok(inserted);
+    }
+
+    if let Some(last_value) = items.last() {
+        let needs_separator = last_value
+            .trailing_trivia
+            .iter()
+            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+        if needs_separator {
+            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
         }
     }
+    inserted.push(rendered_value.into());
+
+    Ok(inserted)
 }
 
 fn remove_root_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
