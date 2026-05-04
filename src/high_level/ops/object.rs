@@ -457,7 +457,7 @@ fn set_array_child(
     match seg {
         ArrayPathSegment::Index(idx) => {
             let Some(current_value) = items.get(*idx) else {
-                return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+                return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
                     last.clone(),
                 ])));
             };
@@ -597,7 +597,7 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
     let key = match last {
         PathSegment::Object(ObjectPathSegment::Key(key)) => key,
         _ => {
-            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
                 last.clone(),
             ])))
         }
@@ -610,7 +610,7 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         .position(|member| member.member_key().as_deref() == Some(key.as_str()));
 
     let Some(member_pos) = member_pos else {
-        return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+        return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
             last.clone(),
         ])));
     };
@@ -625,7 +625,7 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
     let seg = match last {
         PathSegment::Array(seg) => seg,
         _ => {
-            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
                 last.clone(),
             ])))
         }
@@ -639,7 +639,7 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
     };
     let item = items
         .get(idx)
-        .ok_or_else(|| HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![last.clone()])))?;
+        .ok_or_else(|| HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![last.clone()])))?;
 
     Ok(parent
         .green()
@@ -681,7 +681,7 @@ fn rebuild_child_with_set(
         SyntaxKind::Value => {
             set_value_child(child, last, value, string_style, append_mode, pretty_nested, newline)
         }
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
             last.clone(),
         ]))),
     }
@@ -695,7 +695,7 @@ fn rebuild_child_with_remove(
         SyntaxKind::Object => remove_object_child(child, last),
         SyntaxKind::Array => remove_array_child(child, last),
         SyntaxKind::Value => remove_value_child(child, last),
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::new(vec![
+        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
             last.clone(),
         ]))),
     }

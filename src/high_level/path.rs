@@ -52,8 +52,8 @@ impl TryFrom<&str> for HjsonCommentPath {
 }
 
 impl HjsonObjectPath {
-    pub fn new(path: impl Into<HjsonObjectPath>) -> Self {
-        path.into()
+    pub fn from_segments(segments: Vec<PathSegment>) -> Self {
+        Self { segments }
     }
 
     pub fn segments(&self) -> &[PathSegment] {
@@ -152,7 +152,7 @@ impl HjsonObjectPath {
             return None;
         }
         let (left, right) = self.segments.split_at(index);
-        Some((Self::new(left.to_vec()), Self::new(right.to_vec())))
+        Some((Self::from_segments(left.to_vec()), Self::from_segments(right.to_vec())))
     }
 
     pub fn depth(&self) -> usize {
@@ -176,17 +176,17 @@ impl std::str::FromStr for HjsonObjectPath {
     }
 }
 
-impl Into<HjsonObjectPath> for &[PathSegment] {
-    fn into(self) -> HjsonObjectPath {
-        HjsonObjectPath {
-            segments: self.to_vec(),
-        }
+impl From<Vec<PathSegment>> for HjsonObjectPath {
+    fn from(segments: Vec<PathSegment>) -> Self {
+        Self { segments }
     }
 }
 
-impl Into<HjsonObjectPath> for Vec<PathSegment> {
-    fn into(self) -> HjsonObjectPath {
-        HjsonObjectPath { segments: self }
+impl From<&[PathSegment]> for HjsonObjectPath {
+    fn from(segments: &[PathSegment]) -> Self {
+        Self {
+            segments: segments.to_vec(),
+        }
     }
 }
 
