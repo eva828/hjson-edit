@@ -29,6 +29,13 @@ pub trait HjsonDocumentCommentEdit {
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
+    fn append_comment(
+        self,
+        path: HjsonCommentPath,
+        comment: impl Into<String>,
+    ) -> Result<Self, HjsonEditError>
+    where
+        Self: Sized;
     fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
@@ -134,6 +141,20 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 Ok(self)
             }
         }
+    }
+
+    fn append_comment(
+        self,
+        path: HjsonCommentPath,
+        comment: impl Into<String>,
+    ) -> Result<Self, HjsonEditError> {
+        let comment = comment.into();
+        let existing = self.get_comment(path.clone())?;
+        let new_comment = match existing {
+            Some(existing) => format!("{}\n{}", existing, comment),
+            None => comment,
+        };
+        self.set_comment(path, new_comment)
     }
 
     fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {

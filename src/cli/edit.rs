@@ -392,13 +392,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 doc = doc.set_comment(path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
-                // getとsetを使ってappendを実装
-                let existing = doc.get_comment(path.clone())?;
-                let new_comment = match existing {
-                    Some(existing) => format!("{}\n{}", existing, text),
-                    None => text,
-                };
-                doc = doc.set_comment(path, new_comment)?;
+                doc = doc.append_comment(path, text)?;
             }
             EditOp::CommentRemove { path } => {
                 doc = doc.remove_comment(path)?;
