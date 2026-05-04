@@ -4,30 +4,7 @@ use std::ops::Range;
 pub mod edit;
 
 use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum NewlineKind {
-    #[default]
-    Lf,
-    CrLf,
-}
-
-impl NewlineKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Lf => "\n",
-            Self::CrLf => "\r\n",
-        }
-    }
-
-    pub fn from_text(text: &str) -> Option<Self> {
-        match text {
-            "\n" => Some(Self::Lf),
-            "\r\n" => Some(Self::CrLf),
-            _ => None,
-        }
-    }
-}
+use crate::syntax::NewlineKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuoteStyle {

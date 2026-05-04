@@ -6,7 +6,6 @@ use crate::{
         error::HjsonEditError,
         ext::RedNodeExt,
         path::{HjsonCommentPath, HjsonObjectPath},
-        style::DetectNewline,
         HjsonDocument,
     },
     syntax::{RedNode, SyntaxKind},
@@ -86,8 +85,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                     .parent()
                     .ok_or(HjsonEditError::ParentNotFound)?;
 
-                let newline =
-                    SyntaxKind::Newline.create_token(self.current_root().detect_newline().as_str());
+                let newline = SyntaxKind::Newline.create_token(self.current_newline());
                 let indent =
                     SyntaxKind::Whitespace.create_token(&detect_indent_for_member(&member));
                 let comment_node =
@@ -239,7 +237,7 @@ fn insert_document_comment(
 ) -> Result<HjsonDocument, HjsonEditError> {
     let style = resolve_comment_style(doc.current_comment_style(), &comment, existing_style);
     let rendered = render_comment_text(style, &comment);
-    let newline = doc.current_root().detect_newline().as_str().to_string();
+    let newline = doc.current_newline().to_string();
 
     let root = doc.current_root().clone();
     let comment_node = SyntaxKind::Comment

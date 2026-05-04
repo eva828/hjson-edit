@@ -5,6 +5,35 @@ use rowan::Language;
 use rowan::{SyntaxNode, SyntaxToken};
 use std::fmt;
 
+/// 改行コードの種類
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum NewlineKind {
+    /// Line Feed (`\n`)
+    #[default]
+    Lf,
+    /// Carriage Return + Line Feed (`\r\n`)
+    CrLf,
+}
+
+impl NewlineKind {
+    /// 改行コードを文字列として取得
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lf => "\n",
+            Self::CrLf => "\r\n",
+        }
+    }
+
+    /// 改行文字列から改行コード種別を解析
+    pub fn from_text(text: &str) -> Option<Self> {
+        match text {
+            "\n" => Some(Self::Lf),
+            "\r\n" => Some(Self::CrLf),
+            _ => None,
+        }
+    }
+}
+
 /// HJSON構文要素の種別
 ///
 /// 行コメント、ブロックコメント、空白も重要な構文要素として保持する
