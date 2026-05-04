@@ -232,7 +232,7 @@ pub(crate) fn rebuild_tree_with_remove(
 }
 
 fn resolve_parent(root: RedNode, path: &HjsonObjectPath) -> Result<RedNode, HjsonEditError> {
-    let mut current = root;
+    let mut current = root.document_start_node();
     for segment in path.segments() {
         current = current
             .child(segment)
