@@ -33,22 +33,17 @@ pub enum AppendMode {
 }
 
 pub trait HjsonDocumentObjectEdit {
-    fn get(&self, path: impl AsRef<str>) -> Result<HjsonValue, HjsonEditError>;
-    fn set(
-        self,
-        path: impl AsRef<str>,
-        value: impl Into<HjsonValue>,
-    ) -> Result<Self, HjsonEditError>
+    fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError>;
+    fn set(self, path: HjsonObjectPath, value: impl Into<HjsonValue>) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
-    fn remove(self, path: impl AsRef<str>) -> Result<Self, HjsonEditError>
+    fn remove(self, path: HjsonObjectPath) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
 }
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
-    fn get(&self, path: impl AsRef<str>) -> Result<HjsonValue, HjsonEditError> {
-        let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
+    fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
         let node = self
             .walker(&path)
             .last()
@@ -56,16 +51,11 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         node.node_to_value()
     }
 
-    fn set(
-        self,
-        path: impl AsRef<str>,
-        value: impl Into<HjsonValue>,
-    ) -> Result<Self, HjsonEditError> {
+    fn set(self, path: HjsonObjectPath, value: impl Into<HjsonValue>) -> Result<Self, HjsonEditError> {
         let append_mode = self.current_append_mode();
-        let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
         let value = value.into();
 
-        if let Ok(current) = self.get(&path_str) {
+        if let Ok(current) = self.get(path.clone()) {
             if current == value {
                 return Ok(self);
             }
@@ -82,8 +72,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         Ok(self.root(updated))
     }
 
-    fn remove(self, path: impl AsRef<str>) -> Result<Self, HjsonEditError> {
-        let path = HjsonObjectPath::parse(path.as_ref().to_string())?;
+    fn remove(self, path: HjsonObjectPath) -> Result<Self, HjsonEditError> {
         let root = self.current_root().clone();
         let updated = rebuild_tree_with_remove(root.clone(), &path)?;
         Ok(self.root(updated))

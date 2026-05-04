@@ -1,4 +1,4 @@
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonValue};
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath, HjsonValue};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -11,10 +11,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Modify the document using the available methods
     let doc = doc
-        .set("description", "A multi-line\ndescription goes here.")?
-        .set("type", "library")?
         .set(
-            "keywords",
+            HjsonObjectPath::parse("description").unwrap(),
+            "A multi-line\ndescription goes here.",
+        )?
+        .set(HjsonObjectPath::parse("type").unwrap(), "library")?
+        .set(
+            HjsonObjectPath::parse("keywords").unwrap(),
             vec![
                 HjsonValue::String("hjson".to_string()),
                 HjsonValue::String("parser".to_string()),

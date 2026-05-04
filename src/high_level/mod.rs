@@ -104,7 +104,7 @@ impl HjsonDocument {
         &self.newline
     }
 
-    pub(crate) fn current_root(&self) -> &RedNode {
+    pub fn current_root(&self) -> &RedNode {
         &self.root
     }
 

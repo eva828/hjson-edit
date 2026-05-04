@@ -7,7 +7,7 @@ use hjson_edit::{
             comment::{CommentStyle, HjsonDocumentCommentEdit},
             object::{AppendMode, HjsonDocumentObjectEdit, StringStyle},
         },
-        path::HjsonCommentPath,
+        path::{HjsonCommentPath, HjsonObjectPath},
         HjsonDocument,
     },
 };
@@ -19,7 +19,9 @@ fn set_push_preserves_crlf() {
     let expected = "{\n  items: [\r\n    1\r\n    2\r\n  3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("items[-]", 3).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("items[-]").unwrap(), 3)
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -29,7 +31,9 @@ fn set_updates_existing_array_item() {
     let expected = "{\n  items: [1, 4, 3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("items[1]", 4).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("items[1]").unwrap(), 4)
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -39,7 +43,9 @@ fn set_updates_existing_object_value() {
     let expected = "{\n  name: api\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("name", "api").unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("name").unwrap(), "api")
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -49,7 +55,9 @@ fn set_insert_at_appends_when_index_is_past_end() {
     let expected = "{\n  items: [1, 2, 3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("items[+10]", 3).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("items[+10]").unwrap(), 3)
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -59,7 +67,9 @@ fn set_insert_at_inserts_in_the_middle() {
     let expected = "{\n  items: [1,2 3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("items[+1]", 2).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("items[+1]").unwrap(), 2)
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -69,7 +79,9 @@ fn set_adds_nested_object_member() {
     let expected = "{\n  server: { host: localhost , port: 8080}\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("server.port", 8080).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("server.port").unwrap(), 8080)
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -78,13 +90,17 @@ fn remove_object_and_array_members() {
     let object_input = "{\n  server: { host: localhost, port: 8080 }\n}\n";
     let object_expected = "{\n  server: { host: localhost,}\n}\n";
     let object_doc = HjsonDocument::parse(object_input).unwrap();
-    let object_updated = object_doc.remove("server.port").unwrap();
+    let object_updated = object_doc
+        .remove(HjsonObjectPath::parse("server.port").unwrap())
+        .unwrap();
     assert_eq!(object_updated.to_string(), object_expected);
 
     let array_input = "{\n  items: [1, 2, 3]\n}\n";
     let array_expected = "{\n  items: [1, 2,]\n}\n";
     let array_doc = HjsonDocument::parse(array_input).unwrap();
-    let array_updated = array_doc.remove("items[-]").unwrap();
+    let array_updated = array_doc
+        .remove(HjsonObjectPath::parse("items[-]").unwrap())
+        .unwrap();
     assert_eq!(array_updated.to_string(), array_expected);
 }
 
@@ -94,7 +110,7 @@ fn remove_member_cleans_up_trivia_and_avoids_empty_lines() {
     let expected = "{\n  a: aaa,\n  b: bbb\n  d: ddd\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.remove("c").unwrap();
+    let updated = doc.remove(HjsonObjectPath::parse("c").unwrap()).unwrap();
 
     assert_eq!(updated.to_string(), expected);
 }
@@ -106,28 +122,28 @@ fn set_respects_explicit_string_styles() {
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
         .string_style(StringStyle::Preserve)
-        .set("name", "api")
+        .set(HjsonObjectPath::parse("name").unwrap(), "api")
         .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: \"api\"\n}\n");
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
         .string_style(StringStyle::DoubleQuoted)
-        .set("name", "api")
+        .set(HjsonObjectPath::parse("name").unwrap(), "api")
         .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: \"api\"\n}\n");
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
         .string_style(StringStyle::Block)
-        .set("name", "api")
+        .set(HjsonObjectPath::parse("name").unwrap(), "api")
         .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: '''api'''\n}\n");
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
         .string_style(StringStyle::Unquoted)
-        .set("name", "api")
+        .set(HjsonObjectPath::parse("name").unwrap(), "api")
         .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: api\n}\n");
 }
@@ -233,7 +249,7 @@ fn root_object_without_braces_can_be_edited() {
     let expected = "name: app\nport: 9090\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("port", 9090).unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("port").unwrap(), 9090).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -242,13 +258,15 @@ fn set_inserts_into_empty_object_and_array() {
     let obj_input = "{\n}\n";
     let obj_expected = "{\n  name: app\n}\n";
     let obj_doc = HjsonDocument::parse(obj_input).unwrap();
-    let obj_updated = obj_doc.set("name", "app").unwrap();
+    let obj_updated = obj_doc
+        .set(HjsonObjectPath::parse("name").unwrap(), "app")
+        .unwrap();
     assert_eq!(obj_updated.to_string(), obj_expected);
 
     let arr_input = "[\n]\n";
     let arr_expected = "[\n  1\n]\n";
     let arr_doc = HjsonDocument::parse(arr_input).unwrap();
-    let arr_updated = arr_doc.set("[-]", 1).unwrap();
+    let arr_updated = arr_doc.set(HjsonObjectPath::parse("[-]").unwrap(), 1).unwrap();
     assert_eq!(arr_updated.to_string(), arr_expected);
 }
 
@@ -258,7 +276,9 @@ fn set_creates_missing_parents() {
     let expected = "{\n  root: {\n    new: {\n      nested: value\n    }\n  }\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("root.new.nested", "value").unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("root.new.nested").unwrap(), "value")
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -268,7 +288,7 @@ fn set_existing_key_preserves_comments() {
     let expected = "{\n  // keep this note\n  name: api\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set("name", "api").unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("name").unwrap(), "api").unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -278,7 +298,9 @@ fn remove_last_item_preserves_previous_comma() {
     let expected = "{\n  keep: 1,\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.remove("remove").unwrap();
+    let updated = doc
+        .remove(HjsonObjectPath::parse("remove").unwrap())
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -340,7 +362,7 @@ fn set_append_before_footer_inserts_member_above_braceless_footer_comment() {
     let doc = HjsonDocument::parse(input)
         .unwrap()
         .append_mode(AppendMode::BeforeFooter);
-    let updated = doc.set("port", 8080).unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("port").unwrap(), 8080).unwrap();
     let output = updated.to_string();
 
     let port_pos = output.find("port: 8080").unwrap();
@@ -355,7 +377,7 @@ fn set_append_after_comments_inserts_member_below_braceless_footer_comment() {
     let doc = HjsonDocument::parse(input)
         .unwrap()
         .append_mode(AppendMode::AfterComments);
-    let updated = doc.set("port", 8080).unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("port").unwrap(), 8080).unwrap();
     let output = updated.to_string();
 
     let port_pos = output.find("port: 8080").unwrap();

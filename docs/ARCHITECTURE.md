@@ -465,7 +465,7 @@ CLI の役割はあくまで薄いシェルであり、コアロジックはラ�
 ### ライブラリ利用
 
 ```/dev/null/example.rs#L1-13
-use hjson_edit::HjsonDocument;
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath};
 
 let input = r#"
 {
@@ -474,7 +474,7 @@ let input = r#"
 "#;
 
 let document = HjsonDocument::parse(input)?;
-let updated = document.set("name", "api")?;
+let updated = document.set(HjsonObjectPath::parse("name")?, "api")?;
 println!("{}", updated);
 ```
 

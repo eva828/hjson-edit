@@ -29,7 +29,7 @@ hjson-edit edit config.hjson --set server.host localhost --set items[-] newValue
 ### ライブラリ
 
 ```rust
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit};
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath};
 
 let input = r#"{
     // Configuration
@@ -39,7 +39,7 @@ let input = r#"{
 
 let document = HjsonDocument::parse(input)?;
 
-let edited = document.set("name", "api")?;
+let edited = document.set(HjsonObjectPath::parse("name")?, "api")?;
 assert!(edited.to_string().contains("name: api"));
 ```
 

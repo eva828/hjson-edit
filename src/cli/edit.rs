@@ -6,7 +6,7 @@ use hjson_edit::high_level::{
         comment::{CommentStyle, HjsonDocumentCommentEdit},
         object::{HjsonDocumentObjectEdit, StringStyle},
     },
-    path::HjsonCommentPath,
+    path::{HjsonCommentPath, HjsonObjectPath},
     value::HjsonValue,
     HjsonDocument,
 };
@@ -374,10 +374,19 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 string_style,
             } => {
                 let style = string_style.unwrap_or(StringStyle::Preserve);
-                doc = doc.string_style(style).set(path, value)?;
+                doc = doc
+                    .string_style(style)
+                    .set(
+                        HjsonObjectPath::parse(&path)
+                            .with_context(|| format!("Invalid path: {path}"))?,
+                        value,
+                    )?;
             }
             EditOp::Remove { path } => {
-                doc = doc.remove(path)?;
+                doc = doc.remove(
+                    HjsonObjectPath::parse(&path)
+                        .with_context(|| format!("Invalid path: {path}"))?,
+                )?;
             }
             EditOp::CommentSet { path, text } => {
                 doc = doc.set_comment(path, text)?;
