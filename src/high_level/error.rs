@@ -1,7 +1,7 @@
 use line_index::LineIndex;
 
 use crate::{
-    high_level::{path::HjsonObjectPath, value::HjsonValue},
+    high_level::path::HjsonObjectPath,
     syntax::lexer::LexError,
     ParseError, SyntaxKind,
 };
@@ -19,11 +19,6 @@ pub enum HjsonEditError {
     },
     #[error("Parent node not found")]
     ParentNotFound,
-    #[error("Type mismatch: expected {expected:?}, found {found:?}")]
-    TypeMismatch {
-        expected: HjsonValue,
-        found: HjsonValue,
-    },
     #[error("Parse errors:\n{}", format_parse_errors(errors, line_index))]
     ParseError {
         errors: Vec<ParseError>,
