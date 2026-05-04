@@ -262,9 +262,6 @@ impl HjsonValue {
         builder.finish()
     }
 
-    pub fn render_scalar(&self, string_style: Option<QuoteStyle>) -> GreenNode {
-        self.render_value(string_style)
-    }
 }
 
 fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
