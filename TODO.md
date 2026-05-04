@@ -1,35 +1,5 @@
 ## 優先度中: レンダリング・変換処理の重複/不整合
 
-### 13. 文字列 decode / strip / escape の実装が複数あり、挙動が揃っていない
-
-対象:
-
-- `hjson-edit/src/high_level/ext.rs#L253-L319`
-- `hjson-edit/src/high_level/ext.rs#L321-L359`
-- `hjson-edit/src/ast/mod.rs#L959-L971`
-- `hjson-edit/src/high_level/value.rs#L269-L292`
-
-問題点:
-
-- `high_level/ext.rs` の `decode_double_quoted_lossless()` は escape sequence や unicode surrogate pair まで処理します。
-- `ast/mod.rs` の `strip_quotes()` は引用符を外すだけで escape decode しません。
-- `strip_block_string_lossless()` は block string の改行・インデント正規化をします。
-- `ast/mod.rs` の `strip_block()` は `'''` を外すだけです。
-- `render_string()` / `escape_double_quoted()` は `\\` と `\"` だけ escape し、改行やタブなどは処理していません。
-
-影響:
-
-- `doc.get()` で得た値と `doc.ast()` から得た値の文字列 body が異なる可能性があります。
-- `get -> set` の往復で escape の扱いが変わる可能性があります。
-- block string の body 解釈が high_level と ast でズレます。
-
-整理案:
-
-- `string_codec` のような共通モジュールに集約。
-- AST projection と high_level value 変換で同じ decode/encode を使う。
-
----
-
 ### 14. `render_value` / `render_value_pretty` / `render_member` / `render_member_pretty` が重複している
 
 対象:

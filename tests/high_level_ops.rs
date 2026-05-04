@@ -249,7 +249,9 @@ fn root_object_without_braces_can_be_edited() {
     let expected = "name: app\nport: 9090\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set(HjsonObjectPath::parse("port").unwrap(), 9090).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("port").unwrap(), 9090)
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -266,7 +268,9 @@ fn set_inserts_into_empty_object_and_array() {
     let arr_input = "[\n]\n";
     let arr_expected = "[\n  1\n]\n";
     let arr_doc = HjsonDocument::parse(arr_input).unwrap();
-    let arr_updated = arr_doc.set(HjsonObjectPath::parse("[-]").unwrap(), 1).unwrap();
+    let arr_updated = arr_doc
+        .set(HjsonObjectPath::parse("[-]").unwrap(), 1)
+        .unwrap();
     assert_eq!(arr_updated.to_string(), arr_expected);
 }
 
@@ -288,7 +292,9 @@ fn set_existing_key_preserves_comments() {
     let expected = "{\n  // keep this note\n  name: api\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc.set(HjsonObjectPath::parse("name").unwrap(), "api").unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("name").unwrap(), "api")
+        .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -362,7 +368,9 @@ fn set_append_before_footer_inserts_member_above_braceless_footer_comment() {
     let doc = HjsonDocument::parse(input)
         .unwrap()
         .append_mode(AppendMode::BeforeFooter);
-    let updated = doc.set(HjsonObjectPath::parse("port").unwrap(), 8080).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("port").unwrap(), 8080)
+        .unwrap();
     let output = updated.to_string();
 
     let port_pos = output.find("port: 8080").unwrap();
@@ -377,7 +385,9 @@ fn set_append_after_comments_inserts_member_below_braceless_footer_comment() {
     let doc = HjsonDocument::parse(input)
         .unwrap()
         .append_mode(AppendMode::AfterComments);
-    let updated = doc.set(HjsonObjectPath::parse("port").unwrap(), 8080).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("port").unwrap(), 8080)
+        .unwrap();
     let output = updated.to_string();
 
     let port_pos = output.find("port: 8080").unwrap();

@@ -3,10 +3,7 @@ use rowan::NodeOrToken;
 use crate::{
     ast::{AstNode, CommentKind, Member, Trivia},
     high_level::{
-        error::HjsonEditError,
-        path::HjsonCommentPath,
-        resolve::PathResolver,
-        HjsonDocument,
+        error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, HjsonDocument,
     },
     syntax::{RedNode, SyntaxKind},
 };

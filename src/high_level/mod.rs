@@ -6,10 +6,9 @@ pub mod error;
 pub mod ext;
 pub mod ops;
 pub mod path;
+pub(crate) mod resolve;
 pub mod style;
 pub mod value;
-pub(crate) mod resolve;
-
 
 use crate::ast as semantic_ast;
 use crate::ast::AstNode;

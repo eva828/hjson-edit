@@ -24,10 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Modify the document - each operation returns a Result
     let updated = doc
         .set(HjsonObjectPath::parse("version").unwrap(), "0.1.0")? // Adds a new key
-        .set(
-            HjsonObjectPath::parse("dependencies.clap").unwrap(),
-            "4.6",
-        )? // Updates an existing key
+        .set(HjsonObjectPath::parse("dependencies.clap").unwrap(), "4.6")? // Updates an existing key
         .set(HjsonObjectPath::parse("features[-]").unwrap(), "extra")? // Adds to an array using push syntax
         .remove(HjsonObjectPath::parse("name").unwrap())?; // Removes a key
 

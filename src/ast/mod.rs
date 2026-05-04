@@ -1,8 +1,8 @@
 use rowan::NodeOrToken;
 use std::ops::Range;
 
-use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 use crate::syntax::NewlineKind;
+use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuoteStyle {
@@ -16,6 +16,152 @@ pub enum CommentKind {
     Line,
     Hash,
     Block,
+}
+
+impl CommentKind {
+    pub fn decode_body(&self, raw: &str) -> String {
+        match self {
+            CommentKind::Line => raw
+                .strip_prefix("//")
+                .unwrap_or(raw)
+                .trim_start()
+                .to_string(),
+            CommentKind::Hash => raw
+                .strip_prefix('#')
+                .unwrap_or(raw)
+                .trim_start()
+                .to_string(),
+            CommentKind::Block => raw
+                .strip_prefix("/*")
+                .and_then(|s| s.strip_suffix("*/"))
+                .unwrap_or(raw)
+                .trim()
+                .to_string(),
+        }
+    }
+}
+
+impl QuoteStyle {
+    pub fn decode_body(&self, raw: &str) -> String {
+        match self {
+            QuoteStyle::DoubleQuoted => {
+                let inner = raw
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .unwrap_or(raw);
+                let mut out = String::new();
+                let mut chars = inner.chars().peekable();
+
+                while let Some(c) = chars.next() {
+                    if c != '\\' {
+                        out.push(c);
+                        continue;
+                    }
+
+                    match chars.next() {
+                        Some('"') => out.push('"'),
+                        Some('\\') => out.push('\\'),
+                        Some('/') => out.push('/'),
+                        Some('b') => out.push('\u{0008}'),
+                        Some('f') => out.push('\u{000C}'),
+                        Some('n') => out.push('\n'),
+                        Some('r') => out.push('\r'),
+                        Some('t') => out.push('\t'),
+                        Some('u') => {
+                            let mut hex = String::new();
+                            for _ in 0..4 {
+                                if let Some(ch) = chars.next() {
+                                    hex.push(ch);
+                                }
+                            }
+
+                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                if (0xD800..=0xDBFF).contains(&code) {
+                                    let mut lookahead = chars.clone();
+                                    if lookahead.next() == Some('\\')
+                                        && lookahead.next() == Some('u')
+                                    {
+                                        let mut low_hex = String::new();
+                                        for _ in 0..4 {
+                                            if let Some(ch) = lookahead.next() {
+                                                low_hex.push(ch);
+                                            }
+                                        }
+                                        if let Ok(low) = u32::from_str_radix(&low_hex, 16) {
+                                            if (0xDC00..=0xDFFF).contains(&low) {
+                                                let combined = 0x10000
+                                                    + (((code - 0xD800) << 10) | (low - 0xDC00));
+                                                if let Some(ch) = char::from_u32(combined) {
+                                                    out.push(ch);
+                                                    chars = lookahead;
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if let Some(ch) = char::from_u32(code) {
+                                    out.push(ch);
+                                }
+                            }
+                        }
+                        Some(other) => out.push(other),
+                        None => break,
+                    }
+                }
+
+                out
+            }
+            QuoteStyle::Block => {
+                let inner = raw
+                    .strip_prefix("'''")
+                    .and_then(|s| s.strip_suffix("'''"))
+                    .unwrap_or(raw)
+                    .replace("\r\n", "\n")
+                    .replace('\r', "\n");
+
+                let mut lines = inner.split('\n').collect::<Vec<_>>();
+                while lines.first().is_some_and(|line| line.trim().is_empty()) {
+                    lines.remove(0);
+                }
+                while lines.last().is_some_and(|line| line.trim().is_empty()) {
+                    lines.pop();
+                }
+
+                if lines.is_empty() {
+                    return String::new();
+                }
+
+                let indent = lines
+                    .iter()
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| line.chars().take_while(|c| matches!(c, ' ' | '\t')).count())
+                    .min()
+                    .unwrap_or(0);
+
+                lines
+                    .into_iter()
+                    .map(|line| {
+                        if line.trim().is_empty() {
+                            String::new()
+                        } else {
+                            line.chars().skip(indent).collect::<String>()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            QuoteStyle::Unquoted => raw.to_string(),
+        }
+    }
+
+    pub fn encode_body(&self, body: &str) -> String {
+        match self {
+            QuoteStyle::DoubleQuoted => body.replace('\\', "\\\\").replace('"', "\\\""),
+            QuoteStyle::Block | QuoteStyle::Unquoted => body.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -745,12 +891,13 @@ impl Key {
             .find_map(|elem| match elem {
                 NodeOrToken::Token(token) => {
                     let text = token.text().to_string();
-                    match token.kind() {
-                        SyntaxKind::String => Some(strip_quotes(&text)),
-                        SyntaxKind::BlockString => Some(strip_block(&text)),
-                        SyntaxKind::UnquotedString => Some(text),
-                        _ => None,
-                    }
+                    let style = match token.kind() {
+                        SyntaxKind::String => QuoteStyle::DoubleQuoted,
+                        SyntaxKind::BlockString => QuoteStyle::Block,
+                        SyntaxKind::UnquotedString => QuoteStyle::Unquoted,
+                        _ => return None,
+                    };
+                    Some(style.decode_body(&text))
                 }
                 _ => None,
             })
@@ -809,42 +956,52 @@ impl Value {
                     });
                 }
             },
-            NodeOrToken::Token(token) => match token.kind() {
-                SyntaxKind::String => ValueContent::Scalar(ScalarValue::String(StringValue {
-                    raw: token.text().to_string(),
-                    body: strip_quotes(&token.text().to_string()),
-                    quote_style: QuoteStyle::DoubleQuoted,
-                })),
-                SyntaxKind::BlockString => ValueContent::Scalar(ScalarValue::String(StringValue {
-                    raw: token.text().to_string(),
-                    body: strip_block(&token.text().to_string()),
-                    quote_style: QuoteStyle::Block,
-                })),
-                SyntaxKind::UnquotedString => {
-                    ValueContent::Scalar(ScalarValue::String(StringValue {
-                        raw: token.text().to_string(),
-                        body: token.text().to_string(),
-                        quote_style: QuoteStyle::Unquoted,
-                    }))
+            NodeOrToken::Token(token) => {
+                let raw = token.text().to_string();
+                match token.kind() {
+                    SyntaxKind::String => {
+                        let style = QuoteStyle::DoubleQuoted;
+                        ValueContent::Scalar(ScalarValue::String(StringValue {
+                            raw: raw.clone(),
+                            body: style.decode_body(&raw),
+                            quote_style: style,
+                        }))
+                    }
+                    SyntaxKind::BlockString => {
+                        let style = QuoteStyle::Block;
+                        ValueContent::Scalar(ScalarValue::String(StringValue {
+                            raw: raw.clone(),
+                            body: style.decode_body(&raw),
+                            quote_style: style,
+                        }))
+                    }
+                    SyntaxKind::UnquotedString => {
+                        let style = QuoteStyle::Unquoted;
+                        ValueContent::Scalar(ScalarValue::String(StringValue {
+                            raw: raw.clone(),
+                            body: style.decode_body(&raw),
+                            quote_style: style,
+                        }))
+                    }
+                    SyntaxKind::Integer => ValueContent::Scalar(ScalarValue::Integer {
+                        raw: raw.clone(),
+                        parsed: raw.parse::<i64>().ok(),
+                    }),
+                    SyntaxKind::Float => ValueContent::Scalar(ScalarValue::Float {
+                        raw: raw.clone(),
+                        parsed: raw.parse::<f64>().ok(),
+                    }),
+                    SyntaxKind::True => ValueContent::Scalar(ScalarValue::Bool(true)),
+                    SyntaxKind::False => ValueContent::Scalar(ScalarValue::Bool(false)),
+                    SyntaxKind::Null => ValueContent::Scalar(ScalarValue::Null),
+                    other => {
+                        return Err(HjsonEditError::UnexpectedStructure {
+                            expected: SyntaxKind::Value,
+                            found: other,
+                        });
+                    }
                 }
-                SyntaxKind::Integer => ValueContent::Scalar(ScalarValue::Integer {
-                    raw: token.text().to_string(),
-                    parsed: token.text().to_string().parse::<i64>().ok(),
-                }),
-                SyntaxKind::Float => ValueContent::Scalar(ScalarValue::Float {
-                    raw: token.text().to_string(),
-                    parsed: token.text().to_string().parse::<f64>().ok(),
-                }),
-                SyntaxKind::True => ValueContent::Scalar(ScalarValue::Bool(true)),
-                SyntaxKind::False => ValueContent::Scalar(ScalarValue::Bool(false)),
-                SyntaxKind::Null => ValueContent::Scalar(ScalarValue::Null),
-                other => {
-                    return Err(HjsonEditError::UnexpectedStructure {
-                        expected: SyntaxKind::Value,
-                        found: other,
-                    });
-                }
-            },
+            }
         })
     }
 
@@ -931,20 +1088,6 @@ impl ArrayItem {
     }
 }
 
-fn strip_quotes(text: &str) -> String {
-    text.strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .unwrap_or(text)
-        .to_string()
-}
-
-fn strip_block(text: &str) -> String {
-    text.strip_prefix("'''")
-        .and_then(|s| s.strip_suffix("'''"))
-        .unwrap_or(text)
-        .to_string()
-}
-
 fn collect_comments(node: &RedNode) -> Vec<Comment> {
     node.children()
         .filter(|child| child.kind() == SyntaxKind::Comment)
@@ -954,24 +1097,22 @@ fn collect_comments(node: &RedNode) -> Vec<Comment> {
 
 fn collect_comment_trivia(node: &RedNode) -> Option<CommentTrivia> {
     node.children_with_tokens().find_map(|elem| match elem {
-        NodeOrToken::Token(token) => match token.kind() {
-            SyntaxKind::LineComment => Some(CommentTrivia {
-                kind: CommentKind::Line,
-                text: token.text().to_string(),
-                body: strip_line_comment(token.text()),
-            }),
-            SyntaxKind::HashComment => Some(CommentTrivia {
-                kind: CommentKind::Hash,
-                text: token.text().to_string(),
-                body: strip_hash_comment(token.text()),
-            }),
-            SyntaxKind::BlockComment => Some(CommentTrivia {
-                kind: CommentKind::Block,
-                text: token.text().to_string(),
-                body: strip_block_comment(token.text()),
-            }),
-            _ => None,
-        },
+        NodeOrToken::Token(token) => {
+            let text = token.text().to_string();
+            let (kind, body) = match token.kind() {
+                SyntaxKind::LineComment => {
+                    (CommentKind::Line, CommentKind::Line.decode_body(&text))
+                }
+                SyntaxKind::HashComment => {
+                    (CommentKind::Hash, CommentKind::Hash.decode_body(&text))
+                }
+                SyntaxKind::BlockComment => {
+                    (CommentKind::Block, CommentKind::Block.decode_body(&text))
+                }
+                _ => return None,
+            };
+            Some(CommentTrivia { kind, text, body })
+        }
         NodeOrToken::Node(_) => None,
     })
 }
@@ -1255,48 +1396,35 @@ fn trivia_from_element(element: &NodeOrToken<RedNode, RedToken>) -> Option<Trivi
                 kind: NewlineKind::from_text(token.text()).unwrap_or_default(),
                 text: token.text().to_string(),
             }),
-            SyntaxKind::LineComment => Some(Trivia::Comment(CommentTrivia {
-                kind: CommentKind::Line,
-                text: token.text().to_string(),
-                body: strip_line_comment(token.text()),
-            })),
-            SyntaxKind::HashComment => Some(Trivia::Comment(CommentTrivia {
-                kind: CommentKind::Hash,
-                text: token.text().to_string(),
-                body: strip_hash_comment(token.text()),
-            })),
-            SyntaxKind::BlockComment => Some(Trivia::Comment(CommentTrivia {
-                kind: CommentKind::Block,
-                text: token.text().to_string(),
-                body: strip_block_comment(token.text()),
-            })),
+            SyntaxKind::LineComment => {
+                let text = token.text().to_string();
+                Some(Trivia::Comment(CommentTrivia {
+                    kind: CommentKind::Line,
+                    text: text.clone(),
+                    body: CommentKind::Line.decode_body(&text),
+                }))
+            }
+            SyntaxKind::HashComment => {
+                let text = token.text().to_string();
+                Some(Trivia::Comment(CommentTrivia {
+                    kind: CommentKind::Hash,
+                    text: text.clone(),
+                    body: CommentKind::Hash.decode_body(&text),
+                }))
+            }
+            SyntaxKind::BlockComment => {
+                let text = token.text().to_string();
+                Some(Trivia::Comment(CommentTrivia {
+                    kind: CommentKind::Block,
+                    text: text.clone(),
+                    body: CommentKind::Block.decode_body(&text),
+                }))
+            }
             SyntaxKind::Comma => Some(Trivia::Comma(token.text().to_string())),
             _ => None,
         },
         NodeOrToken::Node(_) => None,
     }
-}
-
-fn strip_line_comment(text: &str) -> String {
-    text.strip_prefix("//")
-        .unwrap_or(text)
-        .trim_start()
-        .to_string()
-}
-
-fn strip_hash_comment(text: &str) -> String {
-    text.strip_prefix('#')
-        .unwrap_or(text)
-        .trim_start()
-        .to_string()
-}
-
-fn strip_block_comment(text: &str) -> String {
-    text.strip_prefix("/*")
-        .and_then(|s| s.strip_suffix("*/"))
-        .unwrap_or(text)
-        .trim()
-        .to_string()
 }
 
 pub fn detected_string_style_of_node(node: &RedNode) -> Option<QuoteStyle> {

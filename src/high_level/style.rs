@@ -1,4 +1,4 @@
-use crate::syntax::{SyntaxKind, NewlineKind};
+use crate::syntax::{NewlineKind, SyntaxKind};
 use crate::RedNode;
 use rowan::NodeOrToken;
 

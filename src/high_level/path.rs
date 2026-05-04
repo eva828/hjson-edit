@@ -147,7 +147,10 @@ impl HjsonObjectPath {
             return None;
         }
         let (left, right) = self.segments.split_at(index);
-        Some((Self::from_segments(left.to_vec()), Self::from_segments(right.to_vec())))
+        Some((
+            Self::from_segments(left.to_vec()),
+            Self::from_segments(right.to_vec()),
+        ))
     }
 
     pub fn depth(&self) -> usize {
@@ -184,5 +187,3 @@ impl From<&[PathSegment]> for HjsonObjectPath {
         }
     }
 }
-
-

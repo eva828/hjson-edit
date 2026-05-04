@@ -77,10 +77,7 @@ impl PathResolver {
 
     /// comment API 用に、path が属する Member を返す。
     /// 空 path は comment target として無効（InvalidPath）。
-    pub(crate) fn resolve_member(
-        &self,
-        path: &HjsonObjectPath,
-    ) -> Result<Member, HjsonEditError> {
+    pub(crate) fn resolve_member(&self, path: &HjsonObjectPath) -> Result<Member, HjsonEditError> {
         if path.depth() == 0 {
             return Err(HjsonEditError::InvalidPath("empty path".to_string()));
         }
@@ -124,10 +121,13 @@ impl PathResolver {
             },
             SyntaxKind::Array => match segment {
                 PathSegment::Array(seg) => {
-                    let mut values = node.children().filter(|child| child.kind() == SyntaxKind::Value);
+                    let mut values = node
+                        .children()
+                        .filter(|child| child.kind() == SyntaxKind::Value);
                     match seg {
-                        ArrayPathSegment::Index(index)
-                        | ArrayPathSegment::InsertAt(index) => values.nth(*index),
+                        ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => {
+                            values.nth(*index)
+                        }
                         ArrayPathSegment::Push => values.last(),
                     }
                 }
@@ -152,10 +152,7 @@ impl PathResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        high_level::path::HjsonObjectPath,
-        HjsonDocument,
-    };
+    use crate::{high_level::path::HjsonObjectPath, HjsonDocument};
 
     fn parse(input: &str) -> RedNode {
         HjsonDocument::parse(input).unwrap().syntax_root().clone()
@@ -169,7 +166,9 @@ mod tests {
     fn resolve_node_empty_path_returns_body() {
         let root = parse("name: app\n");
         let resolver = PathResolver::new(root);
-        let node = resolver.resolve_node(&HjsonObjectPath::parse("").unwrap()).unwrap();
+        let node = resolver
+            .resolve_node(&HjsonObjectPath::parse("").unwrap())
+            .unwrap();
         assert_eq!(node.kind(), SyntaxKind::Object);
     }
 
@@ -177,7 +176,9 @@ mod tests {
     fn resolve_node_simple_key() {
         let root = parse("{\n  name: app\n}\n");
         let resolver = PathResolver::new(root);
-        let node = resolver.resolve_node(&HjsonObjectPath::parse("name").unwrap()).unwrap();
+        let node = resolver
+            .resolve_node(&HjsonObjectPath::parse("name").unwrap())
+            .unwrap();
         assert_eq!(node.kind(), SyntaxKind::Value);
     }
 
@@ -278,7 +279,9 @@ mod tests {
     fn resolve_node_root_scalar() {
         let root = parse("123\n");
         let resolver = PathResolver::new(root);
-        let node = resolver.resolve_node(&HjsonObjectPath::parse("").unwrap()).unwrap();
+        let node = resolver
+            .resolve_node(&HjsonObjectPath::parse("").unwrap())
+            .unwrap();
         assert_eq!(node.kind(), SyntaxKind::Value);
     }
 
@@ -318,10 +321,7 @@ mod tests {
             .unwrap();
         // "items" resolves to the Value node wrapping the array
         assert_eq!(res.parent.kind(), SyntaxKind::Value);
-        assert_eq!(
-            res.last,
-            PathSegment::Array(ArrayPathSegment::Index(0))
-        );
+        assert_eq!(res.last, PathSegment::Array(ArrayPathSegment::Index(0)));
     }
 
     #[test]
@@ -354,8 +354,8 @@ mod tests {
     fn resolve_existing_prefix_fully_resolved() {
         let root = parse("{\n  server: { host: localhost }\n}\n");
         let resolver = PathResolver::new(root);
-        let prefix = resolver
-            .resolve_existing_prefix(&HjsonObjectPath::parse("server.host").unwrap());
+        let prefix =
+            resolver.resolve_existing_prefix(&HjsonObjectPath::parse("server.host").unwrap());
         assert_eq!(prefix.consumed, 2);
         assert_eq!(prefix.ancestor.kind(), SyntaxKind::Value);
     }
@@ -364,8 +364,8 @@ mod tests {
     fn resolve_existing_prefix_partial() {
         let root = parse("{\n  root: { }\n}\n");
         let resolver = PathResolver::new(root);
-        let prefix = resolver
-            .resolve_existing_prefix(&HjsonObjectPath::parse("root.new.nested").unwrap());
+        let prefix =
+            resolver.resolve_existing_prefix(&HjsonObjectPath::parse("root.new.nested").unwrap());
         assert_eq!(prefix.consumed, 1);
         // "root" resolves to the Value node wrapping the inner object
         assert_eq!(prefix.ancestor.kind(), SyntaxKind::Value);
@@ -375,8 +375,8 @@ mod tests {
     fn resolve_existing_prefix_none() {
         let root = parse("{\n  name: app\n}\n");
         let resolver = PathResolver::new(root);
-        let prefix = resolver
-            .resolve_existing_prefix(&HjsonObjectPath::parse("missing.path").unwrap());
+        let prefix =
+            resolver.resolve_existing_prefix(&HjsonObjectPath::parse("missing.path").unwrap());
         assert_eq!(prefix.consumed, 0);
         // empty prefix falls back to the document body (Value wrapping the object)
         assert_eq!(prefix.ancestor.kind(), SyntaxKind::Value);
@@ -386,8 +386,8 @@ mod tests {
     fn resolve_existing_prefix_array_then_key() {
         let root = parse("{\n  items: [{ name: a }, { name: b }]\n}\n");
         let resolver = PathResolver::new(root);
-        let prefix = resolver
-            .resolve_existing_prefix(&HjsonObjectPath::parse("items[0].name").unwrap());
+        let prefix =
+            resolver.resolve_existing_prefix(&HjsonObjectPath::parse("items[0].name").unwrap());
         // items -> Value(Array) -> [0] -> Value(Object) -> name -> Value
         assert_eq!(prefix.consumed, 3);
         assert_eq!(prefix.ancestor.kind(), SyntaxKind::Value);
@@ -397,8 +397,8 @@ mod tests {
     fn resolve_existing_prefix_array_insert_at() {
         let root = parse("{\n  items: [1, 2]\n}\n");
         let resolver = PathResolver::new(root);
-        let prefix = resolver
-            .resolve_existing_prefix(&HjsonObjectPath::parse("items[+3].name").unwrap());
+        let prefix =
+            resolver.resolve_existing_prefix(&HjsonObjectPath::parse("items[+3].name").unwrap());
         // InsertAt(3) on a 2-element array resolves as Index(3) which is out of range,
         // so only "items" is consumed.
         assert_eq!(prefix.consumed, 1);

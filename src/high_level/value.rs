@@ -261,17 +261,19 @@ impl HjsonValue {
         builder.finish_node();
         builder.finish()
     }
-
 }
 
 fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
     match style {
         QuoteStyle::DoubleQuoted => (
             SyntaxKind::String,
-            format!("\"{}\"", escape_double_quoted(text)),
+            format!("\"{}\"", style.encode_body(text)),
         ),
-        QuoteStyle::Block => (SyntaxKind::BlockString, format!("'''{}'''", text)),
-        QuoteStyle::Unquoted => (SyntaxKind::UnquotedString, text.to_string()),
+        QuoteStyle::Block => (
+            SyntaxKind::BlockString,
+            format!("'''{}'''", style.encode_body(text)),
+        ),
+        QuoteStyle::Unquoted => (SyntaxKind::UnquotedString, style.encode_body(text)),
     }
 }
 
@@ -284,10 +286,6 @@ fn is_simple_unquoted_text(text: &str) -> bool {
         && text
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-}
-
-fn escape_double_quoted(text: &str) -> String {
-    text.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn push_node(builder: &mut GreenNodeBuilder<'static>, node: &GreenNode) {
