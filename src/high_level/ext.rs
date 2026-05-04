@@ -25,37 +25,36 @@ impl RedNodeExt for RedNode {
     }
 
     fn child(&self, segment: &PathSegment) -> Option<RedNode> {
-        if self.kind() == SyntaxKind::Value {
-            let next = self
+        match self.kind() {
+            SyntaxKind::Root | SyntaxKind::Value => self
                 .children()
                 .find(|child| !child.kind().is_trivia())
-                .and_then(|child| child.child(segment));
-            return next;
-        }
-
-        match segment {
-            PathSegment::Object(segment) if self.kind() == SyntaxKind::Object => self
-                .children_by_kind(SyntaxKind::Member)
-                .find(|member| {
-                    member
-                        .children_by_kind(SyntaxKind::Key)
-                        .find_map(|key| key.extract_key())
-                        .is_some_and(|key| segment.match_key(&key))
-                })
-                .and_then(|member| member.children_by_kind(SyntaxKind::Value).next()),
-            PathSegment::Array(segment) if self.kind() == SyntaxKind::Array => {
-                let mut values = self.children_by_kind(SyntaxKind::Value);
-                match segment {
-                    ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => {
-                        values.nth(*index)
+                .and_then(|child| child.child(segment)),
+            SyntaxKind::Object => match segment {
+                PathSegment::Object(ObjectPathSegment::Key(key)) => self
+                    .children_by_kind(SyntaxKind::Member)
+                    .find(|member| {
+                        member
+                            .children_by_kind(SyntaxKind::Key)
+                            .find_map(|key_node| key_node.extract_key())
+                            .is_some_and(|member_key| &member_key == key)
+                    })
+                    .and_then(|member| member.children_by_kind(SyntaxKind::Value).next()),
+                _ => None,
+            },
+            SyntaxKind::Array => match segment {
+                PathSegment::Array(seg) => {
+                    let mut values = self.children_by_kind(SyntaxKind::Value);
+                    match seg {
+                        ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => {
+                            values.nth(*index)
+                        }
+                        ArrayPathSegment::Push => values.last(),
                     }
-                    ArrayPathSegment::Push => values.last(),
                 }
-            }
-            _ => {
-                let next = self.children().find_map(|child| child.child(segment));
-                next
-            }
+                _ => None,
+            },
+            _ => None,
         }
     }
 
