@@ -225,13 +225,13 @@ impl<'a> EditOpCollector<'a> {
     }
 
     fn collect_comment_ops(&mut self) -> Result<()> {
-        self.collect_comment_set_ops();
-        self.collect_comment_append_ops();
-        self.collect_comment_remove_ops();
+        self.collect_comment_set_ops()?;
+        self.collect_comment_append_ops()?;
+        self.collect_comment_remove_ops()?;
         Ok(())
     }
 
-    fn collect_comment_set_ops(&mut self) {
+    fn collect_comment_set_ops(&mut self) -> Result<()> {
         if let Some(sets) = self.matches.get_raw("comment-set") {
             let vals: Vec<_> = sets.collect();
             let indices = self.collect_indices("comment-set");
@@ -242,16 +242,16 @@ impl<'a> EditOpCollector<'a> {
                 self.ops_with_indices.push((
                     idx_chunk[0],
                     EditOp::CommentSet {
-                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())
-                            .expect("comment path should parse"),
+                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())?,
                         text: chunk[1].to_string_lossy().to_string(),
                     },
                 ));
             }
         }
+        Ok(())
     }
 
-    fn collect_comment_append_ops(&mut self) {
+    fn collect_comment_append_ops(&mut self) -> Result<()> {
         if let Some(appends) = self.matches.get_raw("comment-append") {
             let vals: Vec<_> = appends.collect();
             let indices = self.collect_indices("comment-append");
@@ -262,28 +262,28 @@ impl<'a> EditOpCollector<'a> {
                 self.ops_with_indices.push((
                     idx_chunk[0],
                     EditOp::CommentAppend {
-                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())
-                            .expect("comment path should parse"),
+                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())?,
                         text: chunk[1].to_string_lossy().to_string(),
                     },
                 ));
             }
         }
+        Ok(())
     }
 
-    fn collect_comment_remove_ops(&mut self) {
+    fn collect_comment_remove_ops(&mut self) -> Result<()> {
         if let Some(removes) = self.matches.get_raw("comment-remove") {
             let indices = self.collect_indices("comment-remove");
             for (idx, val) in indices.iter().zip(removes) {
                 self.ops_with_indices.push((
                     *idx,
                     EditOp::CommentRemove {
-                        path: CliValueParser::parse_comment_path(&val.to_string_lossy())
-                            .expect("comment path should parse"),
+                        path: CliValueParser::parse_comment_path(&val.to_string_lossy())?,
                     },
                 ));
             }
         }
+        Ok(())
     }
 
     fn collect_style_ops(&mut self) -> Result<()> {
