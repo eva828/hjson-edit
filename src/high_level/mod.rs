@@ -8,6 +8,7 @@ pub mod ops;
 pub mod path;
 pub mod style;
 pub mod value;
+pub(crate) mod resolve;
 
 
 use crate::ast as semantic_ast;

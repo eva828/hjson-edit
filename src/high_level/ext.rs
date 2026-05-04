@@ -1,81 +1,16 @@
 use rowan::NodeOrToken;
 
 use crate::{
+    ast::{AstNode, Key},
     high_level::{error::HjsonEditError, value::HjsonValue},
-    ArrayPathSegment, PathSegment, RedNode, SyntaxKind,
+    RedNode, SyntaxKind,
 };
 
 pub(crate) trait RedNodeExt {
-    fn children_by_kind(&self, kind: SyntaxKind) -> impl Iterator<Item = RedNode>;
-    fn child(&self, path: &PathSegment) -> Option<RedNode>;
-    fn document_start_node(&self) -> RedNode;
-    fn extract_key(&self) -> Option<String>;
     fn node_to_value(&self) -> Result<HjsonValue, HjsonEditError>;
 }
 
 impl RedNodeExt for RedNode {
-    fn children_by_kind(&self, kind: SyntaxKind) -> impl Iterator<Item = RedNode> {
-        self.children().filter(move |child| child.kind() == kind)
-    }
-
-    fn child(&self, segment: &PathSegment) -> Option<RedNode> {
-        match self.kind() {
-            SyntaxKind::Root | SyntaxKind::Value => self
-                .children()
-                .find(|child| !child.kind().is_trivia())
-                .and_then(|child| child.child(segment)),
-            SyntaxKind::Object => match segment {
-                PathSegment::Key(key) => self
-                    .children_by_kind(SyntaxKind::Member)
-                    .find(|member| {
-                        member
-                            .children_by_kind(SyntaxKind::Key)
-                            .find_map(|key_node| key_node.extract_key())
-                            .is_some_and(|member_key| &member_key == key)
-                    })
-                    .and_then(|member| member.children_by_kind(SyntaxKind::Value).next()),
-                _ => None,
-            },
-            SyntaxKind::Array => match segment {
-                PathSegment::Array(seg) => {
-                    let mut values = self.children_by_kind(SyntaxKind::Value);
-                    match seg {
-                        ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => {
-                            values.nth(*index)
-                        }
-                        ArrayPathSegment::Push => values.last(),
-                    }
-                }
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    fn document_start_node(&self) -> RedNode {
-        if self.kind() == SyntaxKind::Root {
-            self.children()
-                .find(|child| !child.kind().is_trivia())
-                .unwrap_or_else(|| self.clone())
-        } else {
-            self.clone()
-        }
-    }
-
-    fn extract_key(&self) -> Option<String> {
-        self.children_with_tokens().find_map(|child| match child {
-            NodeOrToken::Token(token)
-                if matches!(
-                    token.kind(),
-                    SyntaxKind::String | SyntaxKind::UnquotedString
-                ) =>
-            {
-                Some(token.text().trim_matches('"').to_string())
-            }
-            _ => None,
-        })
-    }
-
     fn node_to_value(&self) -> Result<HjsonValue, HjsonEditError> {
         match self.kind() {
             SyntaxKind::Root => self
@@ -141,7 +76,8 @@ impl RedNodeExt for RedNode {
                     let key = member
                         .children()
                         .find(|child| child.kind() == SyntaxKind::Key)
-                        .and_then(|key| key.extract_key())
+                        .and_then(|key_node| Key::cast(key_node).ok())
+                        .and_then(|k| k.body_text())
                         .ok_or(HjsonEditError::ParentNotFound)?;
                     let value = member
                         .children()

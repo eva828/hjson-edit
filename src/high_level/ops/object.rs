@@ -9,6 +9,7 @@ use crate::{
         error::HjsonEditError,
         ext::RedNodeExt,
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
+        resolve::{ExistingPrefix, ParentResolution, PathResolver},
         value::HjsonValue,
         HjsonDocument,
     },
@@ -43,8 +44,9 @@ pub trait HjsonDocumentObjectEdit {
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
-        let node = resolve_parent(self.syntax_root().clone(), &path)?;
-        node.node_to_value()
+        PathResolver::new(self.syntax_root().clone())
+            .resolve_node(&path)?
+            .node_to_value()
     }
 
     fn set(self, path: HjsonObjectPath, value: impl Into<HjsonValue>) -> Result<Self, HjsonEditError> {
@@ -105,11 +107,9 @@ pub(crate) fn rebuild_tree_with_set(
     append_mode: AppendMode,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let (parent_path, last) = path
-        .split_last()
-        .ok_or_else(|| HjsonEditError::InvalidPath("empty path".to_string()))?;
-    match resolve_parent(root.clone(), &parent_path) {
-        Ok(parent) => {
+    let resolver = PathResolver::new(root.clone());
+    match resolver.resolve_parent(path) {
+        Ok(ParentResolution { parent, last }) => {
             let new_parent = match parent.kind() {
                 SyntaxKind::Root => {
                     set_root_child(&parent, &last, value, string_style, append_mode, false, newline)?
@@ -138,7 +138,7 @@ pub(crate) fn rebuild_tree_with_set(
             }
         }
         Err(HjsonEditError::PathNotFound(_)) => {
-            let (ancestor, consumed) = resolve_existing_prefix(root.clone(), path.segments());
+            let ExistingPrefix { ancestor, consumed } = resolver.resolve_existing_prefix(path);
             if consumed == 0 || consumed >= path.depth() {
                 return Err(HjsonEditError::PathNotFound(path.clone()));
             }
@@ -204,10 +204,7 @@ pub(crate) fn rebuild_tree_with_remove(
     root: RedNode,
     path: &HjsonObjectPath,
 ) -> Result<GreenNode, HjsonEditError> {
-    let (parent_path, last) = path
-        .split_last()
-        .ok_or_else(|| HjsonEditError::InvalidPath("empty path".to_string()))?;
-    let parent = resolve_parent(root.clone(), &parent_path)?;
+    let ParentResolution { parent, last } = PathResolver::new(root.clone()).resolve_parent(path)?;
     let new_parent = match parent.kind() {
         SyntaxKind::Root => remove_root_child(&parent, &last)?,
         SyntaxKind::Object => remove_object_child(&parent, &last)?,
@@ -228,32 +225,6 @@ pub(crate) fn rebuild_tree_with_remove(
     }
 }
 
-pub(crate) fn resolve_parent(root: RedNode, path: &HjsonObjectPath) -> Result<RedNode, HjsonEditError> {
-    let mut current = root.document_start_node();
-    for segment in path.segments() {
-        current = current
-            .child(segment)
-            .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
-    }
-    Ok(current)
-}
-
-fn resolve_existing_prefix(root: RedNode, path: &[PathSegment]) -> (RedNode, usize) {
-    let mut current = root.document_start_node();
-    let mut consumed = 0usize;
-
-    for segment in path {
-        match current.child(segment) {
-            Some(next) => {
-                current = next;
-                consumed += 1;
-            }
-            None => break,
-        }
-    }
-
-    (current, consumed)
-}
 
 fn set_root_child(
     parent: &RedNode,

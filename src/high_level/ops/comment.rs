@@ -4,8 +4,8 @@ use crate::{
     ast::{AstNode, CommentKind, Member, Trivia},
     high_level::{
         error::HjsonEditError,
-        ext::RedNodeExt,
-        path::{HjsonCommentPath, HjsonObjectPath},
+        path::HjsonCommentPath,
+        resolve::PathResolver,
         HjsonDocument,
     },
     syntax::{RedNode, SyntaxKind},
@@ -47,11 +47,11 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
             HjsonCommentPath::Header => extract_document_comment(self, true),
             HjsonCommentPath::Footer => extract_document_comment(self, false),
             HjsonCommentPath::Before(path) => {
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 extract_comment_text(&member.leading_trivia)
             }
             HjsonCommentPath::Inline(path) => {
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 extract_comment_text(&member.trailing_trivia)
             }
         })
@@ -76,7 +76,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 insert_document_comment(self, false, comment, existing_style)
             }
             HjsonCommentPath::Before(path) => {
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 let existing_style = extract_comment_style(&member.leading_trivia);
 
                 if existing_style.is_some() {
@@ -86,7 +86,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 let resolved_style =
                     resolve_comment_style(self.current_comment_style(), &comment, existing_style);
                 let rendered = render_comment_text(resolved_style, &comment);
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 let parent = member
                     .node()
                     .parent()
@@ -110,7 +110,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 Ok(self)
             }
             HjsonCommentPath::Inline(path) => {
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 let existing_style = extract_comment_style(&member.trailing_trivia);
 
                 if existing_style.is_some() {
@@ -120,7 +120,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 let resolved_style =
                     resolve_comment_style(self.current_comment_style(), &comment, existing_style);
                 let rendered = render_comment_text(resolved_style, &comment);
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 let parent = member
                     .node()
                     .parent()
@@ -163,21 +163,6 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 }
 
 impl HjsonDocument {
-    fn resolve_member(&self, path: &HjsonObjectPath) -> Result<Member, HjsonEditError> {
-        let mut target = self.syntax_root().clone().document_start_node();
-        for segment in path.segments() {
-            target = target
-                .child(segment)
-                .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
-        }
-
-        while target.kind() != SyntaxKind::Member {
-            target = target.parent().ok_or(HjsonEditError::ParentNotFound)?;
-        }
-
-        Member::cast(target)
-    }
-
     fn remove_comment_by_path(mut self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
         match path {
             HjsonCommentPath::Header => {
@@ -189,7 +174,7 @@ impl HjsonDocument {
                 Ok(self)
             }
             HjsonCommentPath::Before(path) => {
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 let parent = member
                     .node()
                     .parent()
@@ -217,7 +202,7 @@ impl HjsonDocument {
                 Ok(self)
             }
             HjsonCommentPath::Inline(path) => {
-                let member = self.resolve_member(&path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
                 let parent = member
                     .node()
                     .parent()
