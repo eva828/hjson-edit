@@ -8,7 +8,7 @@ use crate::{
     high_level::{
         error::HjsonEditError,
         ext::RedNodeExt,
-        path::{ArrayPathSegment, HjsonObjectPath, ObjectPathSegment, PathSegment},
+        path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         value::HjsonValue,
         HjsonDocument,
     },
@@ -326,7 +326,7 @@ fn set_object_child(
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
-        PathSegment::Object(ObjectPathSegment::Key(key)) => key,
+        PathSegment::Key(key) => key,
         _ => {
             return Err(HjsonEditError::UnexpectedStructure {
                 expected: SyntaxKind::Member,
@@ -595,7 +595,7 @@ fn remove_value_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
 
 fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
-        PathSegment::Object(ObjectPathSegment::Key(key)) => key,
+        PathSegment::Key(key) => key,
         _ => {
             return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
                 last.clone(),
@@ -650,7 +650,7 @@ fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
     let mut current = value;
     for segment in path.iter().rev() {
         current = match segment {
-            PathSegment::Object(ObjectPathSegment::Key(key)) => {
+            PathSegment::Key(key) => {
                 HjsonValue::Object(vec![(key.clone(), current)])
             }
             PathSegment::Array(ArrayPathSegment::Index(_))

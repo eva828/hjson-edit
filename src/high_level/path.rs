@@ -3,11 +3,6 @@ use std::fmt::Debug;
 use crate::high_level::error::HjsonEditError;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ObjectPathSegment {
-    Key(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum ArrayPathSegment {
     Index(usize),    // [n]
     InsertAt(usize), // [+n]
@@ -16,7 +11,7 @@ pub enum ArrayPathSegment {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathSegment {
-    Object(ObjectPathSegment),
+    Key(String),
     Array(ArrayPathSegment),
 }
 
@@ -88,7 +83,7 @@ impl HjsonObjectPath {
             }
 
             if !key.is_empty() {
-                segments.push(PathSegment::Object(ObjectPathSegment::Key(key)));
+                segments.push(PathSegment::Key(key));
             }
 
             // Parse array index if present
@@ -190,10 +185,4 @@ impl From<&[PathSegment]> for HjsonObjectPath {
     }
 }
 
-impl ObjectPathSegment {
-    pub fn match_key(&self, key: &str) -> bool {
-        match self {
-            ObjectPathSegment::Key(k) => k == key,
-        }
-    }
-}
+

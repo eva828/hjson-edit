@@ -2,7 +2,7 @@ use rowan::NodeOrToken;
 
 use crate::{
     high_level::{error::HjsonEditError, value::HjsonValue},
-    ArrayPathSegment, ObjectPathSegment, PathSegment, RedNode, SyntaxKind,
+    ArrayPathSegment, PathSegment, RedNode, SyntaxKind,
 };
 
 pub(crate) trait RedNodeExt {
@@ -25,7 +25,7 @@ impl RedNodeExt for RedNode {
                 .find(|child| !child.kind().is_trivia())
                 .and_then(|child| child.child(segment)),
             SyntaxKind::Object => match segment {
-                PathSegment::Object(ObjectPathSegment::Key(key)) => self
+                PathSegment::Key(key) => self
                     .children_by_kind(SyntaxKind::Member)
                     .find(|member| {
                         member
