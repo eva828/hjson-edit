@@ -8,7 +8,7 @@ pub mod ops;
 pub mod path;
 pub mod style;
 pub mod value;
-pub mod walker;
+
 
 use crate::ast as semantic_ast;
 use crate::ast::AstNode;

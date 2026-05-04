@@ -43,10 +43,7 @@ pub trait HjsonDocumentObjectEdit {
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
-        let node = self
-            .walker(&path)
-            .last()
-            .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))??;
+        let node = resolve_parent(self.current_root().clone(), &path)?;
         node.node_to_value()
     }
 
@@ -231,7 +228,7 @@ pub(crate) fn rebuild_tree_with_remove(
     }
 }
 
-fn resolve_parent(root: RedNode, path: &HjsonObjectPath) -> Result<RedNode, HjsonEditError> {
+pub(crate) fn resolve_parent(root: RedNode, path: &HjsonObjectPath) -> Result<RedNode, HjsonEditError> {
     let mut current = root.document_start_node();
     for segment in path.segments() {
         current = current
