@@ -1,29 +1,3 @@
-## 優先度中: object/comment ops の重複
-
-### 19. document comment の削除範囲が広すぎる可能性がある
-
-対象:
-
-- `hjson-edit/src/high_level/ops/comment.rs#L270-L319`
-
-問題点:
-
-- header 削除時、先頭から `Comment` または trivia/comment token をすべて削除しています。
-- footer 削除時も末尾から trivia/comment をまとめて削除しています。
-- 「コメントだけを消す」というより、周辺空白・改行もかなり広く消します。
-
-影響:
-
-- 入力の先頭/末尾に意図的な空行がある場合、それも消える可能性があります。
-- `get_comment()` の単位と `remove_comment()` の削除単位が一致していない可能性があります。
-
-整理案:
-
-- `Document.leading_trivia` / `trailing_trivia` でコメント部分の span を厳密に取る。
-- 「コメントだけ削除」「コメント周辺の空行も削除」をモード分けする。
-
----
-
 ## 優先度低: 未使用・公開 API 整理候補
 
 ### 21. `ast` 側の `comments()` 系 API が shallow かつ未使用っぽい

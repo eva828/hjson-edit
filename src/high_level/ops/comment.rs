@@ -154,45 +154,28 @@ fn document_comment_range(
     doc: &HjsonDocument,
     header: bool,
 ) -> Option<std::ops::Range<usize>> {
+    let ast = doc.ast().ok()?;
     let root = doc.syntax_root();
     let children: Vec<_> = root.children_with_tokens().collect();
 
     if header {
-        let mut end = 0usize;
-        while end < children.len() {
-            match &children[end] {
-                NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => end += 1,
-                NodeOrToken::Token(token)
-                    if token.kind().is_comment() || token.kind().is_trivia() =>
-                {
-                    end += 1
-                }
-                _ => break,
-            }
-        }
-        if end == 0 {
-            None
-        } else {
-            Some(0..end)
-        }
+        let leading = &ast.leading_trivia;
+        let start = leading.iter().position(|elem| matches!(elem, Trivia::Comment(_)))?;
+        Some(start..leading.len())
     } else {
-        let mut start = children.len();
-        while start > 0 {
-            match &children[start - 1] {
-                NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => start -= 1,
-                NodeOrToken::Token(token)
-                    if token.kind().is_comment() || token.kind().is_trivia() =>
-                {
-                    start -= 1
-                }
-                _ => break,
-            }
+        let trailing = &ast.trailing_trivia;
+        let start = trailing.iter().position(|elem| matches!(elem, Trivia::Comment(_)))?;
+        let mut end = trailing
+            .iter()
+            .rposition(|elem| matches!(elem, Trivia::Comment(_)))
+            .unwrap()
+            + 1;
+        // Include a single trailing newline after the last comment as part of the block.
+        if end < trailing.len() && matches!(trailing[end], Trivia::Newline { .. }) {
+            end += 1;
         }
-        if start == children.len() {
-            None
-        } else {
-            Some(start..children.len())
-        }
+        let root_start = children.len().saturating_sub(trailing.len());
+        Some((root_start + start)..(root_start + end))
     }
 }
 
@@ -213,10 +196,15 @@ fn set_document_comment(
 
     let root = doc.syntax_root().clone();
 
-    if let Some(range) = document_comment_range(&doc, header) {
-        let new_green = root.green().splice_children(range, vec![]);
+    let insert_at = if let Some(range) = document_comment_range(&doc, header) {
+        let new_green = root.green().splice_children(range.clone(), vec![]);
         doc.root = RedNode::new_root(new_green);
-    }
+        range.start
+    } else if header {
+        doc.ast().ok().map(|ast| ast.leading_trivia.len()).unwrap_or(0)
+    } else {
+        root.children_with_tokens().count()
+    };
 
     if let Some(comment) = comment {
         let resolved_style =
@@ -225,22 +213,34 @@ fn set_document_comment(
         let newline = doc.current_newline().to_string();
 
         let root = doc.syntax_root().clone();
-        let insert_at = if header {
-            0
-        } else {
-            root.children_with_tokens().count()
-        };
         let inserted = if header {
             vec![
                 comment_node.into(),
                 SyntaxKind::Newline.create_token(&newline).into(),
             ]
         } else {
-            vec![
-                SyntaxKind::Newline.create_token(&newline).into(),
-                comment_node.into(),
-                SyntaxKind::Newline.create_token(&newline).into(),
-            ]
+            let needs_leading_newline = if insert_at > 0 {
+                match root.children_with_tokens().nth(insert_at - 1) {
+                    Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Newline => {
+                        false
+                    }
+                    _ => true,
+                }
+            } else {
+                true
+            };
+            if needs_leading_newline {
+                vec![
+                    SyntaxKind::Newline.create_token(&newline).into(),
+                    comment_node.into(),
+                    SyntaxKind::Newline.create_token(&newline).into(),
+                ]
+            } else {
+                vec![
+                    comment_node.into(),
+                    SyntaxKind::Newline.create_token(&newline).into(),
+                ]
+            }
         };
         let new_green = root.green().splice_children(insert_at..insert_at, inserted);
         doc.root = RedNode::new_root(new_green);

@@ -244,6 +244,78 @@ fn footer_comment_is_appended_after_the_document() {
 }
 
 #[test]
+fn footer_comment_can_be_removed() {
+    let input = "{\n  name: app\n}\n";
+
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Hash);
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from(":footer").unwrap(), "done")
+        .unwrap();
+
+    assert_eq!(
+        updated
+            .get_comment(HjsonCommentPath::try_from(":footer").unwrap())
+            .unwrap(),
+        Some("done".to_string())
+    );
+
+    let removed = updated
+        .remove_comment(HjsonCommentPath::try_from(":footer").unwrap())
+        .unwrap();
+    assert_eq!(removed.to_string(), input);
+}
+
+#[test]
+fn header_comment_removal_preserves_leading_blank_lines() {
+    let input = "\n\n# existing\n{\n  name: app\n}\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let removed = doc
+        .remove_comment(HjsonCommentPath::try_from(":header").unwrap())
+        .unwrap();
+    assert_eq!(removed.to_string(), "\n\n{\n  name: app\n}\n");
+}
+
+#[test]
+fn footer_comment_removal_preserves_trailing_blank_lines() {
+    let input = "{\n  name: app\n}\n\n# existing\n\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let removed = doc
+        .remove_comment(HjsonCommentPath::try_from(":footer").unwrap())
+        .unwrap();
+    assert_eq!(removed.to_string(), "{\n  name: app\n}\n\n\n");
+}
+
+#[test]
+fn set_header_comment_preserves_leading_blank_lines() {
+    let input = "\n\n{\n  name: app\n}\n";
+
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Line);
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "top")
+        .unwrap();
+    assert_eq!(updated.to_string(), "\n\n// top\n{\n  name: app\n}\n");
+}
+
+#[test]
+fn set_footer_comment_preserves_trailing_blank_lines() {
+    let input = "{\n  name: app\n}\n\n";
+
+    let doc = HjsonDocument::parse(input)
+        .unwrap()
+        .comment_style(CommentStyle::Hash);
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from(":footer").unwrap(), "done")
+        .unwrap();
+    assert_eq!(updated.to_string(), "{\n  name: app\n}\n\n# done\n");
+}
+
+#[test]
 fn root_object_without_braces_can_be_edited() {
     let input = "name: app\nport: 8080\n";
     let expected = "name: app\nport: 9090\n";
