@@ -297,8 +297,8 @@ pub struct Object {
     pub trailing_trivia: Vec<Trivia>,
     pub delimiter_style: DelimiterStyle,
     pub layout: Layout,
-    pub empty_body_insert_index: usize,
-    pub body_end_index: usize,
+    empty_body_insert_index: usize,
+    body_end_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,8 +314,8 @@ pub struct Array {
     pub trailing_trivia: Vec<Trivia>,
     pub delimiter_style: DelimiterStyle,
     pub layout: Layout,
-    pub empty_body_insert_index: usize,
-    pub body_end_index: usize,
+    empty_body_insert_index: usize,
+    body_end_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -463,10 +463,6 @@ impl Document {
         }
     }
 
-    pub fn comments(&self) -> Vec<Comment> {
-        collect_comments(&self.syntax)
-    }
-
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.item().and_then(|item| item.detected_string_style())
     }
@@ -546,18 +542,6 @@ impl Object {
             .collect()
     }
 
-    pub fn comments(&self) -> Vec<Comment> {
-        collect_comments(&self.syntax)
-    }
-
-    pub fn empty_body_insert_index(&self) -> usize {
-        self.empty_body_insert_index
-    }
-
-    pub fn append_member_index(&self) -> usize {
-        self.append_member_index_before_footer()
-    }
-
     pub fn append_member_index_before_footer(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
@@ -576,10 +560,6 @@ impl Object {
             return self.syntax.children_with_tokens().count();
         }
 
-        self.body_end_index
-    }
-
-    pub fn body_end_index(&self) -> usize {
         self.body_end_index
     }
 
@@ -677,18 +657,6 @@ impl Array {
             .collect()
     }
 
-    pub fn comments(&self) -> Vec<Comment> {
-        collect_comments(&self.syntax)
-    }
-
-    pub fn empty_body_insert_index(&self) -> usize {
-        self.empty_body_insert_index
-    }
-
-    pub fn append_value_index(&self) -> usize {
-        self.append_value_index_before_footer()
-    }
-
     pub fn append_value_index_before_footer(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
@@ -707,10 +675,6 @@ impl Array {
             return self.syntax.children_with_tokens().count();
         }
 
-        self.body_end_index
-    }
-
-    pub fn body_end_index(&self) -> usize {
         self.body_end_index
     }
 
@@ -773,10 +737,6 @@ impl Member {
         self.key().and_then(|key| key.body_text())
     }
 
-    pub fn comments(&self) -> Vec<Comment> {
-        collect_comments(&self.syntax)
-    }
-
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.value().and_then(|value| value.detected_string_style())
     }
@@ -794,13 +754,6 @@ impl Member {
         self.span_range().start
     }
 
-    pub fn insert_after_index(&self) -> usize {
-        self.span_range().end
-    }
-
-    pub fn post_node_index(&self) -> usize {
-        self.syntax.index() + 1
-    }
 }
 
 impl AstNode for Comment {
@@ -1079,20 +1032,6 @@ impl ArrayItem {
         self.span_range().start
     }
 
-    pub fn insert_after_index(&self) -> usize {
-        self.span_range().end
-    }
-
-    pub fn post_node_index(&self) -> usize {
-        self.syntax.index() + 1
-    }
-}
-
-fn collect_comments(node: &RedNode) -> Vec<Comment> {
-    node.children()
-        .filter(|child| child.kind() == SyntaxKind::Comment)
-        .filter_map(|child| Comment::cast(child).ok())
-        .collect()
 }
 
 fn collect_comment_trivia(node: &RedNode) -> Option<CommentTrivia> {
