@@ -373,9 +373,9 @@ fn set_object_child(
         depth: object_ast.layout.depth,
         newline,
     };
-    let rendered_member = value.render_member_node(key, None, &member_config);
 
-    if object_ast.members().is_empty() {
+    let is_empty = object_ast.members().is_empty();
+    if is_empty {
         let range_start = if insert_pos > 0
             && matches!(
                 parent.children_with_tokens().nth(insert_pos - 1),
@@ -385,47 +385,29 @@ fn set_object_child(
         } else {
             insert_pos
         };
-        let inserted = wrap_for_container(
-            rendered_member.into(),
-            object_ast.layout.depth,
-            newline,
-            true,
-            false,
-        );
+        let inserted = value.render_object_member_elements(key, None, &member_config, true);
         return Ok(parent
             .green()
             .splice_children(range_start..insert_pos, inserted));
     }
 
-    if pretty_nested {
-        let inserted = wrap_for_container(
-            rendered_member.into(),
-            object_ast.layout.depth,
-            newline,
-            false,
-            true,
-        );
-        return Ok(parent
-            .green()
-            .splice_children(insert_pos..insert_pos, inserted));
-    }
-
     let mut inserted: Vec<crate::GreenElement> = Vec::new();
-    if let Some(last_member) = object_ast.members().last() {
-        let needs_separator = last_member
-            .trailing_trivia
-            .iter()
-            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-        if needs_separator {
-            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+    if !pretty_nested {
+        if let Some(last_member) = object_ast.members().last() {
+            let needs_separator = last_member
+                .trailing_trivia
+                .iter()
+                .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+            if needs_separator {
+                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+            }
         }
     }
-    inserted.extend(wrap_for_container(
-        rendered_member.into(),
-        object_ast.layout.depth,
-        newline,
-        false,
+    inserted.extend(value.render_object_member_elements(
+        key,
+        None,
+        &member_config,
         false,
     ));
 
@@ -545,7 +527,6 @@ fn build_append_array_elements(
         depth: array_ast.layout.depth,
         newline,
     };
-    let rendered_value = value.render_value_node(&value_config);
 
     let mut inserted = Vec::new();
     if !pretty_nested && !items.is_empty() {
@@ -560,48 +541,12 @@ fn build_append_array_elements(
             }
         }
     }
-    inserted.extend(wrap_for_container(
-        rendered_value.into(),
-        array_ast.layout.depth,
-        newline,
+    inserted.extend(value.render_array_item_elements(
+        &value_config,
         items.is_empty(),
-        pretty_nested,
     ));
 
     Ok(inserted)
-}
-
-fn wrap_for_container(
-    element: crate::GreenElement,
-    depth: usize,
-    newline: &str,
-    empty: bool,
-    pretty: bool,
-) -> Vec<crate::GreenElement> {
-    let mut result = Vec::new();
-    if empty {
-        let indent = "  ".repeat(depth + 1);
-        result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        result.push(element);
-        result.push(SyntaxKind::Newline.create_token(newline).into());
-        if depth > 0 {
-            result.push(
-                SyntaxKind::Whitespace
-                    .create_token("  ".repeat(depth))
-                    .into(),
-            );
-        }
-    } else if pretty {
-        let indent = "  ".repeat(depth + 1);
-        result.push(SyntaxKind::Newline.create_token(newline).into());
-        result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        result.push(element);
-        result.push(SyntaxKind::Newline.create_token(newline).into());
-        result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-    } else {
-        result.push(element);
-    }
-    result
 }
 
 fn remove_root_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {

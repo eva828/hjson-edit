@@ -1,31 +1,3 @@
-## 優先度中: レンダリング・変換処理の重複/不整合
-
-### 24. `push_node()` が GreenNode を再帰コピーしている + ops 側の indent/newline 組み立てが残存
-
-対象:
-
-- `hjson-edit/src/high_level/value.rs`
-- `hjson-edit/src/high_level/ops/object.rs`
-
-問題点:
-
-- `Object` / `Array` の非 pretty 描画で `render_member` / `render_value` を呼んだ後に `push_node` で再帰コピーしています。
-- `render_member` 内部でも `render_value` を呼んだ後に `push_node` でコピーしています。
-- `set_object_child()` / `set_array_child()` / `build_append_array_elements()` 側の indent/newline 組み立てが依然として ops 側に散在しており、value 側が一貫して描画できていません。
-
-影響:
-
-- 小規模なら問題ありませんが、配列/オブジェクトが大きい場合は余分なコピーになります。
-- rowan の API 上、親 `GreenNodeBuilder` に子 `GreenNode` を直接追加できないため、`push_node` の再帰コピーが残っています。
-
-整理案:
-
-- `render_body` のような builder 直接書き込みヘルパーをさらに拡張し、`render_member` / `render_value` の `push_node` 呼び出しも builder 直接書き込みに置き換える。
-- あるいは `GreenNode` を直接 splice できる形に寄せる。
-- 完全な責務分離（value 側がコンテナの pretty 周辺空白も含めて一貫して描画する、あるいは ops 側が一切 indent を計算しない）を完了させる。
-
----
-
 ## 優先度中: object/comment ops の重複
 
 ### 16. root/value child の set/remove 処理がほぼ同じ
