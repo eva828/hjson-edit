@@ -2,7 +2,7 @@ use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 use crate::{
     ast::{
-        detected_string_style_of_node, Array as AstArray, AstNode, Document as AstDocument,
+        detected_string_style_of_node, Array as AstArray, AstNode,
         Object as AstObject, QuoteStyle, Trivia,
     },
     high_level::{
@@ -98,15 +98,7 @@ pub(crate) fn replace_root_value(
     value: &HjsonValue,
     string_style: StringStyle,
 ) -> Result<GreenNode, HjsonEditError> {
-    let doc_ast = AstDocument::cast(root.clone())?;
-    let child = root
-        .children_with_tokens()
-        .nth(doc_ast.body_insert_index())
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let child = match child {
-        NodeOrToken::Node(node) => node,
-        NodeOrToken::Token(_) => return Err(HjsonEditError::ParentNotFound),
-    };
+    let child = find_mutable_child(root)?;
     let updated_child = render_value_like_node(&child, value, string_style);
 
     Ok(root
@@ -125,50 +117,16 @@ pub(crate) fn rebuild_tree_with_set(
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
         Ok(ParentResolution { parent, last }) => {
-            let new_parent = match parent.kind() {
-                SyntaxKind::Root => set_root_child(
-                    &parent,
-                    &last,
-                    value,
-                    string_style,
-                    append_mode,
-                    false,
-                    newline,
-                )?,
-                SyntaxKind::Object => set_object_child(
-                    &parent,
-                    &last,
-                    value,
-                    string_style,
-                    append_mode,
-                    false,
-                    newline,
-                )?,
-                SyntaxKind::Array => set_array_child(
-                    &parent,
-                    &last,
-                    value,
-                    string_style,
-                    append_mode,
-                    false,
-                    newline,
-                )?,
-                SyntaxKind::Value => set_value_child(
-                    &parent,
-                    &last,
-                    value,
-                    string_style,
-                    append_mode,
-                    false,
-                    newline,
-                )?,
-                _ => {
-                    return Err(HjsonEditError::UnexpectedStructure {
-                        expected: SyntaxKind::Object,
-                        found: parent.kind(),
-                    })
-                }
-            };
+            let pretty = false;
+            let new_parent = apply_set_to_node(
+                &parent,
+                &last,
+                value,
+                string_style,
+                append_mode,
+                pretty,
+                newline,
+            )?;
 
             if parent.kind() == SyntaxKind::Root {
                 Ok(new_parent)
@@ -184,50 +142,16 @@ pub(crate) fn rebuild_tree_with_set(
 
             let missing = &path.segments()[consumed];
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
-            let new_parent = match ancestor.kind() {
-                SyntaxKind::Root => set_root_child(
-                    &ancestor,
-                    missing,
-                    &nested_value,
-                    string_style,
-                    append_mode,
-                    !path.segments()[consumed + 1..].is_empty(),
-                    newline,
-                )?,
-                SyntaxKind::Object => set_object_child(
-                    &ancestor,
-                    missing,
-                    &nested_value,
-                    string_style,
-                    append_mode,
-                    !path.segments()[consumed + 1..].is_empty(),
-                    newline,
-                )?,
-                SyntaxKind::Array => set_array_child(
-                    &ancestor,
-                    missing,
-                    &nested_value,
-                    string_style,
-                    append_mode,
-                    !path.segments()[consumed + 1..].is_empty(),
-                    newline,
-                )?,
-                SyntaxKind::Value => set_value_child(
-                    &ancestor,
-                    missing,
-                    &nested_value,
-                    string_style,
-                    append_mode,
-                    true,
-                    newline,
-                )?,
-                _ => {
-                    return Err(HjsonEditError::UnexpectedStructure {
-                        expected: SyntaxKind::Object,
-                        found: ancestor.kind(),
-                    })
-                }
-            };
+            let pretty = !path.segments()[consumed + 1..].is_empty();
+            let new_parent = apply_set_to_node(
+                &ancestor,
+                missing,
+                &nested_value,
+                string_style,
+                append_mode,
+                pretty,
+                newline,
+            )?;
 
             if ancestor.kind() == SyntaxKind::Root {
                 Ok(new_parent)
@@ -244,18 +168,7 @@ pub(crate) fn rebuild_tree_with_remove(
     path: &HjsonObjectPath,
 ) -> Result<GreenNode, HjsonEditError> {
     let ParentResolution { parent, last } = PathResolver::new(root.clone()).resolve_parent(path)?;
-    let new_parent = match parent.kind() {
-        SyntaxKind::Root => remove_root_child(&parent, &last)?,
-        SyntaxKind::Object => remove_object_child(&parent, &last)?,
-        SyntaxKind::Array => remove_array_child(&parent, &last)?,
-        SyntaxKind::Value => remove_value_child(&parent, &last)?,
-        _ => {
-            return Err(HjsonEditError::UnexpectedStructure {
-                expected: SyntaxKind::Object,
-                found: parent.kind(),
-            })
-        }
-    };
+    let new_parent = apply_remove_to_node(&parent, &last)?;
 
     if parent.kind() == SyntaxKind::Root {
         Ok(new_parent)
@@ -264,41 +177,27 @@ pub(crate) fn rebuild_tree_with_remove(
     }
 }
 
-fn set_root_child(
-    parent: &RedNode,
-    last: &PathSegment,
-    value: &HjsonValue,
-    string_style: StringStyle,
-    append_mode: AppendMode,
-    pretty_nested: bool,
-    newline: &str,
-) -> Result<GreenNode, HjsonEditError> {
-    let child = parent
-        .children()
-        .find(|child| {
-            matches!(
-                child.kind(),
-                SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
-            )
-        })
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_set(
-        &child,
-        last,
-        value,
-        string_style,
-        append_mode,
-        pretty_nested,
-        newline,
-    )?;
-
-    Ok(parent
-        .green()
-        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
+fn find_mutable_child(parent: &RedNode) -> Result<RedNode, HjsonEditError> {
+    match parent.kind() {
+        SyntaxKind::Root => parent
+            .children()
+            .find(|child| {
+                matches!(
+                    child.kind(),
+                    SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
+                )
+            })
+            .ok_or(HjsonEditError::ParentNotFound),
+        SyntaxKind::Value => parent
+            .children()
+            .find(|child| !child.kind().is_trivia())
+            .ok_or(HjsonEditError::ParentNotFound),
+        _ => Ok(parent.clone()),
+    }
 }
 
-fn set_value_child(
-    parent: &RedNode,
+fn apply_set_to_node(
+    node: &RedNode,
     last: &PathSegment,
     value: &HjsonValue,
     string_style: StringStyle,
@@ -306,23 +205,64 @@ fn set_value_child(
     pretty_nested: bool,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let child = parent
-        .children()
-        .find(|child| !child.kind().is_trivia())
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_set(
-        &child,
-        last,
-        value,
-        string_style,
-        append_mode,
-        pretty_nested,
-        newline,
-    )?;
+    match node.kind() {
+        SyntaxKind::Root | SyntaxKind::Value => {
+            let child = find_mutable_child(node)?;
+            let updated_child = apply_set_to_node(
+                &child,
+                last,
+                value,
+                string_style,
+                append_mode,
+                pretty_nested,
+                newline,
+            )?;
+            Ok(node
+                .green()
+                .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
+        }
+        SyntaxKind::Object => set_object_child(
+            node,
+            last,
+            value,
+            string_style,
+            append_mode,
+            pretty_nested,
+            newline,
+        ),
+        SyntaxKind::Array => set_array_child(
+            node,
+            last,
+            value,
+            string_style,
+            append_mode,
+            pretty_nested,
+            newline,
+        ),
+        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+            last.clone(),
+        ]))),
+    }
+}
 
-    Ok(parent
-        .green()
-        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
+fn apply_remove_to_node(
+    node: &RedNode,
+    last: &PathSegment,
+) -> Result<GreenNode, HjsonEditError> {
+    match node.kind() {
+        SyntaxKind::Root | SyntaxKind::Value => {
+            let child = find_mutable_child(node)?;
+            let updated_child = apply_remove_to_node(&child, last)?;
+            Ok(node
+                .green()
+                .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
+        }
+        SyntaxKind::Object => remove_object_child(node, last),
+        SyntaxKind::Array => remove_array_child(node, last),
+        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+            last.clone(),
+        ]))),
+    }
 }
 
 fn set_object_child(
@@ -549,34 +489,7 @@ fn build_append_array_elements(
     Ok(inserted)
 }
 
-fn remove_root_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
-    let child = parent
-        .children()
-        .find(|child| {
-            matches!(
-                child.kind(),
-                SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
-            )
-        })
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_remove(&child, last)?;
 
-    Ok(parent
-        .green()
-        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
-}
-
-fn remove_value_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
-    let child = parent
-        .children()
-        .find(|child| !child.kind().is_trivia())
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_child = rebuild_child_with_remove(&child, last)?;
-
-    Ok(parent
-        .green()
-        .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
-}
 
 fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
@@ -645,62 +558,7 @@ fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
     current
 }
 
-fn rebuild_child_with_set(
-    child: &RedNode,
-    last: &PathSegment,
-    value: &HjsonValue,
-    string_style: StringStyle,
-    append_mode: AppendMode,
-    pretty_nested: bool,
-    newline: &str,
-) -> Result<GreenNode, HjsonEditError> {
-    match child.kind() {
-        SyntaxKind::Object => set_object_child(
-            child,
-            last,
-            value,
-            string_style,
-            append_mode,
-            pretty_nested,
-            newline,
-        ),
-        SyntaxKind::Array => set_array_child(
-            child,
-            last,
-            value,
-            string_style,
-            append_mode,
-            pretty_nested,
-            newline,
-        ),
-        SyntaxKind::Value => set_value_child(
-            child,
-            last,
-            value,
-            string_style,
-            append_mode,
-            pretty_nested,
-            newline,
-        ),
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
-            last.clone(),
-        ]))),
-    }
-}
 
-fn rebuild_child_with_remove(
-    child: &RedNode,
-    last: &PathSegment,
-) -> Result<GreenNode, HjsonEditError> {
-    match child.kind() {
-        SyntaxKind::Object => remove_object_child(child, last),
-        SyntaxKind::Array => remove_array_child(child, last),
-        SyntaxKind::Value => remove_value_child(child, last),
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
-            last.clone(),
-        ]))),
-    }
-}
 
 fn render_value_like_node(
     node: &RedNode,
