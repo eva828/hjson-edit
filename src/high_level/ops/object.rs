@@ -10,7 +10,7 @@ use crate::{
         ext::RedNodeExt,
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         resolve::{ExistingPrefix, ParentResolution, PathResolver},
-        value::HjsonValue,
+        value::{HjsonValue, RenderConfig},
         HjsonDocument,
     },
     syntax::{RedNode, SyntaxKind},
@@ -369,12 +369,13 @@ fn set_object_child(
     };
     let mut inserted = Vec::new();
     let indent = "  ".repeat(object_ast.layout.depth + 1);
-    let newline = newline.to_string();
-    let rendered_member = if pretty_nested {
-        value.render_member_pretty(key, None, insert_style, object_ast.layout.depth, &newline)
-    } else {
-        value.render_member(key, None, insert_style)
+    let member_config = RenderConfig {
+        string_style: insert_style,
+        pretty: pretty_nested,
+        depth: object_ast.layout.depth,
+        newline,
     };
+    let rendered_member = value.render_member(key, None, &member_config);
 
     if object_ast.members().is_empty() {
         let range_start = if insert_pos > 0
@@ -388,7 +389,7 @@ fn set_object_child(
         };
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         inserted.push(rendered_member.into());
-        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         if object_ast.layout.depth > 0 {
             inserted.push(
                 SyntaxKind::Whitespace
@@ -402,10 +403,10 @@ fn set_object_child(
     }
 
     if pretty_nested {
-        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         inserted.push(rendered_member.into());
-        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         return Ok(parent
             .green()
@@ -512,7 +513,10 @@ fn set_array_child(
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
-                let inserted = vec![value.render_value(insert_style).into()];
+                let inserted = vec![value.render_value(&RenderConfig {
+                    string_style: insert_style,
+                    ..RenderConfig::default()
+                }).into()];
 
                 Ok(parent
                     .green()
@@ -534,26 +538,27 @@ fn build_append_array_elements(
     let mut inserted = Vec::new();
     let items = array_ast.items();
     let indent = "  ".repeat(array_ast.layout.depth + 1);
-    let newline = newline.to_string();
 
-    let rendered_value = if pretty_nested {
-        value.render_value_pretty(insert_style, array_ast.layout.depth, &newline)
-    } else {
-        value.render_value(insert_style)
+    let value_config = RenderConfig {
+        string_style: insert_style,
+        pretty: pretty_nested,
+        depth: array_ast.layout.depth,
+        newline,
     };
+    let rendered_value = value.render_value(&value_config);
 
     if items.is_empty() {
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         inserted.push(rendered_value.into());
-        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         return Ok(inserted);
     }
 
     if pretty_nested {
-        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         inserted.push(rendered_value.into());
-        inserted.push(SyntaxKind::Newline.create_token(&newline).into());
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
         return Ok(inserted);
     }
@@ -733,7 +738,10 @@ fn render_value_like_node(
 ) -> GreenNode {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
-    value.render_value(Some(quote_style))
+    value.render_value(&RenderConfig {
+        string_style: Some(quote_style),
+        ..RenderConfig::default()
+    })
 }
 
 fn replace_member_value(

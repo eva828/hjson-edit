@@ -1,54 +1,28 @@
 ## 優先度中: レンダリング・変換処理の重複/不整合
 
-### 14. `render_value` / `render_value_pretty` / `render_member` / `render_member_pretty` が重複している
+### 24. `push_node()` が GreenNode を再帰コピーしている + ops 側の indent/newline 組み立てが残存
 
 対象:
 
-- `hjson-edit/src/high_level/value.rs#L66-L132`
-- `hjson-edit/src/high_level/value.rs#L134-L205`
-- `hjson-edit/src/high_level/value.rs#L207-L229`
-- `hjson-edit/src/high_level/value.rs#L232-L263`
+- `hjson-edit/src/high_level/value.rs`
+- `hjson-edit/src/high_level/ops/object.rs`
 
 問題点:
 
-- 通常レンダリングと pretty レンダリングで GreenNodeBuilder の構築処理がほぼ二重化しています。
-- `Object` と `Array` の pretty 処理も似た構造です。
-- `render_member_pretty()` は `depth + 1` を渡していて、呼び出し側の `object_ast.layout.depth` との関係が分かりづらいです。
-
-影響:
-
-- 片方だけ直して片方を直し忘れるリスクがあります。
-- `set_object_child()` / `set_array_child()` 側にも indent/newline 組み立てがあり、責務が分散しています。
-
-整理案:
-
-- `RenderConfig { quote_style, pretty, depth, newline }` のような設定オブジェクトを導入。
-- value 側で「ノードをどう描画するか」、ops 側で「どこに挿入するか」に責務分離する。
-
----
-
-### 15. `push_node()` が GreenNode を再帰コピーしている
-
-対象:
-
-- `hjson-edit/src/high_level/value.rs#L294-L304`
-- `hjson-edit/src/high_level/value.rs#L306-L311`
-
-問題点:
-
-- `render_content()` が `GreenElement` を返し、`render_value()` がそれを再度 builder に push しています。
-- Node の場合、`push_node()` で再帰的にコピーしています。
+- `Object` / `Array` の非 pretty 描画で `render_member` / `render_value` を呼んだ後に `push_node` で再帰コピーしています。
+- `render_member` 内部でも `render_value` を呼んだ後に `push_node` でコピーしています。
+- `set_object_child()` / `set_array_child()` / `build_append_array_elements()` 側の indent/newline 組み立てが依然として ops 側に散在しており、value 側が一貫して描画できていません。
 
 影響:
 
 - 小規模なら問題ありませんが、配列/オブジェクトが大きい場合は余分なコピーになります。
-- `GreenNode` を直接組み立てられる場所と、`GreenElement` を経由する場所が混在しています。
+- rowan の API 上、親 `GreenNodeBuilder` に子 `GreenNode` を直接追加できないため、`push_node` の再帰コピーが残っています。
 
 整理案:
 
-- `render_content` と `render_value` の責務を見直す。
-- 可能なら `GreenNode` を直接 splice できる形に寄せる。
-- `GreenElement` 経由を減らす。
+- `render_body` のような builder 直接書き込みヘルパーをさらに拡張し、`render_member` / `render_value` の `push_node` 呼び出しも builder 直接書き込みに置き換える。
+- あるいは `GreenNode` を直接 splice できる形に寄せる。
+- 完全な責務分離（value 側がコンテナの pretty 周辺空白も含めて一貫して描画する、あるいは ops 側が一切 indent を計算しない）を完了させる。
 
 ---
 

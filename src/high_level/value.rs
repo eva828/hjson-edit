@@ -14,6 +14,31 @@ pub enum HjsonValue {
     Object(Vec<(String, HjsonValue)>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RenderConfig<'a> {
+    pub string_style: Option<QuoteStyle>,
+    pub pretty: bool,
+    pub depth: usize,
+    pub newline: &'a str,
+}
+
+impl<'a> RenderConfig<'a> {
+    pub fn with_depth(self, depth: usize) -> Self {
+        Self { depth, ..self }
+    }
+}
+
+impl Default for RenderConfig<'_> {
+    fn default() -> Self {
+        Self {
+            string_style: None,
+            pretty: false,
+            depth: 0,
+            newline: "\n",
+        }
+    }
+}
+
 impl From<&str> for HjsonValue {
     fn from(s: &str) -> Self {
         HjsonValue::String(s.to_string())
@@ -69,10 +94,37 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
-    pub fn render_content(&self, string_style: Option<QuoteStyle>) -> crate::GreenElement {
+    pub fn render_value(&self, config: &RenderConfig<'_>) -> GreenNode {
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::Value.into());
+        self.render_body(&mut builder, config);
+        builder.finish_node();
+        builder.finish()
+    }
+
+    pub fn render_member(
+        &self,
+        key: &str,
+        key_style: Option<QuoteStyle>,
+        config: &RenderConfig<'_>,
+    ) -> GreenNode {
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::Member.into());
+        render_key(&mut builder, key, key_style);
+        builder.token(SyntaxKind::Colon.into(), ":");
+        builder.token(SyntaxKind::Whitespace.into(), " ");
+        push_node(
+            &mut builder,
+            &self.render_value(&config.with_depth(config.depth + 1)),
+        );
+        builder.finish_node();
+        builder.finish()
+    }
+
+    fn render_body(&self, builder: &mut GreenNodeBuilder<'static>, config: &RenderConfig<'_>) {
         match self {
             HjsonValue::String(s) => {
-                let style = string_style.unwrap_or_else(|| {
+                let style = config.string_style.unwrap_or_else(|| {
                     if is_simple_unquoted_text(s) {
                         QuoteStyle::Unquoted
                     } else {
@@ -80,187 +132,126 @@ impl HjsonValue {
                     }
                 });
                 let (kind, text) = render_string(s, style);
-                kind.create_token(text).into()
+                builder.token(kind.into(), text.as_str());
             }
             HjsonValue::Integer(n) => {
                 let text = n.to_string();
-                SyntaxKind::Integer.create_token(text).into()
+                builder.token(SyntaxKind::Integer.into(), text.as_str());
             }
             HjsonValue::Float(n) => {
                 let text = n.to_string();
-                SyntaxKind::Float.create_token(text).into()
+                builder.token(SyntaxKind::Float.into(), text.as_str());
             }
-            HjsonValue::Bool(true) => SyntaxKind::True.create_token("true").into(),
-            HjsonValue::Bool(false) => SyntaxKind::False.create_token("false").into(),
-            HjsonValue::Null => SyntaxKind::Null.create_token("null").into(),
+            HjsonValue::Bool(true) => {
+                builder.token(SyntaxKind::True.into(), "true");
+            }
+            HjsonValue::Bool(false) => {
+                builder.token(SyntaxKind::False.into(), "false");
+            }
+            HjsonValue::Null => {
+                builder.token(SyntaxKind::Null.into(), "null");
+            }
             HjsonValue::Array(items) => {
-                let mut builder = GreenNodeBuilder::new();
                 builder.start_node(SyntaxKind::Array.into());
                 builder.token(SyntaxKind::LBracket.into(), "[");
-                for (idx, item) in items.iter().enumerate() {
-                    push_node(&mut builder, &item.render_value(string_style));
-                    if idx + 1 != items.len() {
-                        builder.token(SyntaxKind::Comma.into(), ",");
-                    }
-                }
-                builder.token(SyntaxKind::RBracket.into(), "]");
-                builder.finish_node();
-                builder.finish().into()
-            }
-            HjsonValue::Object(entries) => {
-                let mut builder = GreenNodeBuilder::new();
-                builder.start_node(SyntaxKind::Object.into());
-                builder.token(SyntaxKind::LBrace.into(), "{");
-                for (idx, (key, item)) in entries.iter().enumerate() {
-                    push_node(&mut builder, &item.render_member(key, None, string_style));
-                    if idx + 1 != entries.len() {
-                        builder.token(SyntaxKind::Comma.into(), ",");
-                    }
-                }
-                builder.token(SyntaxKind::RBrace.into(), "}");
-                builder.finish_node();
-                builder.finish().into()
-            }
-        }
-    }
-
-    pub fn render_value(&self, string_style: Option<QuoteStyle>) -> GreenNode {
-        let mut builder = GreenNodeBuilder::new();
-        builder.start_node(SyntaxKind::Value.into());
-        push_green_element(&mut builder, &self.render_content(string_style));
-        builder.finish_node();
-        builder.finish()
-    }
-
-    pub fn render_value_pretty(
-        &self,
-        string_style: Option<QuoteStyle>,
-        depth: usize,
-        newline: &str,
-    ) -> GreenNode {
-        match self {
-            HjsonValue::Array(items) => {
-                let mut builder = GreenNodeBuilder::new();
-                builder.start_node(SyntaxKind::Value.into());
-                builder.start_node(SyntaxKind::Array.into());
-                builder.token(SyntaxKind::LBracket.into(), "[");
-                if items.is_empty() {
-                    builder.token(SyntaxKind::RBracket.into(), "]");
-                } else {
-                    builder.token(SyntaxKind::Newline.into(), newline);
+                if config.pretty && !items.is_empty() {
+                    builder.token(SyntaxKind::Newline.into(), config.newline);
                     for (idx, item) in items.iter().enumerate() {
-                        let indent_text = indent(depth + 1);
-                        builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
-                        push_node(
-                            &mut builder,
-                            &item.render_value_pretty(string_style, depth + 1, newline),
+                        builder.token(
+                            SyntaxKind::Whitespace.into(),
+                            indent(config.depth + 1).as_str(),
                         );
+                        builder.start_node(SyntaxKind::Value.into());
+                        item.render_body(builder, &config.with_depth(config.depth + 1));
+                        builder.finish_node();
                         if idx + 1 != items.len() {
-                            builder.token(SyntaxKind::Newline.into(), newline);
+                            builder.token(SyntaxKind::Newline.into(), config.newline);
                         }
                     }
-                    builder.token(SyntaxKind::Newline.into(), newline);
-                    let indent_text = indent(depth);
-                    builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
+                    builder.token(SyntaxKind::Newline.into(), config.newline);
+                    builder.token(
+                        SyntaxKind::Whitespace.into(),
+                        indent(config.depth).as_str(),
+                    );
+                    builder.token(SyntaxKind::RBracket.into(), "]");
+                } else {
+                    for (idx, item) in items.iter().enumerate() {
+                        builder.start_node(SyntaxKind::Value.into());
+                        item.render_body(builder, config);
+                        builder.finish_node();
+                        if idx + 1 != items.len() {
+                            builder.token(SyntaxKind::Comma.into(), ",");
+                        }
+                    }
                     builder.token(SyntaxKind::RBracket.into(), "]");
                 }
                 builder.finish_node();
-                builder.finish_node();
-                builder.finish()
             }
             HjsonValue::Object(entries) => {
-                let mut builder = GreenNodeBuilder::new();
-                builder.start_node(SyntaxKind::Value.into());
                 builder.start_node(SyntaxKind::Object.into());
                 builder.token(SyntaxKind::LBrace.into(), "{");
-                if entries.is_empty() {
+                if config.pretty && !entries.is_empty() {
+                    builder.token(SyntaxKind::Newline.into(), config.newline);
+                    for (idx, (key, value)) in entries.iter().enumerate() {
+                        builder.token(
+                            SyntaxKind::Whitespace.into(),
+                            indent(config.depth + 1).as_str(),
+                        );
+                        builder.start_node(SyntaxKind::Member.into());
+                        render_key(builder, key, None);
+                        builder.token(SyntaxKind::Colon.into(), ":");
+                        builder.token(SyntaxKind::Whitespace.into(), " ");
+                        push_node(
+                            builder,
+                            &value.render_value(&config.with_depth(config.depth + 2)),
+                        );
+                        builder.finish_node();
+                        if idx + 1 != entries.len() {
+                            builder.token(SyntaxKind::Newline.into(), config.newline);
+                        }
+                    }
+                    builder.token(SyntaxKind::Newline.into(), config.newline);
+                    builder.token(
+                        SyntaxKind::Whitespace.into(),
+                        indent(config.depth).as_str(),
+                    );
                     builder.token(SyntaxKind::RBrace.into(), "}");
                 } else {
-                    builder.token(SyntaxKind::Newline.into(), newline);
-                    for (idx, (key, item)) in entries.iter().enumerate() {
-                        let indent_text = indent(depth + 1);
-                        builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
+                    for (idx, (key, value)) in entries.iter().enumerate() {
                         push_node(
-                            &mut builder,
-                            &item.render_member_pretty(key, None, string_style, depth + 1, newline),
+                            builder,
+                            &value.render_member(key, None, config),
                         );
                         if idx + 1 != entries.len() {
-                            builder.token(SyntaxKind::Newline.into(), newline);
+                            builder.token(SyntaxKind::Comma.into(), ",");
                         }
                     }
-                    builder.token(SyntaxKind::Newline.into(), newline);
-                    let indent_text = indent(depth);
-                    builder.token(SyntaxKind::Whitespace.into(), indent_text.as_str());
                     builder.token(SyntaxKind::RBrace.into(), "}");
                 }
                 builder.finish_node();
-                builder.finish_node();
-                builder.finish()
             }
-            _ => self.render_value(string_style),
         }
     }
+}
 
-    pub fn render_member(
-        &self,
-        key: &str,
-        key_style: Option<QuoteStyle>,
-        string_style: Option<QuoteStyle>,
-    ) -> GreenNode {
-        let mut builder = GreenNodeBuilder::new();
-        builder.start_node(SyntaxKind::Member.into());
-        builder.start_node(SyntaxKind::Key.into());
-        let (key_kind, key_text) = render_string(
-            key,
-            key_style.unwrap_or_else(|| {
-                if is_simple_unquoted_text(key) {
-                    QuoteStyle::Unquoted
-                } else {
-                    QuoteStyle::DoubleQuoted
-                }
-            }),
-        );
-        builder.token(key_kind.into(), key_text.as_str());
-        builder.finish_node();
-        builder.token(SyntaxKind::Colon.into(), ":");
-        builder.token(SyntaxKind::Whitespace.into(), " ");
-        push_node(&mut builder, &self.render_value(string_style));
-        builder.finish_node();
-        builder.finish()
-    }
-
-    pub fn render_member_pretty(
-        &self,
-        key: &str,
-        key_style: Option<QuoteStyle>,
-        string_style: Option<QuoteStyle>,
-        depth: usize,
-        newline: &str,
-    ) -> GreenNode {
-        let mut builder = GreenNodeBuilder::new();
-        builder.start_node(SyntaxKind::Member.into());
-        builder.start_node(SyntaxKind::Key.into());
-        let (key_kind, key_text) = render_string(
-            key,
-            key_style.unwrap_or_else(|| {
-                if is_simple_unquoted_text(key) {
-                    QuoteStyle::Unquoted
-                } else {
-                    QuoteStyle::DoubleQuoted
-                }
-            }),
-        );
-        builder.token(key_kind.into(), key_text.as_str());
-        builder.finish_node();
-        builder.token(SyntaxKind::Colon.into(), ":");
-        builder.token(SyntaxKind::Whitespace.into(), " ");
-        push_node(
-            &mut builder,
-            &self.render_value_pretty(string_style, depth + 1, newline),
-        );
-        builder.finish_node();
-        builder.finish()
-    }
+fn render_key(
+    builder: &mut GreenNodeBuilder<'static>,
+    key: &str,
+    key_style: Option<QuoteStyle>,
+) {
+    builder.start_node(SyntaxKind::Key.into());
+    let (key_kind, key_text) = render_string(
+        key,
+        key_style.unwrap_or_else(|| {
+            if is_simple_unquoted_text(key) {
+                QuoteStyle::Unquoted
+            } else {
+                QuoteStyle::DoubleQuoted
+            }
+        }),
+    );
+    builder.token(key_kind.into(), key_text.as_str());
+    builder.finish_node();
 }
 
 fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
@@ -297,11 +288,4 @@ fn push_node(builder: &mut GreenNodeBuilder<'static>, node: &GreenNode) {
         }
     }
     builder.finish_node();
-}
-
-fn push_green_element(builder: &mut GreenNodeBuilder<'static>, element: &crate::GreenElement) {
-    match element {
-        rowan::NodeOrToken::Node(node) => push_node(builder, node),
-        rowan::NodeOrToken::Token(token) => builder.token(token.kind(), token.text()),
-    }
 }
