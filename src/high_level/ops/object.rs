@@ -367,15 +367,13 @@ fn set_object_child(
         AppendMode::BeforeFooter => object_ast.append_member_index_before_footer(),
         AppendMode::AfterComments => object_ast.append_member_index_after_comments(),
     };
-    let mut inserted = Vec::new();
-    let indent = "  ".repeat(object_ast.layout.depth + 1);
     let member_config = RenderConfig {
         string_style: insert_style,
         pretty: pretty_nested,
         depth: object_ast.layout.depth,
         newline,
     };
-    let rendered_member = value.render_member(key, None, &member_config);
+    let rendered_member = value.render_member_node(key, None, &member_config);
 
     if object_ast.members().is_empty() {
         let range_start = if insert_pos > 0
@@ -387,32 +385,32 @@ fn set_object_child(
         } else {
             insert_pos
         };
-        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        inserted.push(rendered_member.into());
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
-        if object_ast.layout.depth > 0 {
-            inserted.push(
-                SyntaxKind::Whitespace
-                    .create_token(&"  ".repeat(object_ast.layout.depth))
-                    .into(),
-            );
-        }
+        let inserted = wrap_for_container(
+            rendered_member.into(),
+            object_ast.layout.depth,
+            newline,
+            true,
+            false,
+        );
         return Ok(parent
             .green()
             .splice_children(range_start..insert_pos, inserted));
     }
 
     if pretty_nested {
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
-        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        inserted.push(rendered_member.into());
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
-        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        let inserted = wrap_for_container(
+            rendered_member.into(),
+            object_ast.layout.depth,
+            newline,
+            false,
+            true,
+        );
         return Ok(parent
             .green()
             .splice_children(insert_pos..insert_pos, inserted));
     }
 
+    let mut inserted: Vec<crate::GreenElement> = Vec::new();
     if let Some(last_member) = object_ast.members().last() {
         let needs_separator = last_member
             .trailing_trivia
@@ -423,8 +421,13 @@ fn set_object_child(
             inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
         }
     }
-
-    inserted.push(rendered_member.into());
+    inserted.extend(wrap_for_container(
+        rendered_member.into(),
+        object_ast.layout.depth,
+        newline,
+        false,
+        false,
+    ));
 
     Ok(parent
         .green()
@@ -513,7 +516,7 @@ fn set_array_child(
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
-                let inserted = vec![value.render_value(&RenderConfig {
+                let inserted = vec![value.render_value_node(&RenderConfig {
                     string_style: insert_style,
                     ..RenderConfig::default()
                 }).into()];
@@ -535,47 +538,70 @@ fn build_append_array_elements(
     pretty_nested: bool,
     newline: &str,
 ) -> Result<Vec<crate::GreenElement>, HjsonEditError> {
-    let mut inserted = Vec::new();
     let items = array_ast.items();
-    let indent = "  ".repeat(array_ast.layout.depth + 1);
-
     let value_config = RenderConfig {
         string_style: insert_style,
         pretty: pretty_nested,
         depth: array_ast.layout.depth,
         newline,
     };
-    let rendered_value = value.render_value(&value_config);
+    let rendered_value = value.render_value_node(&value_config);
 
-    if items.is_empty() {
-        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        inserted.push(rendered_value.into());
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
-        return Ok(inserted);
-    }
-
-    if pretty_nested {
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
-        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        inserted.push(rendered_value.into());
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
-        inserted.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        return Ok(inserted);
-    }
-
-    if let Some(last_value) = items.last() {
-        let needs_separator = last_value
-            .trailing_trivia
-            .iter()
-            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-        if needs_separator {
-            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+    let mut inserted = Vec::new();
+    if !pretty_nested && !items.is_empty() {
+        if let Some(last_value) = items.last() {
+            let needs_separator = last_value
+                .trailing_trivia
+                .iter()
+                .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+            if needs_separator {
+                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+            }
         }
     }
-    inserted.push(rendered_value.into());
+    inserted.extend(wrap_for_container(
+        rendered_value.into(),
+        array_ast.layout.depth,
+        newline,
+        items.is_empty(),
+        pretty_nested,
+    ));
 
     Ok(inserted)
+}
+
+fn wrap_for_container(
+    element: crate::GreenElement,
+    depth: usize,
+    newline: &str,
+    empty: bool,
+    pretty: bool,
+) -> Vec<crate::GreenElement> {
+    let mut result = Vec::new();
+    if empty {
+        let indent = "  ".repeat(depth + 1);
+        result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        result.push(element);
+        result.push(SyntaxKind::Newline.create_token(newline).into());
+        if depth > 0 {
+            result.push(
+                SyntaxKind::Whitespace
+                    .create_token("  ".repeat(depth))
+                    .into(),
+            );
+        }
+    } else if pretty {
+        let indent = "  ".repeat(depth + 1);
+        result.push(SyntaxKind::Newline.create_token(newline).into());
+        result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        result.push(element);
+        result.push(SyntaxKind::Newline.create_token(newline).into());
+        result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+    } else {
+        result.push(element);
+    }
+    result
 }
 
 fn remove_root_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -738,7 +764,7 @@ fn render_value_like_node(
 ) -> GreenNode {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
-    value.render_value(&RenderConfig {
+    value.render_value_node(&RenderConfig {
         string_style: Some(quote_style),
         ..RenderConfig::default()
     })
