@@ -11,20 +11,22 @@
 
 ## やるべきこと
 
-### 1. スタイル enum の再設計（Preserve と実スタイルの分離）
+### [済] 1. スタイル enum の再設計（Preserve と実スタイルの分離）
 
-**`StringStyle` を `Preserve` / `Explicit(QuoteStyle)` に分離する**
-- 現在: `StringStyle::Preserve`, `DoubleQuoted`, `Block`, `Unquoted`
-- 変更後: `StringStyle::Preserve`, `StringStyle::Explicit(QuoteStyle)`
+**`StringStyle` を `Preserve` / `Explicit(QuoteStyle)` に分離する → `Prefer<QuoteStyle>` に統合**
+- ~~現在: `StringStyle::Preserve`, `DoubleQuoted`, `Block`, `Unquoted`~~
+- ~~変更後: `StringStyle::Preserve`, `StringStyle::Explicit(QuoteStyle)`~~
+- 最終: `Prefer<T>` generic 型を新設。`Prefer<QuoteStyle>` に統合し、`StringStyle` は削除
 - `resolve_quote_style` の match が簡潔になる（`Preserve => detected.unwrap_or(...)`、`Explicit(style) => style` のみ）
 - `QuoteStyle`（`ast` 側）との重複が解消され、一貫性が向上する
 
-**`CommentStyle` を `Preserve` / `Explicit(CommentKind)` に分離する**
-- 現在: `CommentStyle::Preserve`, `Line`, `Hash`, `Block`
-- 変更後: `CommentStyle::Preserve`, `CommentStyle::Explicit(CommentKind)`
-- `resolve_comment_style` の戻り値は常に `Explicit(...)` になり、`render_comment_text` に `Preserve` が渡される曖昧さが解消する
+**`CommentStyle` を `Preserve` / `Explicit(CommentKind)` に分離する → `Prefer<CommentKind>` に統合**
+- ~~現在: `CommentStyle::Preserve`, `Line`, `Hash`, `Block`~~
+- ~~変更後: `CommentStyle::Preserve`, `CommentStyle::Explicit(CommentKind)`~~
+- 最終: `Prefer<CommentKind>` に統合し、`CommentStyle` は削除
+- `resolve_comment_style` の戻り値は `CommentKind` に確定し、`render_comment_text` への曖昧な `Preserve` 渡しが解消する
 - `CommentKind`（`ast` 側）との重複が解消される
-- `render_comment_text` で `CommentStyle::Preserve | CommentStyle::Block` を同じ分支にしている箇所は、`resolve_comment_style` 通過後なら実質デッドコードになるので削除できる
+- `render_comment_text` で `CommentStyle::Preserve | CommentStyle::Block` を同じ分支にしていた箇所を削除
 
 ---
 

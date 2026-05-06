@@ -1,14 +1,17 @@
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 use anyhow::{Context, Result};
-use hjson_edit::high_level::{
-    ops::{
-        comment::{CommentStyle, HjsonDocumentCommentEdit},
-        object::{HjsonDocumentObjectEdit, StringStyle},
+use hjson_edit::{
+    ast::{CommentKind, QuoteStyle},
+    high_level::{
+        ops::{
+            comment::HjsonDocumentCommentEdit,
+            object::HjsonDocumentObjectEdit,
+        },
+        path::{HjsonCommentPath, HjsonObjectPath},
+        value::HjsonValue,
+        Prefer, HjsonDocument,
     },
-    path::{HjsonCommentPath, HjsonObjectPath},
-    value::HjsonValue,
-    HjsonDocument,
 };
 
 #[derive(Debug, Clone)]
@@ -16,7 +19,7 @@ enum EditOp {
     Set {
         path: String,
         value: HjsonValue,
-        string_style: Option<StringStyle>,
+        string_style: Option<Prefer<QuoteStyle>>,
     },
     Remove {
         path: String,
@@ -32,8 +35,8 @@ enum EditOp {
     CommentRemove {
         path: HjsonCommentPath,
     },
-    SetCommentStyle(CommentStyle),
-    SetStringStyle(StringStyle),
+    SetCommentStyle(Prefer<CommentKind>),
+    SetStringStyle(Prefer<QuoteStyle>),
 }
 
 pub fn edit_command() -> Command {
@@ -143,12 +146,12 @@ impl CliValueParser {
         HjsonValue::String(raw.to_string())
     }
 
-    fn detect_inline_string_style(raw: &str) -> Option<StringStyle> {
+    fn detect_inline_string_style(raw: &str) -> Option<Prefer<QuoteStyle>> {
         if raw.len() >= 6 && raw.starts_with("'''") && raw.ends_with("'''") {
-            return Some(StringStyle::Block);
+            return Some(Prefer::Explicit(QuoteStyle::Block));
         }
         if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-            return Some(StringStyle::DoubleQuoted);
+            return Some(Prefer::Explicit(QuoteStyle::DoubleQuoted));
         }
         None
     }
@@ -297,9 +300,9 @@ impl<'a> EditOpCollector<'a> {
             let indices = self.collect_indices("comment-style");
             for (idx, val) in indices.iter().zip(styles) {
                 let style = match val.to_string_lossy().as_ref() {
-                    "line" => CommentStyle::Line,
-                    "hash" => CommentStyle::Hash,
-                    "block" => CommentStyle::Block,
+                    "line" => Prefer::Explicit(CommentKind::Line),
+                    "hash" => Prefer::Explicit(CommentKind::Hash),
+                    "block" => Prefer::Explicit(CommentKind::Block),
                     other => anyhow::bail!("Invalid comment style: {}", other),
                 };
                 self.ops_with_indices
@@ -314,10 +317,10 @@ impl<'a> EditOpCollector<'a> {
             let indices = self.collect_indices("string-style");
             for (idx, val) in indices.iter().zip(styles) {
                 let style = match val.to_string_lossy().as_ref() {
-                    "preserve" => StringStyle::Preserve,
-                    "double" => StringStyle::DoubleQuoted,
-                    "block" => StringStyle::Block,
-                    "unquoted" => StringStyle::Unquoted,
+                    "preserve" => Prefer::Preserve,
+                    "double" => Prefer::Explicit(QuoteStyle::DoubleQuoted),
+                    "block" => Prefer::Explicit(QuoteStyle::Block),
+                    "unquoted" => Prefer::Explicit(QuoteStyle::Unquoted),
                     other => anyhow::bail!("Invalid string style: {}", other),
                 };
                 self.ops_with_indices
@@ -373,7 +376,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 value,
                 string_style,
             } => {
-                let style = string_style.unwrap_or(StringStyle::Preserve);
+                let style = string_style.unwrap_or(Prefer::Preserve);
                 doc = doc.string_style(style).set(
                     HjsonObjectPath::parse(&path)
                         .with_context(|| format!("Invalid path: {path}"))?,

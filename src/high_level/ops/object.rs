@@ -11,19 +11,10 @@ use crate::{
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         resolve::{ExistingPrefix, ParentResolution, PathResolver},
         value::{HjsonValue, RenderConfig},
-        HjsonDocument,
+        Prefer, HjsonDocument,
     },
     syntax::{RedNode, SyntaxKind},
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StringStyle {
-    #[default]
-    Preserve,
-    DoubleQuoted,
-    Block,
-    Unquoted,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppendMode {
@@ -96,7 +87,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
 pub(crate) fn replace_root_value(
     root: &RedNode,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = find_mutable_child(root)?;
     let updated_child = render_value_like_node(&child, value, string_style);
@@ -110,7 +101,7 @@ pub(crate) fn rebuild_tree_with_set(
     root: RedNode,
     path: &HjsonObjectPath,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
@@ -200,7 +191,7 @@ fn apply_set_to_node(
     node: &RedNode,
     last: &PathSegment,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
     pretty_nested: bool,
     newline: &str,
@@ -269,7 +260,7 @@ fn set_object_child(
     parent: &RedNode,
     last: &PathSegment,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
     pretty_nested: bool,
     newline: &str,
@@ -287,7 +278,7 @@ fn set_object_child(
     let object_ast = AstObject::cast(parent.clone())?;
     let detected = object_ast.detected_string_style();
     let insert_style = match (string_style, detected) {
-        (StringStyle::Preserve, None) => None,
+        (Prefer::Preserve, None) => None,
         _ => Some(resolve_quote_style(string_style, detected)),
     };
     if let Some(member) = object_ast
@@ -360,7 +351,7 @@ fn set_array_child(
     parent: &RedNode,
     last: &PathSegment,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
     pretty_nested: bool,
     newline: &str,
@@ -378,7 +369,7 @@ fn set_array_child(
     let array_ast = AstArray::cast(parent.clone())?;
     let detected = array_ast.detected_string_style();
     let insert_style = match (string_style, detected) {
-        (StringStyle::Preserve, None) => None,
+        (Prefer::Preserve, None) => None,
         _ => Some(resolve_quote_style(string_style, detected)),
     };
     let items = array_ast.items();
@@ -563,7 +554,7 @@ fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
 fn render_value_like_node(
     node: &RedNode,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
 ) -> GreenNode {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
@@ -576,7 +567,7 @@ fn render_value_like_node(
 fn replace_member_value(
     member: &RedNode,
     value: &HjsonValue,
-    string_style: StringStyle,
+    string_style: Prefer<QuoteStyle>,
 ) -> Result<GreenNode, HjsonEditError> {
     let value_child = member
         .children()
@@ -590,11 +581,9 @@ fn replace_member_value(
     ))
 }
 
-fn resolve_quote_style(preference: StringStyle, detected: Option<QuoteStyle>) -> QuoteStyle {
+fn resolve_quote_style(preference: Prefer<QuoteStyle>, detected: Option<QuoteStyle>) -> QuoteStyle {
     match preference {
-        StringStyle::Preserve => detected.unwrap_or(QuoteStyle::DoubleQuoted),
-        StringStyle::DoubleQuoted => QuoteStyle::DoubleQuoted,
-        StringStyle::Block => QuoteStyle::Block,
-        StringStyle::Unquoted => QuoteStyle::Unquoted,
+        Prefer::Preserve => detected.unwrap_or(QuoteStyle::DoubleQuoted),
+        Prefer::Explicit(style) => style,
     }
 }

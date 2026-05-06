@@ -17,11 +17,10 @@ pub(crate) mod syntax;
 pub use format::{FormatConfig, Formatter};
 pub use high_level::{
     error::HjsonEditError,
-    ops::comment::CommentStyle,
-    ops::object::{AppendMode, HjsonDocumentObjectEdit, StringStyle},
+    ops::object::{AppendMode, HjsonDocumentObjectEdit},
     path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
     value::HjsonValue,
-    HjsonDocument,
+    Prefer, HjsonDocument,
 };
 pub use line_index::LineIndex;
 pub use syntax::parser::ParseError;

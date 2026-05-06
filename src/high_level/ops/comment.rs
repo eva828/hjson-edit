@@ -3,19 +3,11 @@ use rowan::NodeOrToken;
 use crate::{
     ast::{AstNode, CommentKind, Member, Trivia},
     high_level::{
-        error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, HjsonDocument,
+        error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, Prefer,
+        HjsonDocument,
     },
     syntax::{GreenElement, RedNode, SyntaxKind},
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CommentStyle {
-    #[default]
-    Preserve,
-    Line,
-    Hash,
-    Block,
-}
 
 pub trait HjsonDocumentCommentEdit {
     fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;
@@ -106,19 +98,15 @@ enum MemberCommentLocation {
     Inline,
 }
 
-fn make_comment_node(style: CommentStyle, text: &str) -> rowan::GreenNode {
+fn make_comment_node(style: CommentKind, text: &str) -> rowan::GreenNode {
     SyntaxKind::Comment.create_node(vec![kind_from_style(style)
-        .create_token(&render_comment_text(style, text))
+        .create_token(render_comment_text(style, text))
         .into()])
 }
 
-fn trivia_comment_style(trivia: &[Trivia]) -> Option<CommentStyle> {
+fn trivia_comment_style(trivia: &[Trivia]) -> Option<CommentKind> {
     trivia.iter().find_map(|elem| match elem {
-        Trivia::Comment(comment) => Some(match comment.kind {
-            CommentKind::Line => CommentStyle::Line,
-            CommentKind::Hash => CommentStyle::Hash,
-            CommentKind::Block => CommentStyle::Block,
-        }),
+        Trivia::Comment(comment) => Some(comment.kind),
         _ => None,
     })
 }
@@ -285,7 +273,7 @@ fn set_member_comment(
             MemberCommentLocation::Before => {
                 let newline = SyntaxKind::Newline.create_token(doc.current_newline());
                 let indent =
-                    SyntaxKind::Whitespace.create_token(&detect_indent_for_member(&member));
+                    SyntaxKind::Whitespace.create_token(detect_indent_for_member(&member));
                 (
                     member.node().index(),
                     vec![comment_node.into(), newline.into(), indent.into()],
@@ -349,28 +337,26 @@ fn extract_comment_text(trivia: &[Trivia]) -> Option<String> {
     }
 }
 
-fn kind_from_style(style: CommentStyle) -> SyntaxKind {
+fn kind_from_style(style: CommentKind) -> SyntaxKind {
     match style {
-        CommentStyle::Preserve | CommentStyle::Block => SyntaxKind::BlockComment,
-        CommentStyle::Line => SyntaxKind::LineComment,
-        CommentStyle::Hash => SyntaxKind::HashComment,
+        CommentKind::Block => SyntaxKind::BlockComment,
+        CommentKind::Line => SyntaxKind::LineComment,
+        CommentKind::Hash => SyntaxKind::HashComment,
     }
 }
 
 fn resolve_comment_style(
-    preferred: CommentStyle,
+    preferred: Prefer<CommentKind>,
     comment: &str,
-    existing_style: Option<CommentStyle>,
-) -> CommentStyle {
+    existing_style: Option<CommentKind>,
+) -> CommentKind {
     if comment.contains('\n') || comment.contains('\r') {
-        return CommentStyle::Block;
+        return CommentKind::Block;
     }
 
     match preferred {
-        CommentStyle::Preserve => existing_style.unwrap_or(CommentStyle::Block),
-        CommentStyle::Line => CommentStyle::Line,
-        CommentStyle::Hash => CommentStyle::Hash,
-        CommentStyle::Block => CommentStyle::Block,
+        Prefer::Preserve => existing_style.unwrap_or(CommentKind::Block),
+        Prefer::Explicit(kind) => kind,
     }
 }
 
@@ -395,10 +381,10 @@ fn detect_indent_for_member(member: &Member) -> String {
     }
 }
 
-fn render_comment_text(style: CommentStyle, comment: &str) -> String {
+fn render_comment_text(style: CommentKind, comment: &str) -> String {
     match style {
-        CommentStyle::Line => format!("// {}", comment),
-        CommentStyle::Hash => format!("# {}", comment),
-        CommentStyle::Block | CommentStyle::Preserve => format!("/* {} */", comment),
+        CommentKind::Line => format!("// {}", comment),
+        CommentKind::Hash => format!("# {}", comment),
+        CommentKind::Block => format!("/* {} */", comment),
     }
 }

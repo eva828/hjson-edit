@@ -11,10 +11,9 @@ pub mod style;
 pub mod value;
 
 use crate::ast as semantic_ast;
-use crate::ast::AstNode;
+use crate::ast::{AstNode, CommentKind, QuoteStyle};
 use crate::high_level::error::HjsonEditError;
-use crate::high_level::ops::comment::CommentStyle;
-use crate::high_level::ops::object::{AppendMode, StringStyle};
+use crate::high_level::ops::object::AppendMode;
 use crate::high_level::style::DetectNewline;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
@@ -22,12 +21,20 @@ use crate::RedNode;
 use line_index::LineIndex;
 use rowan::GreenNode;
 
+/// 値の維持（Preserve）または明示的な指定（Explicit）を表す型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Prefer<T> {
+    #[default]
+    Preserve,
+    Explicit(T),
+}
+
 /// HJSONドキュメント
 #[derive(Debug, Clone)]
 pub struct HjsonDocument {
     root: RedNode,
-    string_style: StringStyle,
-    comment_style: CommentStyle,
+    string_style: Prefer<QuoteStyle>,
+    comment_style: Prefer<CommentKind>,
     append_mode: AppendMode,
     newline: String,
 }
@@ -59,19 +66,19 @@ impl HjsonDocument {
 
         Ok(Self {
             root,
-            string_style: StringStyle::default(),
-            comment_style: CommentStyle::default(),
+            string_style: Prefer::default(),
+            comment_style: Prefer::default(),
             append_mode: AppendMode::default(),
             newline: input.detect_newline().as_str().to_string(),
         })
     }
 
-    pub fn string_style(mut self, style: StringStyle) -> Self {
+    pub fn string_style(mut self, style: Prefer<QuoteStyle>) -> Self {
         self.string_style = style;
         self
     }
 
-    pub fn comment_style(mut self, style: CommentStyle) -> Self {
+    pub fn comment_style(mut self, style: Prefer<CommentKind>) -> Self {
         self.comment_style = style;
         self
     }
@@ -88,11 +95,11 @@ impl HjsonDocument {
         }
     }
 
-    pub(crate) fn current_string_style(&self) -> StringStyle {
+    pub(crate) fn current_string_style(&self) -> Prefer<QuoteStyle> {
         self.string_style
     }
 
-    pub(crate) fn current_comment_style(&self) -> CommentStyle {
+    pub(crate) fn current_comment_style(&self) -> Prefer<CommentKind> {
         self.comment_style
     }
 
