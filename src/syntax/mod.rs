@@ -154,50 +154,6 @@ impl SyntaxKind {
         rowan::GreenToken::new(self.into(), text.into().as_str())
     }
 
-    /// 新しいノードを作成
-    pub fn create_node(self, children: Vec<crate::syntax::GreenElement>) -> rowan::GreenNode {
-        use crate::syntax::GreenElement;
-        use rowan::GreenNodeBuilder;
-
-        fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement) {
-            match element {
-                rowan::NodeOrToken::Node(node) => {
-                    builder.start_node(node.kind());
-                    for child in node.children() {
-                        let elem = child_to_green_element(child);
-                        push_element(builder, &elem);
-                    }
-                    builder.finish_node();
-                }
-                rowan::NodeOrToken::Token(token) => {
-                    let kind: rowan::SyntaxKind = token.kind();
-                    builder.token(kind, token.text());
-                }
-            }
-        }
-
-        fn child_to_green_element(
-            child: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
-        ) -> GreenElement {
-            match child {
-                rowan::NodeOrToken::Node(node_data) => rowan::NodeOrToken::Node(
-                    rowan::GreenNode::from(std::borrow::Cow::Borrowed(node_data)),
-                ),
-                rowan::NodeOrToken::Token(token_data) => rowan::NodeOrToken::Token(
-                    rowan::GreenToken::new(token_data.kind(), token_data.text()),
-                ),
-            }
-        }
-
-        let mut builder = GreenNodeBuilder::new();
-        builder.start_node(self.into());
-        for child in children {
-            push_element(&mut builder, &child);
-        }
-        builder.finish_node();
-        builder.finish()
-    }
-
     /// トークンかどうか
     pub fn is_token(self) -> bool {
         use SyntaxKind::*;

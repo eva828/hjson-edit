@@ -9,7 +9,7 @@ use crate::{
         error::HjsonEditError,
         ext::RedNodeExt,
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
-        resolve::{ExistingPrefix, ParentResolution, PathResolver},
+        resolve::{resolve_body, ExistingPrefix, ParentResolution, PathResolver},
         value::{HjsonValue, RenderConfig},
         Prefer, HjsonDocument,
     },
@@ -53,12 +53,6 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         let value = value.into();
         let newline = self.current_newline();
 
-        if let Ok(current) = self.get(path.clone()) {
-            if current == value {
-                return Ok(self);
-            }
-        }
-
         let root = self.syntax_root().clone();
         let string_style = self.current_string_style();
         let updated = if path.depth() == 0 {
@@ -90,7 +84,7 @@ pub(crate) fn replace_root_value(
     string_style: Prefer<QuoteStyle>,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let child = find_mutable_child(root)?;
+    let child = resolve_body(root)?;
     let config = RenderConfig {
         string_style: None,
         pretty: false,
@@ -175,25 +169,6 @@ pub(crate) fn rebuild_tree_with_remove(
     }
 }
 
-fn find_mutable_child(parent: &RedNode) -> Result<RedNode, HjsonEditError> {
-    match parent.kind() {
-        SyntaxKind::Root => parent
-            .children()
-            .find(|child| {
-                matches!(
-                    child.kind(),
-                    SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
-                )
-            })
-            .ok_or(HjsonEditError::ParentNotFound),
-        SyntaxKind::Value => parent
-            .children()
-            .find(|child| !child.kind().is_trivia())
-            .ok_or(HjsonEditError::ParentNotFound),
-        _ => Ok(parent.clone()),
-    }
-}
-
 fn transform_node(
     node: &RedNode,
     last: &PathSegment,
@@ -202,7 +177,7 @@ fn transform_node(
 ) -> Result<GreenNode, HjsonEditError> {
     match node.kind() {
         SyntaxKind::Root | SyntaxKind::Value => {
-            let child = find_mutable_child(node)?;
+            let child = resolve_body(node)?;
             let updated_child = transform_node(&child, last, on_object, on_array)?;
             Ok(node
                 .green()
@@ -210,7 +185,7 @@ fn transform_node(
         }
         SyntaxKind::Object => on_object(node, last),
         SyntaxKind::Array => on_array(node, last),
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
             last.clone(),
         ]))),
     }
@@ -377,7 +352,7 @@ fn set_array_child(
     match seg {
         ArrayPathSegment::Index(idx) => {
             let Some(current_value) = items.get(*idx) else {
-                return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+                return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
                     last.clone(),
                 ])));
             };
@@ -455,7 +430,7 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
     let key = match last {
         PathSegment::Key(key) => key,
         _ => {
-            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
                 last.clone(),
             ])))
         }
@@ -468,7 +443,7 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         .position(|member| member.member_key().as_deref() == Some(key.as_str()));
 
     let Some(member_pos) = member_pos else {
-        return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+        return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
             last.clone(),
         ])));
     };
@@ -483,7 +458,7 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
     let seg = match last {
         PathSegment::Array(seg) => seg,
         _ => {
-            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+            return Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
                 last.clone(),
             ])))
         }
@@ -497,7 +472,7 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
     };
     let item = items
         .get(idx)
-        .ok_or_else(|| HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![last.clone()])))?;
+        .ok_or_else(|| HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![last.clone()])))?;
 
     Ok(parent
         .green()

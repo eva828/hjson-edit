@@ -74,31 +74,31 @@
 - ~~空配列時の処理が `set_array_child` に残り、非空時だけ関数に委譲されている~~
 - 関数を解体して `set_array_child` に統合。空配列・非空配列の分岐を1箇所に集約
 
-### 5. 未使用・過剰コードの削除
+### [済] 5. 未使用・過剰コードの削除
 
 **`HjsonObjectPath` の変換経路を `parse()` のみに絞る**
-- `TryFrom<&str>` / `FromStr` / `From<Vec>` / `From<&[PathSegment]>` を削除
-- 公開 API は `HjsonObjectPath::parse(&str)` のみにする
+- ~~`TryFrom<&str>` / `FromStr` / `From<Vec>` / `From<&[PathSegment]>` を削除~~
+- ~~公開 API は `HjsonObjectPath::parse(&str)` のみにする~~
 
 **`DetectNewline for RedNode` を削除する**
-- コードベース内で完全に未使用
-- `HjsonDocument::current_newline()` に一本化する
+- ~~コードベース内で完全に未使用~~
+- ~~`HjsonDocument::current_newline()` に一本化する~~
 
 **`SyntaxKind::create_node` を削除する**
-- `rowan::GreenNode::new(...)` で直接作れる過剰なラッパー
-- 使用箇所も `GreenNode::new` で代替可能
+- ~~`rowan::GreenNode::new(...)` で直接作れる過剰なラッパー~~
+- ~~使用箇所も `GreenNode::new` で代替可能~~
 
 **`HjsonDocument::set` の早期 return を削除する**
-- `get`（パス解決 + `node_to_value`）を毎回実行する重い最適化
-- ほとんどのケースで無駄
+- ~~`get`（パス解決 + `node_to_value`）を毎回実行する重い最適化~~
+- ~~ほとんどのケースで無駄~~
 
 **[済] `set_object_child` / `set_array_child` の `resolve_insert_style` を共通化する**
 - ~~`match (string_style, detected) { (Preserve, None) => None, _ => Some(...) }` がコピペ~~
 - `resolve_insert_style(string_style, detected)` ヘルパを導入（タスク4と同時対応）
 
 **`find_mutable_child` と `normalized_start` を統合する**
-- 両者とも Root/Value から実質子を取り出すロジック
-- 1つのヘルパに集約する
+- ~~両者とも Root/Value から実質子を取り出すロジック~~
+- ~~`resolve_body` ヘルパに集約。`resolve.rs` に公開し、`object.rs` でも利用~~
 
 ---
 

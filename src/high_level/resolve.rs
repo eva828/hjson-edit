@@ -19,6 +19,28 @@ pub(crate) struct ExistingPrefix {
     pub consumed: usize,
 }
 
+/// Root または Value ノードから、実質的な中身のノードを取り出す。
+/// Root に有効な子がない場合は Root 自身を fallback として返す。
+/// Value に中身がない場合のみエラーを返す。
+pub(crate) fn resolve_body(node: &RedNode) -> Result<RedNode, HjsonEditError> {
+    match node.kind() {
+        SyntaxKind::Root => Ok(node
+            .children()
+            .find(|child| {
+                matches!(
+                    child.kind(),
+                    SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
+                )
+            })
+            .unwrap_or_else(|| node.clone())),
+        SyntaxKind::Value => node
+            .children()
+            .find(|child| !child.kind().is_trivia())
+            .ok_or(HjsonEditError::ParentNotFound),
+        _ => Ok(node.clone()),
+    }
+}
+
 pub(crate) struct PathResolver {
     root: RedNode,
 }
@@ -31,7 +53,7 @@ impl PathResolver {
     /// path 全体を解決して最終 node を返す。
     /// 空 path は document body 自体を指す。
     pub(crate) fn resolve_node(&self, path: &HjsonObjectPath) -> Result<RedNode, HjsonEditError> {
-        let mut current = self.normalized_start();
+        let mut current = resolve_body(&self.root)?;
         for segment in path.segments() {
             current = self
                 .resolve_one(&current, segment)
@@ -56,7 +78,7 @@ impl PathResolver {
     /// set で missing parent を作るために、既に存在する最長 prefix を返す。
     /// 基本的に error を返さず、どこまで解決できたかを返す。
     pub(crate) fn resolve_existing_prefix(&self, path: &HjsonObjectPath) -> ExistingPrefix {
-        let mut current = self.normalized_start();
+        let mut current = resolve_body(&self.root).unwrap_or_else(|_| self.root.clone());
         let mut consumed = 0usize;
 
         for segment in path.segments() {
@@ -89,26 +111,11 @@ impl PathResolver {
         Member::cast(current)
     }
 
-    /// 解決開始点を正規化する。
-    /// Root が渡された場合は document body の先頭非 trivia node を開始点にする。
-    /// Object / Array / Value が渡された場合はその node 自体を開始点にする。
-    /// 空 document など body が見つからない場合は Root 自身を fallback にする。
-    fn normalized_start(&self) -> RedNode {
-        match self.root.kind() {
-            SyntaxKind::Root => self
-                .root
-                .children()
-                .find(|child| !child.kind().is_trivia())
-                .unwrap_or_else(|| self.root.clone()),
-            _ => self.root.clone(),
-        }
-    }
-
     /// 1 segment 解決ルールの集約。
     fn resolve_one(&self, node: &RedNode, segment: &PathSegment) -> Option<RedNode> {
         match node.kind() {
             SyntaxKind::Root | SyntaxKind::Value => {
-                let child = node.children().find(|child| !child.kind().is_trivia())?;
+                let child = resolve_body(node).ok()?;
                 self.resolve_one(&child, segment)
             }
             SyntaxKind::Object => match segment {

@@ -132,9 +132,12 @@ fn join_comment_bodies(trivia: &[Trivia]) -> Option<String> {
 }
 
 fn make_comment_node(style: CommentKind, text: &str) -> rowan::GreenNode {
-    SyntaxKind::Comment.create_node(vec![kind_from_style(style)
-        .create_token(render_comment_text(style, text))
-        .into()])
+    rowan::GreenNode::new(
+        SyntaxKind::Comment.into(),
+        vec![kind_from_style(style)
+            .create_token(render_comment_text(style, text))
+            .into()],
+    )
 }
 
 fn trivia_comment_style(trivia: &[Trivia]) -> Option<CommentKind> {

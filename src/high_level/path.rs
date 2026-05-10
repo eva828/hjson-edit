@@ -158,32 +158,4 @@ impl HjsonObjectPath {
     }
 }
 
-impl TryFrom<&str> for HjsonObjectPath {
-    type Error = HjsonEditError;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        HjsonObjectPath::parse(s)
-    }
-}
-
-impl std::str::FromStr for HjsonObjectPath {
-    type Err = HjsonEditError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        HjsonObjectPath::parse(s)
-    }
-}
-
-impl From<Vec<PathSegment>> for HjsonObjectPath {
-    fn from(segments: Vec<PathSegment>) -> Self {
-        Self { segments }
-    }
-}
-
-impl From<&[PathSegment]> for HjsonObjectPath {
-    fn from(segments: &[PathSegment]) -> Self {
-        Self {
-            segments: segments.to_vec(),
-        }
-    }
-}
