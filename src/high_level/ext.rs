@@ -6,6 +6,7 @@ use crate::{
     RedNode, RedToken, SyntaxKind,
 };
 
+// TODO: node_to_valueとこれはHjsonValueにimplするべきでは？
 fn token_to_value(token: &RedToken) -> Result<HjsonValue, HjsonEditError> {
     let text = token.text();
     match token.kind() {
