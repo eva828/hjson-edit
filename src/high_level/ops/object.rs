@@ -194,6 +194,28 @@ fn find_mutable_child(parent: &RedNode) -> Result<RedNode, HjsonEditError> {
     }
 }
 
+fn transform_node(
+    node: &RedNode,
+    last: &PathSegment,
+    on_object: impl FnOnce(&RedNode, &PathSegment) -> Result<GreenNode, HjsonEditError>,
+    on_array: impl FnOnce(&RedNode, &PathSegment) -> Result<GreenNode, HjsonEditError>,
+) -> Result<GreenNode, HjsonEditError> {
+    match node.kind() {
+        SyntaxKind::Root | SyntaxKind::Value => {
+            let child = find_mutable_child(node)?;
+            let updated_child = transform_node(&child, last, on_object, on_array)?;
+            Ok(node
+                .green()
+                .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
+        }
+        SyntaxKind::Object => on_object(node, last),
+        SyntaxKind::Array => on_array(node, last),
+        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
+            last.clone(),
+        ]))),
+    }
+}
+
 fn apply_set_to_node(
     node: &RedNode,
     last: &PathSegment,
@@ -203,64 +225,39 @@ fn apply_set_to_node(
     pretty_nested: bool,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    match node.kind() {
-        SyntaxKind::Root | SyntaxKind::Value => {
-            let child = find_mutable_child(node)?;
-            let updated_child = apply_set_to_node(
-                &child,
+    transform_node(
+        node,
+        last,
+        |node, last| {
+            set_object_child(
+                node,
                 last,
                 value,
                 string_style,
                 append_mode,
                 pretty_nested,
                 newline,
-            )?;
-            Ok(node
-                .green()
-                .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
-        }
-        SyntaxKind::Object => set_object_child(
-            node,
-            last,
-            value,
-            string_style,
-            append_mode,
-            pretty_nested,
-            newline,
-        ),
-        SyntaxKind::Array => set_array_child(
-            node,
-            last,
-            value,
-            string_style,
-            append_mode,
-            pretty_nested,
-            newline,
-        ),
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
-            last.clone(),
-        ]))),
-    }
+            )
+        },
+        |node, last| {
+            set_array_child(
+                node,
+                last,
+                value,
+                string_style,
+                append_mode,
+                pretty_nested,
+                newline,
+            )
+        },
+    )
 }
 
 fn apply_remove_to_node(
     node: &RedNode,
     last: &PathSegment,
 ) -> Result<GreenNode, HjsonEditError> {
-    match node.kind() {
-        SyntaxKind::Root | SyntaxKind::Value => {
-            let child = find_mutable_child(node)?;
-            let updated_child = apply_remove_to_node(&child, last)?;
-            Ok(node
-                .green()
-                .splice_children(child.index()..child.index() + 1, vec![updated_child.into()]))
-        }
-        SyntaxKind::Object => remove_object_child(node, last),
-        SyntaxKind::Array => remove_array_child(node, last),
-        _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from(vec![
-            last.clone(),
-        ]))),
-    }
+    transform_node(node, last, remove_object_child, remove_array_child)
 }
 
 fn set_object_child(
@@ -283,11 +280,7 @@ fn set_object_child(
     };
 
     let object_ast = AstObject::cast(parent.clone())?;
-    let detected = object_ast.detected_string_style();
-    let insert_style = match (string_style, detected) {
-        (Prefer::Preserve, None) => None,
-        _ => Some(resolve_quote_style(string_style, detected)),
-    };
+    let insert_style = resolve_insert_style(string_style, object_ast.detected_string_style());
     if let Some(member) = object_ast
         .members()
         .into_iter()
@@ -320,15 +313,7 @@ fn set_object_child(
 
     let is_empty = object_ast.members().is_empty();
     if is_empty {
-        let range_start = if insert_pos > 0
-            && matches!(
-                parent.children_with_tokens().nth(insert_pos - 1),
-                Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
-            ) {
-            insert_pos - 1
-        } else {
-            insert_pos
-        };
+        let range_start = resolve_insert_range_start(parent, insert_pos);
         let inserted = value.render_object_member_elements(key, None, &member_config, true);
         return Ok(parent
             .green()
@@ -380,11 +365,7 @@ fn set_array_child(
     };
 
     let array_ast = AstArray::cast(parent.clone())?;
-    let detected = array_ast.detected_string_style();
-    let insert_style = match (string_style, detected) {
-        (Prefer::Preserve, None) => None,
-        _ => Some(resolve_quote_style(string_style, detected)),
-    };
+    let insert_style = resolve_insert_style(string_style, array_ast.detected_string_style());
     let items = array_ast.items();
 
     // Normalize Push to InsertAt at the end
@@ -418,25 +399,30 @@ fn set_array_child(
                     AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
                     AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
                 };
-                let inserted = build_append_array_elements(
-                    parent,
-                    &array_ast,
-                    value,
-                    insert_style,
-                    pretty_nested,
+                let value_config = RenderConfig {
+                    string_style: insert_style,
+                    pretty: pretty_nested,
+                    depth: array_ast.layout.depth,
                     newline,
-                )?;
+                };
+
+                let mut inserted = Vec::new();
+                if !pretty_nested && !items.is_empty() {
+                    if let Some(last_value) = items.last() {
+                        let needs_separator = last_value
+                            .trailing_trivia
+                            .iter()
+                            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+                        if needs_separator {
+                            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                        }
+                    }
+                }
+                inserted.extend(value.render_array_item_elements(&value_config, items.is_empty()));
 
                 if items.is_empty() {
-                    let range_start = if insert_pos > 0
-                        && matches!(
-                            parent.children_with_tokens().nth(insert_pos - 1),
-                            Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
-                        ) {
-                        insert_pos - 1
-                    } else {
-                        insert_pos
-                    };
+                    let range_start = resolve_insert_range_start(parent, insert_pos);
                     return Ok(parent
                         .green()
                         .splice_children(range_start..insert_pos, inserted));
@@ -464,45 +450,6 @@ fn set_array_child(
         ArrayPathSegment::Push => unreachable!("Push should have been normalized"),
     }
 }
-
-fn build_append_array_elements(
-    _parent: &RedNode,
-    array_ast: &AstArray,
-    value: &HjsonValue,
-    insert_style: Option<QuoteStyle>,
-    pretty_nested: bool,
-    newline: &str,
-) -> Result<Vec<crate::GreenElement>, HjsonEditError> {
-    let items = array_ast.items();
-    let value_config = RenderConfig {
-        string_style: insert_style,
-        pretty: pretty_nested,
-        depth: array_ast.layout.depth,
-        newline,
-    };
-
-    let mut inserted = Vec::new();
-    if !pretty_nested && !items.is_empty() {
-        if let Some(last_value) = items.last() {
-            let needs_separator = last_value
-                .trailing_trivia
-                .iter()
-                .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-            if needs_separator {
-                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
-            }
-        }
-    }
-    inserted.extend(value.render_array_item_elements(
-        &value_config,
-        items.is_empty(),
-    ));
-
-    Ok(inserted)
-}
-
-
 
 fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
@@ -609,5 +556,28 @@ fn resolve_quote_style(preference: Prefer<QuoteStyle>, detected: Option<QuoteSty
     match preference {
         Prefer::Preserve => detected.unwrap_or(QuoteStyle::DoubleQuoted),
         Prefer::Explicit(style) => style,
+    }
+}
+
+fn resolve_insert_style(
+    string_style: Prefer<QuoteStyle>,
+    detected: Option<QuoteStyle>,
+) -> Option<QuoteStyle> {
+    match (string_style, detected) {
+        (Prefer::Preserve, None) => None,
+        _ => Some(resolve_quote_style(string_style, detected)),
+    }
+}
+
+fn resolve_insert_range_start(parent: &RedNode, insert_pos: usize) -> usize {
+    if insert_pos > 0
+        && matches!(
+            parent.children_with_tokens().nth(insert_pos - 1),
+            Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
+        )
+    {
+        insert_pos - 1
+    } else {
+        insert_pos
     }
 }

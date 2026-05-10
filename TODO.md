@@ -59,19 +59,20 @@
 - 空コンテナ時と pretty 時のインデント/改行生成がほぼ同じ
 - `RenderConfig` に吸収するか、共通の要素生成ヘルパを作る
 
-### 4. set/remove 処理の構造的重複解消
+### [済] 4. set/remove 処理の構造的重複解消
 
 **`apply_set_to_node` と `apply_remove_to_node` を高階関数で統合する**
-- 両者は match 構造が完全一致。中身が `set_xxx` か `remove_xxx` かだけ
-- `transform_node(node, last, |parent, seg| { ... })` の形に抽象化する
+- ~~両者は match 構造が完全一致。中身が `set_xxx` か `remove_xxx` かだけ~~
+- `transform_node(node, last, on_object, on_array)` を新設。`Root|Value` ブランチの再帰と `splice_children` を共通化し、`Object|Array` ブランチはクロージャで差分注入
+- `apply_set_to_node` / `apply_remove_to_node` は `transform_node` を呼ぶ薄いラッパーに縮小
 
 **`set_object_child` / `set_array_child` の空コンテナ挿入ロジックを共通化する**
-- `range_start` の Whitespace 遡り調整がコピペされている
-- 共通の範囲計算ヘルパを導入する
+- ~~`range_start` の Whitespace 遡り調整がコピペされている~~
+- `resolve_insert_range_start(parent, insert_pos)` ヘルパを導入し、両方で利用
 
 **`build_append_array_elements` の責務境界を明確化する**
-- 空配列時の処理が `set_array_child` に残り、非空時だけ関数に委譲されている
-- 関数に任せるか、そもそも解体して `set_array_child` に統合する
+- ~~空配列時の処理が `set_array_child` に残り、非空時だけ関数に委譲されている~~
+- 関数を解体して `set_array_child` に統合。空配列・非空配列の分岐を1箇所に集約
 
 ### 5. 未使用・過剰コードの削除
 
@@ -91,9 +92,9 @@
 - `get`（パス解決 + `node_to_value`）を毎回実行する重い最適化
 - ほとんどのケースで無駄
 
-**`set_object_child` / `set_array_child` の `resolve_insert_style` を共通化する**
-- `match (string_style, detected) { (Preserve, None) => None, _ => Some(...) }` がコピペ
-- `resolve_insert_style(container_ast, string_style)` ヘルパにする
+**[済] `set_object_child` / `set_array_child` の `resolve_insert_style` を共通化する**
+- ~~`match (string_style, detected) { (Preserve, None) => None, _ => Some(...) }` がコピペ~~
+- `resolve_insert_style(string_style, detected)` ヘルパを導入（タスク4と同時対応）
 
 **`find_mutable_child` と `normalized_start` を統合する**
 - 両者とも Root/Value から実質子を取り出すロジック
