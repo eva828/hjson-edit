@@ -1,7 +1,7 @@
-use rowan::NodeOrToken;
+use rowan::{GreenNode, NodeOrToken};
 
 use crate::{
-    ast::{AstNode, CommentKind, Member, Trivia},
+    ast::{AstNode, CommentKind, Document, Member, Trivia},
     high_level::{
         error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, Prefer,
         HjsonDocument,
@@ -32,18 +32,26 @@ pub trait HjsonDocumentCommentEdit {
 
 impl HjsonDocumentCommentEdit for HjsonDocument {
     fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError> {
-        Ok(match path {
-            HjsonCommentPath::Header => extract_document_comment(self, true),
-            HjsonCommentPath::Footer => extract_document_comment(self, false),
-            HjsonCommentPath::Before(path) => {
-                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
-                extract_comment_text(&member.leading_trivia)
+        match resolve_comment_target(&path) {
+            CommentTarget::Document { header } => {
+                let ast = self.ast().ok();
+                let trivia = if header {
+                    ast.as_ref().map(|a| &*a.leading_trivia)
+                } else {
+                    ast.as_ref().map(|a| &*a.trailing_trivia)
+                };
+                Ok(trivia.and_then(join_comment_bodies))
             }
-            HjsonCommentPath::Inline(path) => {
-                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(&path)?;
-                extract_comment_text(&member.trailing_trivia)
+            CommentTarget::Member { path, location } => {
+                let member =
+                    PathResolver::new(self.syntax_root().clone()).resolve_member(path)?;
+                let trivia = match location {
+                    MemberCommentLocation::Before => &member.leading_trivia,
+                    MemberCommentLocation::Inline => &member.trailing_trivia,
+                };
+                Ok(join_comment_bodies(trivia))
             }
-        })
+        }
     }
 
     fn set_comment(
@@ -51,17 +59,8 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
         path: HjsonCommentPath,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError> {
-        let comment = comment.into();
-        match path {
-            HjsonCommentPath::Header => set_document_comment(self, true, Some(comment)),
-            HjsonCommentPath::Footer => set_document_comment(self, false, Some(comment)),
-            HjsonCommentPath::Before(path) => {
-                set_member_comment(self, &path, MemberCommentLocation::Before, Some(comment))
-            }
-            HjsonCommentPath::Inline(path) => {
-                set_member_comment(self, &path, MemberCommentLocation::Inline, Some(comment))
-            }
-        }
+        let updated = update_comment(&self, path, Some(comment.into()))?;
+        Ok(self.root(updated))
     }
 
     fn append_comment(
@@ -79,16 +78,8 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
     }
 
     fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
-        match path {
-            HjsonCommentPath::Header => set_document_comment(self, true, None),
-            HjsonCommentPath::Footer => set_document_comment(self, false, None),
-            HjsonCommentPath::Before(path) => {
-                set_member_comment(self, &path, MemberCommentLocation::Before, None)
-            }
-            HjsonCommentPath::Inline(path) => {
-                set_member_comment(self, &path, MemberCommentLocation::Inline, None)
-            }
-        }
+        let updated = update_comment(&self, path, None)?;
+        Ok(self.root(updated))
     }
 }
 
@@ -96,6 +87,48 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
 enum MemberCommentLocation {
     Before,
     Inline,
+}
+
+enum CommentTarget<'a> {
+    Document { header: bool },
+    Member {
+        path: &'a crate::high_level::path::HjsonObjectPath,
+        location: MemberCommentLocation,
+    },
+}
+
+fn resolve_comment_target(path: &HjsonCommentPath) -> CommentTarget<'_> {
+    match path {
+        HjsonCommentPath::Header => CommentTarget::Document { header: true },
+        HjsonCommentPath::Footer => CommentTarget::Document { header: false },
+        HjsonCommentPath::Before(path) => CommentTarget::Member {
+            path,
+            location: MemberCommentLocation::Before,
+        },
+        HjsonCommentPath::Inline(path) => CommentTarget::Member {
+            path,
+            location: MemberCommentLocation::Inline,
+        },
+    }
+}
+
+fn extract_comment_bodies(trivia: &[Trivia]) -> Vec<String> {
+    trivia
+        .iter()
+        .filter_map(|elem| match elem {
+            Trivia::Comment(comment) => Some(comment.body.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn join_comment_bodies(trivia: &[Trivia]) -> Option<String> {
+    let bodies = extract_comment_bodies(trivia);
+    if bodies.is_empty() {
+        None
+    } else {
+        Some(bodies.join("\n"))
+    }
 }
 
 fn make_comment_node(style: CommentKind, text: &str) -> rowan::GreenNode {
@@ -138,73 +171,79 @@ fn member_comment_range(
     }
 }
 
-fn document_comment_range(
+fn update_comment(
     doc: &HjsonDocument,
-    header: bool,
-) -> Option<std::ops::Range<usize>> {
-    let ast = doc.ast().ok()?;
-    let root = doc.syntax_root();
-    let children: Vec<_> = root.children_with_tokens().collect();
+    path: HjsonCommentPath,
+    comment: Option<String>,
+) -> Result<GreenNode, HjsonEditError> {
+    let root = doc.syntax_root().clone();
+    let preferred = doc.current_comment_style();
+    let newline = doc.current_newline();
 
-    if header {
-        let leading = &ast.leading_trivia;
-        let start = leading.iter().position(|elem| matches!(elem, Trivia::Comment(_)))?;
-        Some(start..leading.len())
-    } else {
-        let trailing = &ast.trailing_trivia;
-        let start = trailing.iter().position(|elem| matches!(elem, Trivia::Comment(_)))?;
-        let mut end = trailing
-            .iter()
-            .rposition(|elem| matches!(elem, Trivia::Comment(_)))
-            .unwrap()
-            + 1;
-        // Include a single trailing newline after the last comment as part of the block.
-        if end < trailing.len() && matches!(trailing[end], Trivia::Newline { .. }) {
-            end += 1;
+    match resolve_comment_target(&path) {
+        CommentTarget::Document { header } => {
+            build_document_comment(&root, header, comment, preferred, newline)
         }
-        let root_start = children.len().saturating_sub(trailing.len());
-        Some((root_start + start)..(root_start + end))
+        CommentTarget::Member { path, location } => {
+            build_member_comment(root, path, location, comment, preferred, newline)
+        }
     }
 }
 
-fn set_document_comment(
-    mut doc: HjsonDocument,
+fn build_document_comment(
+    root: &RedNode,
     header: bool,
     comment: Option<String>,
-) -> Result<HjsonDocument, HjsonEditError> {
+    preferred: Prefer<CommentKind>,
+    newline: &str,
+) -> Result<GreenNode, HjsonEditError> {
+    let ast = Document::cast(root.clone())?;
+
     let existing_style = if header {
-        doc.ast()
-            .ok()
-            .and_then(|ast| trivia_comment_style(&ast.leading_trivia))
+        trivia_comment_style(&ast.leading_trivia)
     } else {
-        doc.ast()
-            .ok()
-            .and_then(|ast| trivia_comment_style(&ast.trailing_trivia))
+        trivia_comment_style(&ast.trailing_trivia)
     };
 
-    let root = doc.syntax_root().clone();
+    let children: Vec<_> = root.children_with_tokens().collect();
 
-    let insert_at = if let Some(range) = document_comment_range(&doc, header) {
-        let new_green = root.green().splice_children(range.clone(), vec![]);
-        doc.root = RedNode::new_root(new_green);
-        range.start
-    } else if header {
-        doc.ast().ok().map(|ast| ast.leading_trivia.len()).unwrap_or(0)
+    let (mut green, insert_at) = if header {
+        let leading = &ast.leading_trivia;
+        if let Some(start) = leading.iter().position(|e| matches!(e, Trivia::Comment(_))) {
+            let range = start..leading.len();
+            let green = root.green().splice_children(range.clone(), vec![]);
+            (green, range.start)
+        } else {
+            (root.green().clone().into_owned(), leading.len())
+        }
     } else {
-        root.children_with_tokens().count()
+        let trailing = &ast.trailing_trivia;
+        if let Some(start) = trailing.iter().position(|e| matches!(e, Trivia::Comment(_))) {
+            let mut end = trailing
+                .iter()
+                .rposition(|e| matches!(e, Trivia::Comment(_)))
+                .unwrap()
+                + 1;
+            if end < trailing.len() && matches!(trailing[end], Trivia::Newline { .. }) {
+                end += 1;
+            }
+            let root_start = children.len().saturating_sub(trailing.len());
+            let range = (root_start + start)..(root_start + end);
+            let green = root.green().splice_children(range.clone(), vec![]);
+            (green, range.start)
+        } else {
+            (root.green().clone().into_owned(), children.len())
+        }
     };
 
     if let Some(comment) = comment {
-        let resolved_style =
-            resolve_comment_style(doc.current_comment_style(), &comment, existing_style);
+        let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
         let comment_node = make_comment_node(resolved_style, &comment);
-        let newline = doc.current_newline().to_string();
 
-        let root = doc.syntax_root().clone();
-        let inserted = if header {
+        let inserted: Vec<GreenElement> = if header {
             vec![
                 comment_node.into(),
-                SyntaxKind::Newline.create_token(&newline).into(),
+                SyntaxKind::Newline.create_token(newline).into(),
             ]
         } else {
             let needs_leading_newline = if insert_at > 0 {
@@ -219,121 +258,94 @@ fn set_document_comment(
             };
             if needs_leading_newline {
                 vec![
-                    SyntaxKind::Newline.create_token(&newline).into(),
+                    SyntaxKind::Newline.create_token(newline).into(),
                     comment_node.into(),
-                    SyntaxKind::Newline.create_token(&newline).into(),
+                    SyntaxKind::Newline.create_token(newline).into(),
                 ]
             } else {
                 vec![
                     comment_node.into(),
-                    SyntaxKind::Newline.create_token(&newline).into(),
+                    SyntaxKind::Newline.create_token(newline).into(),
                 ]
             }
         };
-        let new_green = root.green().splice_children(insert_at..insert_at, inserted);
-        doc.root = RedNode::new_root(new_green);
+        green = green.splice_children(insert_at..insert_at, inserted);
     }
 
-    Ok(doc)
+    Ok(green)
 }
 
-fn set_member_comment(
-    mut doc: HjsonDocument,
+fn build_member_comment(
+    root: RedNode,
     path: &crate::high_level::path::HjsonObjectPath,
     location: MemberCommentLocation,
     comment: Option<String>,
-) -> Result<HjsonDocument, HjsonEditError> {
-    let member = PathResolver::new(doc.syntax_root().clone()).resolve_member(path)?;
+    preferred: Prefer<CommentKind>,
+    newline: &str,
+) -> Result<GreenNode, HjsonEditError> {
+    let member = PathResolver::new(root.clone()).resolve_member(path)?;
     let parent = member
         .node()
         .parent()
         .ok_or(HjsonEditError::ParentNotFound)?;
 
-    if let Some((start, end)) = member_comment_range(&member, location) {
-        let new_green = parent.green().splice_children(start..end, vec![]);
-        let new_root = parent.replace_with(new_green);
-        doc.root = RedNode::new_root(new_root);
-    }
+    let green_after_remove = if let Some((start, end)) = member_comment_range(&member, location) {
+        parent.green().splice_children(start..end, vec![])
+    } else {
+        parent.green().clone().into_owned()
+    };
 
-    if let Some(comment) = comment {
-        let member = PathResolver::new(doc.syntax_root().clone()).resolve_member(path)?;
-        let parent = member
-            .node()
-            .parent()
-            .ok_or(HjsonEditError::ParentNotFound)?;
-        let existing_style = trivia_comment_style(match location {
-            MemberCommentLocation::Before => &member.leading_trivia,
-            MemberCommentLocation::Inline => &member.trailing_trivia,
-        });
-        let resolved_style =
-            resolve_comment_style(doc.current_comment_style(), &comment, existing_style);
-        let comment_node = make_comment_node(resolved_style, &comment);
-
-        let (index, inserted): (usize, Vec<GreenElement>) = match location {
-            MemberCommentLocation::Before => {
-                let newline = SyntaxKind::Newline.create_token(doc.current_newline());
-                let indent =
-                    SyntaxKind::Whitespace.create_token(detect_indent_for_member(&member));
-                (
-                    member.node().index(),
-                    vec![comment_node.into(), newline.into(), indent.into()],
-                )
-            }
-            MemberCommentLocation::Inline => {
-                let space = SyntaxKind::Whitespace.create_token(" ");
-                (
-                    member.node().index() + 1,
-                    vec![space.into(), comment_node.into()],
-                )
-            }
+    if comment.is_none() {
+        return if parent.kind() == SyntaxKind::Root {
+            Ok(green_after_remove)
+        } else {
+            Ok(parent.replace_with(green_after_remove))
         };
-
-        let new_green = parent.green().splice_children(index..index, inserted);
-        let new_root = parent.replace_with(new_green);
-        doc.root = RedNode::new_root(new_root);
     }
 
-    Ok(doc)
-}
+    let comment = comment.unwrap();
 
-fn extract_document_comment(doc: &HjsonDocument, header: bool) -> Option<String> {
-    let ast = doc.ast().ok()?;
-    let mut bodies = Vec::new();
+    let new_root = RedNode::new_root(if parent.kind() == SyntaxKind::Root {
+        green_after_remove.clone()
+    } else {
+        parent.replace_with(green_after_remove.clone())
+    });
 
-    if header {
-        for elem in &ast.leading_trivia {
-            if let Trivia::Comment(comment) = elem {
-                bodies.push(comment.body.clone())
-            }
+    let member = PathResolver::new(new_root).resolve_member(path)?;
+    let parent = member
+        .node()
+        .parent()
+        .ok_or(HjsonEditError::ParentNotFound)?;
+    let existing_style = trivia_comment_style(match location {
+        MemberCommentLocation::Before => &member.leading_trivia,
+        MemberCommentLocation::Inline => &member.trailing_trivia,
+    });
+    let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
+    let comment_node = make_comment_node(resolved_style, &comment);
+
+    let (index, inserted): (usize, Vec<GreenElement>) = match location {
+        MemberCommentLocation::Before => {
+            let nl = SyntaxKind::Newline.create_token(newline);
+            let indent = SyntaxKind::Whitespace.create_token(detect_indent_for_member(&member));
+            (
+                member.node().index(),
+                vec![comment_node.into(), nl.into(), indent.into()],
+            )
         }
-    } else {
-        for elem in &ast.trailing_trivia {
-            if let Trivia::Comment(comment) = elem {
-                bodies.push(comment.body.clone())
-            }
+        MemberCommentLocation::Inline => {
+            let space = SyntaxKind::Whitespace.create_token(" ");
+            (
+                member.node().index() + 1,
+                vec![space.into(), comment_node.into()],
+            )
         }
-    }
+    };
 
-    if bodies.is_empty() {
-        None
+    let new_parent = parent.green().splice_children(index..index, inserted);
+    if parent.kind() == SyntaxKind::Root {
+        Ok(new_parent)
     } else {
-        Some(bodies.join("\n"))
-    }
-}
-
-fn extract_comment_text(trivia: &[Trivia]) -> Option<String> {
-    let comments = trivia
-        .iter()
-        .filter_map(|elem| match elem {
-            Trivia::Comment(comment) => Some(comment.body.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    if comments.is_empty() {
-        None
-    } else {
-        Some(comments.into_iter().rev().collect::<Vec<_>>().join("\n"))
+        Ok(parent.replace_with(new_parent))
     }
 }
 

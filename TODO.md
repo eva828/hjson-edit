@@ -30,7 +30,7 @@
 
 ---
 
-### 2. コメント操作の設計統一
+### [済] 2. コメント操作の設計統一
 
 **`comment.rs` のドキュメント更新パターンを `object.rs` と統一する**
 - `set_document_comment` / `set_member_comment` が内部で `doc.root = ...` を書き換えるのをやめ、`GreenNode` を返す形にする
