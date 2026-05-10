@@ -3,8 +3,44 @@ use rowan::NodeOrToken;
 use crate::{
     ast::{AstNode, Key, QuoteStyle},
     high_level::{error::HjsonEditError, value::HjsonValue},
-    RedNode, SyntaxKind,
+    RedNode, RedToken, SyntaxKind,
 };
+
+fn token_to_value(token: &RedToken) -> Result<HjsonValue, HjsonEditError> {
+    let text = token.text();
+    match token.kind() {
+        SyntaxKind::String => Ok(HjsonValue::String(
+            QuoteStyle::DoubleQuoted.decode_body(text),
+        )),
+        SyntaxKind::BlockString => {
+            Ok(HjsonValue::String(QuoteStyle::Block.decode_body(text)))
+        }
+        SyntaxKind::UnquotedString => {
+            Ok(HjsonValue::String(QuoteStyle::Unquoted.decode_body(text)))
+        }
+        SyntaxKind::Integer => text
+            .parse::<i64>()
+            .map(HjsonValue::Integer)
+            .map_err(|_| HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Integer,
+                found: token.kind(),
+            }),
+        SyntaxKind::Float => text
+            .parse::<f64>()
+            .map(HjsonValue::Float)
+            .map_err(|_| HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Float,
+                found: token.kind(),
+            }),
+        SyntaxKind::True => Ok(HjsonValue::Bool(true)),
+        SyntaxKind::False => Ok(HjsonValue::Bool(false)),
+        SyntaxKind::Null => Ok(HjsonValue::Null),
+        _ => Err(HjsonEditError::UnexpectedStructure {
+            expected: SyntaxKind::Value,
+            found: token.kind(),
+        }),
+    }
+}
 
 pub(crate) trait RedNodeExt {
     fn node_to_value(&self) -> Result<HjsonValue, HjsonEditError>;
@@ -32,43 +68,7 @@ impl RedNodeExt for RedNode {
                 .ok_or(HjsonEditError::ParentNotFound)
                 .and_then(|child| match child {
                     NodeOrToken::Node(node) => node.node_to_value(),
-                    NodeOrToken::Token(token) => {
-                        let text = token.text().to_string();
-                        match token.kind() {
-                            SyntaxKind::String => Ok(HjsonValue::String(
-                                QuoteStyle::DoubleQuoted.decode_body(&text),
-                            )),
-                            SyntaxKind::BlockString => {
-                                Ok(HjsonValue::String(QuoteStyle::Block.decode_body(&text)))
-                            }
-                            SyntaxKind::UnquotedString => {
-                                Ok(HjsonValue::String(QuoteStyle::Unquoted.decode_body(&text)))
-                            }
-                            SyntaxKind::Integer => token
-                                .text()
-                                .parse::<i64>()
-                                .map(HjsonValue::Integer)
-                                .map_err(|_| HjsonEditError::UnexpectedStructure {
-                                    expected: SyntaxKind::Integer,
-                                    found: token.kind(),
-                                }),
-                            SyntaxKind::Float => token
-                                .text()
-                                .parse::<f64>()
-                                .map(HjsonValue::Float)
-                                .map_err(|_| HjsonEditError::UnexpectedStructure {
-                                    expected: SyntaxKind::Float,
-                                    found: token.kind(),
-                                }),
-                            SyntaxKind::True => Ok(HjsonValue::Bool(true)),
-                            SyntaxKind::False => Ok(HjsonValue::Bool(false)),
-                            SyntaxKind::Null => Ok(HjsonValue::Null),
-                            _ => Err(HjsonEditError::UnexpectedStructure {
-                                expected: SyntaxKind::Value,
-                                found: token.kind(),
-                            }),
-                        }
-                    }
+                    NodeOrToken::Token(token) => token_to_value(&token),
                 }),
             SyntaxKind::Object => {
                 let mut entries = Vec::new();
@@ -100,36 +100,21 @@ impl RedNodeExt for RedNode {
                 }
                 Ok(HjsonValue::Array(items))
             }
-            SyntaxKind::String => Ok(HjsonValue::String(
-                QuoteStyle::DoubleQuoted.decode_body(&self.text().to_string()),
-            )),
-            SyntaxKind::BlockString => Ok(HjsonValue::String(
-                QuoteStyle::Block.decode_body(&self.text().to_string()),
-            )),
-            SyntaxKind::UnquotedString => Ok(HjsonValue::String(
-                QuoteStyle::Unquoted.decode_body(&self.text().to_string()),
-            )),
-            SyntaxKind::Integer => self
-                .text()
-                .to_string()
-                .parse::<i64>()
-                .map(HjsonValue::Integer)
-                .map_err(|_| HjsonEditError::UnexpectedStructure {
-                    expected: SyntaxKind::Integer,
-                    found: self.kind(),
-                }),
-            SyntaxKind::Float => self
-                .text()
-                .to_string()
-                .parse::<f64>()
-                .map(HjsonValue::Float)
-                .map_err(|_| HjsonEditError::UnexpectedStructure {
-                    expected: SyntaxKind::Float,
-                    found: self.kind(),
-                }),
-            SyntaxKind::True => Ok(HjsonValue::Bool(true)),
-            SyntaxKind::False => Ok(HjsonValue::Bool(false)),
-            SyntaxKind::Null => Ok(HjsonValue::Null),
+            SyntaxKind::String
+            | SyntaxKind::BlockString
+            | SyntaxKind::UnquotedString
+            | SyntaxKind::Integer
+            | SyntaxKind::Float
+            | SyntaxKind::True
+            | SyntaxKind::False
+            | SyntaxKind::Null => self
+                .children_with_tokens()
+                .find_map(|child| match child {
+                    NodeOrToken::Token(token) if !token.kind().is_trivia() => Some(token),
+                    _ => None,
+                })
+                .ok_or(HjsonEditError::ParentNotFound)
+                .and_then(|token| token_to_value(&token)),
             _ => Err(HjsonEditError::UnexpectedStructure {
                 expected: SyntaxKind::Value,
                 found: self.kind(),

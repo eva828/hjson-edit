@@ -26,6 +26,37 @@ impl<'a> RenderConfig<'a> {
     pub fn with_depth(self, depth: usize) -> Self {
         Self { depth, ..self }
     }
+
+    pub fn wrap_container_elements(
+        &self,
+        rendered: GreenElement,
+        container_is_empty: bool,
+    ) -> Vec<GreenElement> {
+        let mut result = Vec::new();
+        if container_is_empty {
+            let indent = "  ".repeat(self.depth + 1);
+            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            result.push(rendered);
+            result.push(SyntaxKind::Newline.create_token(self.newline).into());
+            if self.depth > 0 {
+                result.push(
+                    SyntaxKind::Whitespace
+                        .create_token("  ".repeat(self.depth))
+                        .into(),
+                );
+            }
+        } else if self.pretty {
+            let indent = "  ".repeat(self.depth + 1);
+            result.push(SyntaxKind::Newline.create_token(self.newline).into());
+            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            result.push(rendered);
+            result.push(SyntaxKind::Newline.create_token(self.newline).into());
+            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        } else {
+            result.push(rendered);
+        }
+        result
+    }
 }
 
 impl Default for RenderConfig<'_> {
@@ -120,31 +151,8 @@ impl HjsonValue {
         config: &RenderConfig<'_>,
         container_is_empty: bool,
     ) -> Vec<GreenElement> {
-        let mut result = Vec::new();
         let rendered = self.render_value_node(config).into();
-        if container_is_empty {
-            let indent = "  ".repeat(config.depth + 1);
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-            result.push(rendered);
-            result.push(SyntaxKind::Newline.create_token(config.newline).into());
-            if config.depth > 0 {
-                result.push(
-                    SyntaxKind::Whitespace
-                        .create_token("  ".repeat(config.depth))
-                        .into(),
-                );
-            }
-        } else if config.pretty {
-            let indent = "  ".repeat(config.depth + 1);
-            result.push(SyntaxKind::Newline.create_token(config.newline).into());
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-            result.push(rendered);
-            result.push(SyntaxKind::Newline.create_token(config.newline).into());
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        } else {
-            result.push(rendered);
-        }
-        result
+        config.wrap_container_elements(rendered, container_is_empty)
     }
 
     /// Object の子 member1つを描画（前後の改行・インデント含む）
@@ -155,31 +163,8 @@ impl HjsonValue {
         config: &RenderConfig<'_>,
         container_is_empty: bool,
     ) -> Vec<GreenElement> {
-        let mut result = Vec::new();
         let rendered = self.render_member_node(key, key_style, config).into();
-        if container_is_empty {
-            let indent = "  ".repeat(config.depth + 1);
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-            result.push(rendered);
-            result.push(SyntaxKind::Newline.create_token(config.newline).into());
-            if config.depth > 0 {
-                result.push(
-                    SyntaxKind::Whitespace
-                        .create_token("  ".repeat(config.depth))
-                        .into(),
-                );
-            }
-        } else if config.pretty {
-            let indent = "  ".repeat(config.depth + 1);
-            result.push(SyntaxKind::Newline.create_token(config.newline).into());
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-            result.push(rendered);
-            result.push(SyntaxKind::Newline.create_token(config.newline).into());
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
-        } else {
-            result.push(rendered);
-        }
-        result
+        config.wrap_container_elements(rendered, container_is_empty)
     }
 
     fn render_body(&self, config: &RenderConfig<'_>) -> Vec<GreenElement> {

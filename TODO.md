@@ -45,7 +45,7 @@
 - `extract_comment_text` のみ `.rev()` していて一貫性がない
 - 共通ヘルパに統合し、呼び出し側で順序を制御する
 
-### 3. 値変換・レンダリングの重複解消
+### [済] 3. 値変換・レンダリングの重複解消
 
 **`node_to_value` のトークン変換をヘルパ関数に抽出する**
 - `SyntaxKind::Value` ブランチとトップレベルで、String/Integer/Float/Bool/Null の変換が2重にある

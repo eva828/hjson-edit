@@ -62,7 +62,7 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         let root = self.syntax_root().clone();
         let string_style = self.current_string_style();
         let updated = if path.depth() == 0 {
-            replace_root_value(&root, &value, string_style)?
+            replace_root_value(&root, &value, string_style, newline)?
         } else {
             rebuild_tree_with_set(
                 root.clone(),
@@ -88,9 +88,16 @@ pub(crate) fn replace_root_value(
     root: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = find_mutable_child(root)?;
-    let updated_child = render_value_like_node(&child, value, string_style);
+    let config = RenderConfig {
+        string_style: None,
+        pretty: false,
+        depth: 0,
+        newline,
+    };
+    let updated_child = render_value_like_node(&child, value, string_style, &config);
 
     Ok(root
         .green()
@@ -287,7 +294,13 @@ fn set_object_child(
         .find(|member| member.member_key().as_deref() == Some(key.as_str()))
     {
         let member_node = member.syntax().clone();
-        let updated = replace_member_value(&member_node, value, string_style)?;
+        let replace_config = RenderConfig {
+            string_style: None,
+            pretty: false,
+            depth: 0,
+            newline,
+        };
+        let updated = replace_member_value(&member_node, value, string_style, &replace_config)?;
         return Ok(parent.green().splice_children(
             member_node.index()..member_node.index() + 1,
             vec![updated.into()],
@@ -387,7 +400,13 @@ fn set_array_child(
                     last.clone(),
                 ])));
             };
-            let updated = render_value_like_node(current_value.syntax(), value, string_style);
+            let value_config = RenderConfig {
+                string_style: insert_style,
+                pretty: pretty_nested,
+                depth: array_ast.layout.depth + 1,
+                newline,
+            };
+            let updated = render_value_like_node(current_value.syntax(), value, string_style, &value_config);
             Ok(parent.green().splice_children(
                 current_value.syntax().index()..current_value.syntax().index() + 1,
                 vec![updated.into()],
@@ -429,10 +448,13 @@ fn set_array_child(
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
-                let inserted = vec![value.render_value_node(&RenderConfig {
+                let insert_config = RenderConfig {
                     string_style: insert_style,
-                    ..RenderConfig::default()
-                }).into()];
+                    pretty: pretty_nested,
+                    depth: array_ast.layout.depth + 1,
+                    newline,
+                };
+                let inserted = vec![value.render_value_node(&insert_config).into()];
 
                 Ok(parent
                     .green()
@@ -555,12 +577,13 @@ fn render_value_like_node(
     node: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    config: &RenderConfig<'_>,
 ) -> GreenNode {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
     value.render_value_node(&RenderConfig {
         string_style: Some(quote_style),
-        ..RenderConfig::default()
+        ..*config
     })
 }
 
@@ -568,12 +591,13 @@ fn replace_member_value(
     member: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    config: &RenderConfig<'_>,
 ) -> Result<GreenNode, HjsonEditError> {
     let value_child = member
         .children()
         .find(|child| child.kind() == SyntaxKind::Value)
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_value = render_value_like_node(&value_child, value, string_style);
+    let updated_value = render_value_like_node(&value_child, value, string_style, config);
 
     Ok(member.green().splice_children(
         value_child.index()..value_child.index() + 1,
