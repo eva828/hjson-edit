@@ -185,6 +185,7 @@ fn transform_node(
         }
         SyntaxKind::Object => on_object(node, last),
         SyntaxKind::Array => on_array(node, last),
+        // resolve_parent の結果は常に Object/Array/Value/Root のいずれかなので到達しない
         _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
             last.clone(),
         ]))),
