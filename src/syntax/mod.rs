@@ -190,12 +190,13 @@ impl SyntaxKind {
         )
     }
 
-    /// トリビア（空白・コメント）かどうか
+    /// トリビア（空白・コメントトークン）かどうか
+    /// Comment ノードは含めない（トークンとノードを区別するため）
     pub fn is_trivia(self) -> bool {
         use SyntaxKind::*;
         matches!(
             self,
-            Whitespace | Newline | LineComment | HashComment | BlockComment | Comment
+            Whitespace | Newline | LineComment | HashComment | BlockComment
         )
     }
 
