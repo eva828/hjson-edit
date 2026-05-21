@@ -20,11 +20,11 @@ pub(crate) struct ExistingPrefix {
 }
 
 /// Root または Value ノードから、実質的な中身のノードを取り出す。
-/// Root に有効な子がない場合は Root 自身を fallback として返す。
-/// Value に中身がない場合のみエラーを返す。
+/// Root に有効な子がない場合は ParentNotFound エラーを返す。
+/// Value に中身がない場合もエラーを返す。
 pub(crate) fn resolve_body(node: &RedNode) -> Result<RedNode, HjsonEditError> {
     match node.kind() {
-        SyntaxKind::Root => Ok(node
+        SyntaxKind::Root => node
             .children()
             .find(|child| {
                 matches!(
@@ -32,7 +32,7 @@ pub(crate) fn resolve_body(node: &RedNode) -> Result<RedNode, HjsonEditError> {
                     SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
                 )
             })
-            .unwrap_or_else(|| node.clone())),
+            .ok_or(HjsonEditError::ParentNotFound),
         SyntaxKind::Value => node
             .children()
             .find(|child| !child.kind().is_trivia())
