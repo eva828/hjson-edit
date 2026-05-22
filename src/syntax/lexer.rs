@@ -483,3 +483,4 @@ impl<'a> Lexer<'a> {
 fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
 }
+
