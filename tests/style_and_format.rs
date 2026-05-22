@@ -1,5 +1,5 @@
 use hjson_edit::{
-    ast::{CommentKind, QuoteStyle},
+    ast::QuoteStyle,
     high_level::{
         ops::object::HjsonDocumentObjectEdit,
         path::HjsonObjectPath,

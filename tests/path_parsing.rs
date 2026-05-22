@@ -1,11 +1,6 @@
 use std::convert::TryFrom;
 
-use hjson_edit::{
-    high_level::{
-        error::HjsonEditError,
-        path::{HjsonCommentPath, HjsonObjectPath},
-    },
-};
+use hjson_edit::high_level::path::{HjsonCommentPath, HjsonObjectPath};
 
 #[test]
 fn parse_valid_simple_key_succeeds() {

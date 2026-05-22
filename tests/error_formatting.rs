@@ -1,6 +1,5 @@
 use hjson_edit::{
     high_level::{
-        error::HjsonEditError,
         ops::object::HjsonDocumentObjectEdit,
         path::HjsonObjectPath,
         HjsonDocument,

@@ -1,9 +1,4 @@
-use hjson_edit::{
-    high_level::{
-        error::HjsonEditError,
-        path::HjsonObjectPath,
-    },
-};
+use hjson_edit::high_level::path::HjsonObjectPath;
 
 // ------------------------------------------------------------------
 // Edge cases for path parsing.
