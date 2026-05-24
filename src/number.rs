@@ -38,14 +38,13 @@ impl HjsonNumber {
         }
 
         if idx < bytes.len() && bytes[idx] == b'.' {
-            has_fraction_or_exp = true;
             idx += 1;
             let frac_start = idx;
             while idx < bytes.len() && bytes[idx].is_ascii_digit() {
                 idx += 1;
             }
-            if frac_start == idx {
-                return None;
+            if frac_start != idx {
+                has_fraction_or_exp = true;
             }
         }
 
@@ -160,12 +159,13 @@ mod tests {
         assert!(HjsonNumber::is_valid("42"));
         assert!(HjsonNumber::is_valid("-1.5"));
         assert!(HjsonNumber::is_valid("1e10"));
+        assert!(HjsonNumber::is_valid("1."));
+        assert!(HjsonNumber::is_valid("123."));
     }
 
     #[test]
     fn is_valid_returns_false_for_invalid_numbers() {
         assert!(!HjsonNumber::is_valid("01"));
-        assert!(!HjsonNumber::is_valid("1."));
         assert!(!HjsonNumber::is_valid("1e"));
         assert!(!HjsonNumber::is_valid("abc"));
     }
