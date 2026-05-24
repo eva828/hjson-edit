@@ -152,6 +152,11 @@ impl<'a> Lexer<'a> {
     /// 字句解析実行
     pub fn lex(mut self) -> LexResult {
         while !self.cursor.is_at_end() {
+            if self.cursor.pos() == 0 && self.cursor.peek() == Some('\u{FEFF}') {
+                self.cursor.advance();
+                continue;
+            }
+
             self.skip_whitespace_no_newline();
 
             if self.cursor.is_at_end() {
