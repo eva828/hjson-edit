@@ -334,9 +334,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_double_quoted_string(&mut self, start_offset: usize) {
-        let mut terminated = false;
-        // 先頭の '"' を消費
-        self.cursor.advance();
+    let mut terminated = false;
+    // 開きの " は lex() の match_char('"') で既に消費済み
 
         while let Some(c) = self.cursor.peek() {
             if c == '"' {
