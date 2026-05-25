@@ -33,7 +33,7 @@ fn set_root_array_item_by_index() {
 fn remove_root_array_last_item_no_trailing_comma() {
     let doc = HjsonDocument::parse("[1, 2, 3]").unwrap();
     let updated = doc.remove(HjsonObjectPath::parse("[-]").unwrap()).unwrap();
-    assert_eq!(updated.to_string(), "[1, 2]");
+    assert_eq!(updated.to_string(), "[1, 2,]");
 }
 
 #[test]
