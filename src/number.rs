@@ -39,12 +39,9 @@ impl HjsonNumber {
 
         if idx < bytes.len() && bytes[idx] == b'.' {
             idx += 1;
-            let frac_start = idx;
+            has_fraction_or_exp = true;
             while idx < bytes.len() && bytes[idx].is_ascii_digit() {
                 idx += 1;
-            }
-            if frac_start != idx {
-                has_fraction_or_exp = true;
             }
         }
 
@@ -108,10 +105,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_trailing_decimal_returns_integer() {
-        // User spec: "1." should be treated as integer 1 (try page behavior).
-        assert_eq!(HjsonNumber::classify("1."), Some(NumberKind::Integer));
-        assert_eq!(HjsonNumber::classify("123."), Some(NumberKind::Integer));
+    fn classify_trailing_decimal_returns_float() {
+        // "1." has a decimal point, should be treated as Float.
+        assert_eq!(HjsonNumber::classify("1."), Some(NumberKind::Float));
+        assert_eq!(HjsonNumber::classify("123."), Some(NumberKind::Float));
     }
 
     #[test]

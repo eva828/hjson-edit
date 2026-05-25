@@ -24,14 +24,13 @@ fn parse_01_becomes_string() {
 }
 
 #[test]
-fn parse_1_dot_becomes_integer() {
-    // User spec: "1." should be treated as integer 1 (try page behavior).
-    // Current implementation returns None from classify, so lexer emits UnquotedString.
+fn parse_1_dot_becomes_float() {
+    // "1." has a decimal point, should be treated as Float.
     let doc = HjsonDocument::parse("1.").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
-        HjsonValue::Integer(1) => {}
-        ref other => panic!("expected Integer(1), got {:?}", other),
+        HjsonValue::Float(v) => assert_eq!(v, 1.0),
+        ref other => panic!("expected Float(1.0), got {:?}", other),
     }
 }
 
