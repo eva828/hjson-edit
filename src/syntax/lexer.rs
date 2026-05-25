@@ -461,7 +461,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        if c == '#' {
+        if c == '#' && self.is_hash_comment_start() {
             return true;
         }
         // 空白やカンマ・括弧などの記号でストップ
