@@ -561,8 +561,6 @@ impl Parser {
                 }
             } else if self.at(SyntaxKind::RBrace) {
                 break;
-            } else if value_boundary == ValueBoundary::Closed && self.is_object_member_start() {
-                continue;
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
                 if had_newline {
@@ -645,9 +643,7 @@ impl Parser {
             self.eat_trivia();
             let _ = self.parse_value(ScalarContext::ArrayItem);
 
-            // 同一行に複数の値がある場合の処理（例："a" "b" "c"）
-            // HJSONではカンマなしの引用符付き文字列が許可されている
-            self.parse_array_multiple_values();
+            // 同一行に複数の値がある場合はエラー（カンマまたは改行が必要）
 
             // 値の後のトリビア（改行・コメントなど）を消費
             let had_newline = self.eat_trivia_and_report_newline();
@@ -685,35 +681,6 @@ impl Parser {
         }
 
         self.builder.finish_node();
-    }
-
-    fn parse_array_multiple_values(&mut self) {
-        loop {
-            self.eat_trivia();
-            if self.is_at_end() || self.at(SyntaxKind::RBracket) || self.at(SyntaxKind::Comma) {
-                break;
-            }
-            // 次のトークンが新しい値の開始かチェック
-            if let Some(kind) = self.current_kind() {
-                if matches!(
-                    kind,
-                    SyntaxKind::String
-                        | SyntaxKind::BlockString
-                        | SyntaxKind::UnquotedString
-                        | SyntaxKind::Integer
-                        | SyntaxKind::Float
-                        | SyntaxKind::True
-                        | SyntaxKind::False
-                        | SyntaxKind::Null
-                        | SyntaxKind::LBrace
-                        | SyntaxKind::LBracket
-                ) {
-                    self.parse_value(ScalarContext::ArrayItem);
-                    continue;
-                }
-            }
-            break;
-        }
     }
 
     /// キー: 値 のペアを解析
@@ -886,8 +853,6 @@ impl Parser {
                 self.eat_trivia();
             } else if self.at(SyntaxKind::RBrace) {
                 break;
-            } else if value_boundary == ValueBoundary::Closed && self.is_object_member_start() {
-                continue;
             } else if !self.is_at_end() && !had_separator_newline {
                 break;
             }
