@@ -3,9 +3,7 @@ use std::convert::TryFrom;
 use hjson_edit::{
     ast::CommentKind,
     high_level::{
-        ops::comment::HjsonDocumentCommentEdit,
-        path::HjsonCommentPath,
-        Prefer, HjsonDocument,
+        ops::comment::HjsonDocumentCommentEdit, path::HjsonCommentPath, HjsonDocument, Prefer,
     },
 };
 
@@ -27,7 +25,7 @@ fn set_inline_comment_on_deep_path() {
 
 #[test]
 fn get_inline_comment_on_deep_path_returns_comment() {
-    let input = "{\n  a: {\n    b: {\n      c: value // note\n    }\n  }\n}\n";
+    let input = "{\n  a: {\n    b: {\n      c: \"value\" // note\n    }\n  }\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
     let comment = doc
         .get_comment(HjsonCommentPath::try_from("a.b.c:inline").unwrap())
@@ -37,7 +35,7 @@ fn get_inline_comment_on_deep_path_returns_comment() {
 
 #[test]
 fn remove_inline_comment_on_deep_path_removes_comment() {
-    let input = "{\n  a: {\n    b: {\n      c: value // note\n    }\n  }\n}\n";
+    let input = "{\n  a: {\n    b: {\n      c: \"value\" // note\n    }\n  }\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
     let removed = doc
         .remove_comment(HjsonCommentPath::try_from("a.b.c:inline").unwrap())
