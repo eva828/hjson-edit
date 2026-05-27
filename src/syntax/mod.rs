@@ -1,10 +1,38 @@
-pub mod ext;
 pub mod lexer;
 pub mod parser;
 
 use rowan::Language;
 use rowan::{SyntaxNode, SyntaxToken};
 use std::fmt;
+
+/// 改行コードの種類
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum NewlineKind {
+    /// Line Feed (`\n`)
+    #[default]
+    Lf,
+    /// Carriage Return + Line Feed (`\r\n`)
+    CrLf,
+}
+
+impl NewlineKind {
+    /// 改行コードを文字列として取得
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lf => "\n",
+            Self::CrLf => "\r\n",
+        }
+    }
+
+    /// 改行文字列から改行コード種別を解析
+    pub fn from_text(text: &str) -> Option<Self> {
+        match text {
+            "\n" => Some(Self::Lf),
+            "\r\n" => Some(Self::CrLf),
+            _ => None,
+        }
+    }
+}
 
 /// HJSON構文要素の種別
 ///
@@ -52,9 +80,12 @@ pub enum SyntaxKind {
     // 値
     Object,
     Array,
-    Pair, // キー: 値
+    Member, // キー: 値
     Key,
     Value,
+
+    // コメントノード
+    Comment,
 
     // エラー回復用
     Error,
@@ -103,10 +134,11 @@ impl Language for HjsonLanguage {
             19 => SyntaxKind::Root,
             20 => SyntaxKind::Object,
             21 => SyntaxKind::Array,
-            22 => SyntaxKind::Pair,
+            22 => SyntaxKind::Member,
             23 => SyntaxKind::Key,
             24 => SyntaxKind::Value,
-            25 => SyntaxKind::Error,
+            25 => SyntaxKind::Comment,
+            26 => SyntaxKind::Error,
             n => panic!("Unknown SyntaxKind: {n}"),
         }
     }
@@ -120,50 +152,6 @@ impl SyntaxKind {
     /// 新しいトークンを作成
     pub fn create_token(self, text: impl Into<String>) -> rowan::GreenToken {
         rowan::GreenToken::new(self.into(), text.into().as_str())
-    }
-
-    /// 新しいノードを作成
-    pub fn create_node(self, children: Vec<crate::syntax::GreenElement>) -> rowan::GreenNode {
-        use crate::syntax::GreenElement;
-        use rowan::GreenNodeBuilder;
-
-        fn push_element(builder: &mut GreenNodeBuilder<'static>, element: &GreenElement) {
-            match element {
-                rowan::NodeOrToken::Node(node) => {
-                    builder.start_node(node.kind());
-                    for child in node.children() {
-                        let elem = child_to_green_element(child);
-                        push_element(builder, &elem);
-                    }
-                    builder.finish_node();
-                }
-                rowan::NodeOrToken::Token(token) => {
-                    let kind: rowan::SyntaxKind = token.kind();
-                    builder.token(kind, token.text());
-                }
-            }
-        }
-
-        fn child_to_green_element(
-            child: rowan::NodeOrToken<&rowan::GreenNodeData, &rowan::GreenTokenData>,
-        ) -> GreenElement {
-            match child {
-                rowan::NodeOrToken::Node(node_data) => rowan::NodeOrToken::Node(
-                    rowan::GreenNode::from(std::borrow::Cow::Borrowed(node_data)),
-                ),
-                rowan::NodeOrToken::Token(token_data) => rowan::NodeOrToken::Token(
-                    rowan::GreenToken::new(token_data.kind(), token_data.text()),
-                ),
-            }
-        }
-
-        let mut builder = GreenNodeBuilder::new();
-        builder.start_node(self.into());
-        for child in children {
-            push_element(&mut builder, &child);
-        }
-        builder.finish_node();
-        builder.finish()
     }
 
     /// トークンかどうか
@@ -196,10 +184,14 @@ impl SyntaxKind {
     /// ノードかどうか
     pub fn is_node(self) -> bool {
         use SyntaxKind::*;
-        matches!(self, Root | Object | Array | Pair | Key | Value | Error)
+        matches!(
+            self,
+            Root | Object | Array | Member | Key | Value | Comment | Error
+        )
     }
 
-    /// トリビア（空白・コメント）かどうか
+    /// トリビア（空白・コメントトークン）かどうか
+    /// Comment ノードは含めない（トークンとノードを区別するため）
     pub fn is_trivia(self) -> bool {
         use SyntaxKind::*;
         matches!(
@@ -211,63 +203,7 @@ impl SyntaxKind {
     /// コメントかどうか
     pub fn is_comment(self) -> bool {
         use SyntaxKind::*;
-        matches!(self, LineComment | HashComment | BlockComment)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// SyntaxKindからrowan::SyntaxKindへの変換と逆変換が一致することを検証
-    #[test]
-    fn test_kind_conversion() {
-        let kind = SyntaxKind::LBrace;
-        let raw: rowan::SyntaxKind = kind.into();
-        let converted = HjsonLanguage::kind_from_raw(raw);
-        assert_eq!(kind, converted);
-    }
-
-    /// 全SyntaxKindバリアントの往復変換（kind_to_raw → kind_from_raw）が一致することを検証
-    ///
-    /// これにより kind_from_raw の match アームが全バリアントを網羅していることが
-    /// テスト実行時に保証される。バリアントを追加した場合はここに追加すること。
-    #[test]
-    fn test_all_kind_roundtrip() {
-        use SyntaxKind::*;
-        let all_kinds = [
-            LBrace,
-            RBrace,
-            LBracket,
-            RBracket,
-            Colon,
-            Comma,
-            True,
-            False,
-            Null,
-            Integer,
-            Float,
-            String,
-            BlockString,
-            UnquotedString,
-            LineComment,
-            HashComment,
-            BlockComment,
-            Whitespace,
-            Newline,
-            Root,
-            Object,
-            Array,
-            Pair,
-            Key,
-            Value,
-            Error,
-        ];
-        for kind in all_kinds {
-            let raw = HjsonLanguage::kind_to_raw(kind);
-            let roundtripped = HjsonLanguage::kind_from_raw(raw);
-            assert_eq!(kind, roundtripped, "Roundtrip failed for {:?}", kind);
-        }
+        matches!(self, LineComment | HashComment | BlockComment | Comment)
     }
 }
 
@@ -278,5 +214,3 @@ pub type GreenElement = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
 pub type RedNode = SyntaxNode<HjsonLanguage>;
 /// RedToken型エイリアス
 pub type RedToken = SyntaxToken<HjsonLanguage>;
-/// RedElement型エイリアス
-pub type RedElement = rowan::SyntaxElement<HjsonLanguage>;

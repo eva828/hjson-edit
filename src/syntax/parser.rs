@@ -21,7 +21,7 @@ impl ParseError {
         }
     }
 
-    pub fn format(&self, line_index: &LineIndex) -> String {
+    pub fn format_with_line_index(&self, line_index: &LineIndex) -> String {
         let lc = line_index.line_col(TextSize::from(self.offset as u32));
         format!(
             "Error at line {}, column {}: {}",
@@ -29,6 +29,14 @@ impl ParseError {
         )
     }
 }
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Parse error at offset {}: {}", self.offset, self.message)
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// 構文解析結果
 #[derive(Debug)]
@@ -50,6 +58,12 @@ enum ScalarContext {
     Root,
     ObjectValue,
     ArrayItem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueBoundary {
+    Closed,
+    Open,
 }
 
 struct ScalarScanner<'a> {
@@ -254,11 +268,12 @@ impl Parser {
         self.builder.start_node(SyntaxKind::Root.into());
 
         if !self.is_at_end() {
-            self.eat_trivia();
             if self.is_braceless_object_start() {
+                self.eat_root_header_trivia_for_braceless_object();
                 self.parse_braceless_object();
             } else {
-                self.parse_value(ScalarContext::Root);
+                self.eat_trivia();
+                let _ = self.parse_value(ScalarContext::Root);
             }
         }
 
@@ -300,6 +315,16 @@ impl Parser {
         }
     }
 
+    fn bump_trivia(&mut self) {
+        if matches!(self.current().map(|token| token.kind), Some(kind) if kind.is_comment()) {
+            self.builder.start_node(SyntaxKind::Comment.into());
+            self.bump();
+            self.builder.finish_node();
+        } else {
+            self.bump();
+        }
+    }
+
     /// 特定の非トリビアトークンかチェック
     fn at(&self, kind: SyntaxKind) -> bool {
         self.current_kind() == Some(kind)
@@ -325,7 +350,11 @@ impl Parser {
     /// 回復点までトークンを消費（トリビア含めてすべて保持）
     fn consume_until_recovery(&mut self, recovery_kinds: &[SyntaxKind]) {
         while !self.is_at_end() && !self.at_any(recovery_kinds) {
-            self.bump();
+            if self.current().is_some_and(|token| token.kind.is_trivia()) {
+                self.bump_trivia();
+            } else {
+                self.bump();
+            }
         }
     }
 
@@ -335,7 +364,7 @@ impl Parser {
     fn eat_trivia(&mut self) {
         while let Some(token) = self.current() {
             if token.kind.is_trivia() {
-                self.bump();
+                self.bump_trivia();
             } else {
                 break;
             }
@@ -349,12 +378,55 @@ impl Parser {
                 if token.kind == SyntaxKind::Newline {
                     had_newline = true;
                 }
-                self.bump();
+                self.bump_trivia();
             } else {
                 break;
             }
         }
         had_newline
+    }
+
+    fn eat_root_header_trivia_for_braceless_object(&mut self) {
+        let start = self.position;
+        let mut cursor = self.position;
+        let mut last_newline = None;
+
+        while let Some(token) = self.tokens.get(cursor) {
+            if !token.kind.is_trivia() {
+                break;
+            }
+            if token.kind == SyntaxKind::Newline {
+                last_newline = Some(cursor);
+            }
+            cursor += 1;
+        }
+
+        if cursor == start {
+            return;
+        }
+
+        let mut consume_until = cursor;
+
+        if let Some(newline_index) = last_newline {
+            let trailing_start = newline_index + 1;
+            let trailing = &self.tokens[trailing_start..cursor];
+            if !trailing.is_empty()
+                && trailing
+                    .iter()
+                    .all(|token| token.kind == SyntaxKind::Whitespace)
+            {
+                consume_until = trailing_start;
+            }
+        } else if self.tokens[start..cursor]
+            .iter()
+            .all(|token| token.kind == SyntaxKind::Whitespace)
+        {
+            consume_until = start;
+        }
+
+        while self.position < consume_until {
+            self.bump_trivia();
+        }
     }
 
     /// 次の非トリビアトークンの種類を取得
@@ -371,14 +443,14 @@ impl Parser {
     }
 
     /// 値を解析
-    fn parse_value(&mut self, context: ScalarContext) {
+    fn parse_value(&mut self, context: ScalarContext) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Value.into());
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
         // 終了チェック（ストリーム終端）
         if self.is_at_end() {
             self.builder.finish_node();
-            return;
+            return ValueBoundary::Open;
         }
 
         // 現在のトークンを確認（トリビア以外）
@@ -386,9 +458,13 @@ impl Parser {
             match token_kind {
                 SyntaxKind::LBrace => {
                     self.parse_object();
+                    self.builder.finish_node();
+                    return ValueBoundary::Closed;
                 }
                 SyntaxKind::LBracket => {
                     self.parse_array();
+                    self.builder.finish_node();
+                    return ValueBoundary::Closed;
                 }
                 SyntaxKind::String
                 | SyntaxKind::BlockString
@@ -397,7 +473,11 @@ impl Parser {
                 | SyntaxKind::Float
                 | SyntaxKind::True
                 | SyntaxKind::False
-                | SyntaxKind::Null => self.parse_scalar_value(context),
+                | SyntaxKind::Null => {
+                    let boundary = self.parse_scalar_value(context);
+                    self.builder.finish_node();
+                    return boundary;
+                }
                 _ => {
                     let offset = if let Some(t) = self.current() {
                         t.offset
@@ -413,6 +493,7 @@ impl Parser {
         }
 
         self.builder.finish_node();
+        ValueBoundary::Closed
     }
 
     /// オブジェクト { ... } を解析
@@ -423,6 +504,14 @@ impl Parser {
         self.bump();
 
         // 空のオブジェクトかチェック
+        if self.at(SyntaxKind::RBrace) {
+            self.eat_trivia();
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        self.eat_trivia();
         if self.at(SyntaxKind::RBrace) {
             self.bump();
             self.builder.finish_node();
@@ -447,19 +536,19 @@ impl Parser {
             }
 
             // トリビアがあっても at() はトリビアをスキップして確認するため、
-            // ここでは parse_pair の直前に先行するトリビアを消費しておく。
+            // ここでは parse_member の直前に先行するトリビアを消費しておく。
             if self.at(SyntaxKind::RBrace) || self.is_at_end() {
                 break;
             }
 
-            // consume trivia so it becomes sibling tokens of the upcoming Pair
+            // consume trivia so it becomes sibling tokens of the upcoming Member
             self.eat_trivia();
-            self.parse_pair();
+            let value_boundary = self.parse_member();
 
-            // Pairの後のトリビアを消費（コメントなど）
+            // Memberの後のトリビアを消費（コメントなど）
             let had_newline = self.eat_trivia_and_report_newline();
 
-            // カンマ
+            // 閉じ値の後は同一行でも次の member を許可する
             if self.at(SyntaxKind::Comma) {
                 self.bump();
 
@@ -470,6 +559,8 @@ impl Parser {
                 if self.at(SyntaxKind::RBrace) {
                     break;
                 }
+            } else if self.at(SyntaxKind::RBrace) {
+                break;
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
                 if had_newline {
@@ -518,6 +609,14 @@ impl Parser {
 
         // 空の配列かチェック
         if self.at(SyntaxKind::RBracket) {
+            self.eat_trivia();
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        self.eat_trivia();
+        if self.at(SyntaxKind::RBracket) {
             self.bump();
             self.builder.finish_node();
             return;
@@ -542,11 +641,9 @@ impl Parser {
 
             // 値ノードの兄弟としてトリビアを消費する
             self.eat_trivia();
-            self.parse_value(ScalarContext::ArrayItem);
+            let _ = self.parse_value(ScalarContext::ArrayItem);
 
-            // 同一行に複数の値がある場合の処理（例："a" "b" "c"）
-            // HJSONではカンマなしの引用符付き文字列が許可されている
-            self.parse_array_multiple_values();
+            // 同一行に複数の値がある場合はエラー（カンマまたは改行が必要）
 
             // 値の後のトリビア（改行・コメントなど）を消費
             let had_newline = self.eat_trivia_and_report_newline();
@@ -586,39 +683,10 @@ impl Parser {
         self.builder.finish_node();
     }
 
-    fn parse_array_multiple_values(&mut self) {
-        loop {
-            self.eat_trivia();
-            if self.is_at_end() || self.at(SyntaxKind::RBracket) || self.at(SyntaxKind::Comma) {
-                break;
-            }
-            // 次のトークンが新しい値の開始かチェック
-            if let Some(kind) = self.current_kind() {
-                if matches!(
-                    kind,
-                    SyntaxKind::String
-                        | SyntaxKind::BlockString
-                        | SyntaxKind::UnquotedString
-                        | SyntaxKind::Integer
-                        | SyntaxKind::Float
-                        | SyntaxKind::True
-                        | SyntaxKind::False
-                        | SyntaxKind::Null
-                        | SyntaxKind::LBrace
-                        | SyntaxKind::LBracket
-                ) {
-                    self.parse_value(ScalarContext::ArrayItem);
-                    continue;
-                }
-            }
-            break;
-        }
-    }
-
     /// キー: 値 のペアを解析
-    fn parse_pair(&mut self) {
-        self.builder.start_node(SyntaxKind::Pair.into());
-        // Pairノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
+    fn parse_member(&mut self) -> ValueBoundary {
+        self.builder.start_node(SyntaxKind::Member.into());
+        // Memberノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
         // キー
         self.builder.start_node(SyntaxKind::Key.into());
@@ -639,7 +707,7 @@ impl Parser {
                 }
                 self.builder.finish_node();
                 self.builder.finish_node();
-                return;
+                return ValueBoundary::Closed;
             }
         }
 
@@ -677,33 +745,46 @@ impl Parser {
         // 値
         // ':'と値の間のトリビアを消費して、Valueノードをトリビアフリーにする
         self.eat_trivia();
-        self.parse_value(ScalarContext::ObjectValue);
+        let boundary = self.parse_value(ScalarContext::ObjectValue);
 
         self.builder.finish_node();
+        boundary
     }
 
-    fn parse_scalar_value(&mut self, context: ScalarContext) {
+    fn parse_scalar_value(&mut self, context: ScalarContext) -> ValueBoundary {
         if let Some(token) = self.current() {
-            match token.kind {
-                SyntaxKind::String | SyntaxKind::BlockString => self.bump(),
-                SyntaxKind::UnquotedString
+            let kind = token.kind;
+            return match kind {
+                SyntaxKind::String
+                | SyntaxKind::BlockString
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
                 | SyntaxKind::True
                 | SyntaxKind::False
                 | SyntaxKind::Null => {
+                    self.bump();
+                    ValueBoundary::Closed
+                }
+                SyntaxKind::UnquotedString => {
                     let (text, consumed) =
                         ScalarScanner::new(&self.tokens, self.position, context).collect();
                     if consumed == 1 {
                         self.bump();
+                        ValueBoundary::Open
                     } else {
                         self.builder.token(SyntaxKind::UnquotedString.into(), &text);
                         self.position += consumed;
+                        ValueBoundary::Open
                     }
                 }
-                _ => self.bump(),
-            }
+                _ => {
+                    self.bump();
+                    ValueBoundary::Closed
+                }
+            };
         }
+
+        ValueBoundary::Closed
     }
 
     fn has_colon_after_key(&self) -> bool {
@@ -731,9 +812,13 @@ impl Parser {
         false
     }
 
-    /// ブレースレスルートオブジェクトの開始かチェック
+    /// オブジェクトの member 開始かチェック
     /// 引用符なしキー（UnquotedString）または引用符付きキー（String）で開始される
     fn is_braceless_object_start(&self) -> bool {
+        self.is_object_member_start()
+    }
+
+    fn is_object_member_start(&self) -> bool {
         matches!(
             self.current_kind(),
             Some(SyntaxKind::UnquotedString) | Some(SyntaxKind::String)
@@ -758,14 +843,16 @@ impl Parser {
                 break;
             }
 
-            // Pairが先行トリビアを吸収しないように、トリビアを消費する
+            // Memberが先行トリビアを吸収しないように、トリビアを消費する
             self.eat_trivia();
-            self.parse_pair();
+            let value_boundary = self.parse_member();
 
             let had_separator_newline = self.eat_trivia_and_report_newline();
             if self.at(SyntaxKind::Comma) {
                 self.bump();
                 self.eat_trivia();
+            } else if self.at(SyntaxKind::RBrace) {
+                break;
             } else if !self.is_at_end() && !had_separator_newline {
                 break;
             }

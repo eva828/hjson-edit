@@ -31,11 +31,17 @@ pub fn build_cli() -> Command {
 
 fn parse_command() -> Command {
     Command::new("parse")
-        .about("Parse HJSON file and output AST")
+        .about("Parse HJSON file and output tree or AST")
         .arg(
             Arg::new("file")
                 .required(true)
                 .value_parser(clap::value_parser!(std::path::PathBuf)),
+        )
+        .arg(
+            Arg::new("ast")
+                .long("ast")
+                .action(ArgAction::SetTrue)
+                .help("Show the semantic AST tree instead of the lossless tree view"),
         )
         .arg(
             Arg::new("show-trivia")

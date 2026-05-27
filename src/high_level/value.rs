@@ -1,0 +1,317 @@
+use rowan::GreenNode;
+
+use crate::ast::QuoteStyle;
+use crate::syntax::{GreenElement, SyntaxKind};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HjsonValue {
+    String(String),
+    Integer(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
+    Array(Vec<HjsonValue>),
+    Object(Vec<(String, HjsonValue)>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RenderConfig<'a> {
+    pub string_style: Option<QuoteStyle>,
+    pub pretty: bool,
+    pub depth: usize,
+    pub newline: &'a str,
+}
+
+impl<'a> RenderConfig<'a> {
+    pub fn with_depth(self, depth: usize) -> Self {
+        Self { depth, ..self }
+    }
+
+    pub fn wrap_container_elements(
+        &self,
+        rendered: GreenElement,
+        container_is_empty: bool,
+    ) -> Vec<GreenElement> {
+        let mut result = Vec::new();
+        if container_is_empty {
+            let indent = "  ".repeat(self.depth + 1);
+            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            result.push(rendered);
+            result.push(SyntaxKind::Newline.create_token(self.newline).into());
+            if self.depth > 0 {
+                result.push(
+                    SyntaxKind::Whitespace
+                        .create_token("  ".repeat(self.depth))
+                        .into(),
+                );
+            }
+        } else if self.pretty {
+            let indent = "  ".repeat(self.depth + 1);
+            result.push(SyntaxKind::Newline.create_token(self.newline).into());
+            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            result.push(rendered);
+            result.push(SyntaxKind::Newline.create_token(self.newline).into());
+            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+        } else {
+            result.push(rendered);
+        }
+        result
+    }
+}
+
+impl Default for RenderConfig<'_> {
+    fn default() -> Self {
+        Self {
+            string_style: None,
+            pretty: false,
+            depth: 0,
+            newline: "\n",
+        }
+    }
+}
+
+impl From<&str> for HjsonValue {
+    fn from(s: &str) -> Self {
+        HjsonValue::String(s.to_string())
+    }
+}
+
+impl From<String> for HjsonValue {
+    fn from(s: String) -> Self {
+        HjsonValue::String(s)
+    }
+}
+
+impl From<i64> for HjsonValue {
+    fn from(n: i64) -> Self {
+        HjsonValue::Integer(n)
+    }
+}
+
+impl From<i32> for HjsonValue {
+    fn from(n: i32) -> Self {
+        HjsonValue::Integer(n as i64)
+    }
+}
+
+impl From<f64> for HjsonValue {
+    fn from(n: f64) -> Self {
+        HjsonValue::Float(n)
+    }
+}
+
+impl From<f32> for HjsonValue {
+    fn from(n: f32) -> Self {
+        HjsonValue::Float(n as f64)
+    }
+}
+
+impl From<bool> for HjsonValue {
+    fn from(b: bool) -> Self {
+        HjsonValue::Bool(b)
+    }
+}
+
+impl From<Vec<HjsonValue>> for HjsonValue {
+    fn from(v: Vec<HjsonValue>) -> Self {
+        HjsonValue::Array(v)
+    }
+}
+
+impl From<Vec<(String, HjsonValue)>> for HjsonValue {
+    fn from(v: Vec<(String, HjsonValue)>) -> Self {
+        HjsonValue::Object(v)
+    }
+}
+
+impl HjsonValue {
+    pub(crate) fn render_value_node(&self, config: &RenderConfig<'_>) -> GreenNode {
+        GreenNode::new(SyntaxKind::Value.into(), self.render_body(config))
+    }
+
+    pub(crate) fn render_member_node(
+        &self,
+        key: &str,
+        key_style: Option<QuoteStyle>,
+        config: &RenderConfig<'_>,
+    ) -> GreenNode {
+        let children: Vec<GreenElement> = vec![
+            render_key_node(key, key_style).into(),
+            SyntaxKind::Colon.create_token(":").into(),
+            SyntaxKind::Whitespace.create_token(" ").into(),
+            self.render_value_node(&config.with_depth(config.depth + 1))
+                .into(),
+        ];
+        GreenNode::new(SyntaxKind::Member.into(), children)
+    }
+
+    /// Array の子要素1つを描画（前後の改行・インデント含む）
+    pub(crate) fn render_array_item_elements(
+        &self,
+        config: &RenderConfig<'_>,
+        container_is_empty: bool,
+    ) -> Vec<GreenElement> {
+        let rendered = self.render_value_node(config).into();
+        config.wrap_container_elements(rendered, container_is_empty)
+    }
+
+    /// Object の子 member1つを描画（前後の改行・インデント含む）
+    pub(crate) fn render_object_member_elements(
+        &self,
+        key: &str,
+        key_style: Option<QuoteStyle>,
+        config: &RenderConfig<'_>,
+        container_is_empty: bool,
+    ) -> Vec<GreenElement> {
+        let rendered = self.render_member_node(key, key_style, config).into();
+        config.wrap_container_elements(rendered, container_is_empty)
+    }
+
+    fn render_body(&self, config: &RenderConfig<'_>) -> Vec<GreenElement> {
+        match self {
+            HjsonValue::String(s) => {
+                let style = config.string_style.unwrap_or_else(|| {
+                    if is_simple_unquoted_text(s) {
+                        QuoteStyle::Unquoted
+                    } else {
+                        QuoteStyle::DoubleQuoted
+                    }
+                });
+                let (kind, text) = render_string(s, style);
+                vec![kind.create_token(text.as_str()).into()]
+            }
+            HjsonValue::Integer(n) => {
+                let text = n.to_string();
+                vec![SyntaxKind::Integer.create_token(text.as_str()).into()]
+            }
+            HjsonValue::Float(n) => {
+                let text = n.to_string();
+                vec![SyntaxKind::Float.create_token(text.as_str()).into()]
+            }
+            HjsonValue::Bool(true) => {
+                vec![SyntaxKind::True.create_token("true").into()]
+            }
+            HjsonValue::Bool(false) => {
+                vec![SyntaxKind::False.create_token("false").into()]
+            }
+            HjsonValue::Null => {
+                vec![SyntaxKind::Null.create_token("null").into()]
+            }
+            HjsonValue::Array(items) => {
+                let mut children = vec![SyntaxKind::LBracket.create_token("[").into()];
+                if config.pretty && !items.is_empty() {
+                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                    for (idx, item) in items.iter().enumerate() {
+                        children.push(
+                            SyntaxKind::Whitespace
+                                .create_token(indent(config.depth + 1).as_str())
+                                .into(),
+                        );
+                        children.push(
+                            item.render_value_node(&config.with_depth(config.depth + 1))
+                                .into(),
+                        );
+                        if idx + 1 != items.len() {
+                            children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                        }
+                    }
+                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                    children.push(
+                        SyntaxKind::Whitespace
+                            .create_token(indent(config.depth).as_str())
+                            .into(),
+                    );
+                    children.push(SyntaxKind::RBracket.create_token("]").into());
+                } else {
+                    for (idx, item) in items.iter().enumerate() {
+                        children.push(item.render_value_node(config).into());
+                        if idx + 1 != items.len() {
+                            children.push(SyntaxKind::Comma.create_token(",").into());
+                        }
+                    }
+                    children.push(SyntaxKind::RBracket.create_token("]").into());
+                }
+                children
+            }
+            HjsonValue::Object(entries) => {
+                let mut children = vec![SyntaxKind::LBrace.create_token("{").into()];
+                if config.pretty && !entries.is_empty() {
+                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                    for (idx, (key, value)) in entries.iter().enumerate() {
+                        children.push(
+                            SyntaxKind::Whitespace
+                                .create_token(indent(config.depth + 1).as_str())
+                                .into(),
+                        );
+                        children.push(
+                            value
+                                .render_member_node(key, None, &config.with_depth(config.depth + 1))
+                                .into(),
+                        );
+                        if idx + 1 != entries.len() {
+                            children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                        }
+                    }
+                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                    children.push(
+                        SyntaxKind::Whitespace
+                            .create_token(indent(config.depth).as_str())
+                            .into(),
+                    );
+                    children.push(SyntaxKind::RBrace.create_token("}").into());
+                } else {
+                    for (idx, (key, value)) in entries.iter().enumerate() {
+                        children.push(value.render_member_node(key, None, config).into());
+                        if idx + 1 != entries.len() {
+                            children.push(SyntaxKind::Comma.create_token(",").into());
+                        }
+                    }
+                    children.push(SyntaxKind::RBrace.create_token("}").into());
+                }
+                children
+            }
+        }
+    }
+}
+
+fn render_key_node(key: &str, key_style: Option<QuoteStyle>) -> GreenNode {
+    let (key_kind, key_text) = render_string(
+        key,
+        key_style.unwrap_or_else(|| {
+            if is_simple_unquoted_text(key) {
+                QuoteStyle::Unquoted
+            } else {
+                QuoteStyle::DoubleQuoted
+            }
+        }),
+    );
+    GreenNode::new(
+        SyntaxKind::Key.into(),
+        vec![key_kind.create_token(key_text.as_str()).into()],
+    )
+}
+
+fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
+    match style {
+        QuoteStyle::DoubleQuoted => (
+            SyntaxKind::String,
+            format!("\"{}\"", style.encode_body(text)),
+        ),
+        QuoteStyle::Block => (
+            SyntaxKind::BlockString,
+            format!("'''{}'''", style.encode_body(text)),
+        ),
+        QuoteStyle::Unquoted => (SyntaxKind::UnquotedString, style.encode_body(text)),
+    }
+}
+
+fn indent(depth: usize) -> String {
+    "  ".repeat(depth)
+}
+
+fn is_simple_unquoted_text(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}

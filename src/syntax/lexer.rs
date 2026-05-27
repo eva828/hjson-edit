@@ -1,3 +1,6 @@
+use line_index::LineIndex;
+use rowan::TextSize;
+
 use super::SyntaxKind;
 /// HJSON字句解析器
 ///
@@ -18,7 +21,23 @@ impl LexError {
             offset,
         }
     }
+
+    pub fn format_with_line_index(&self, line_index: &LineIndex) -> String {
+        let lc = line_index.line_col(TextSize::from(self.offset as u32));
+        format!(
+            "Error at line {}, column {}: {}",
+            lc.line, lc.col, self.message
+        )
+    }
 }
+
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LexError at offset {}: {}", self.offset, self.message)
+    }
+}
+
+impl std::error::Error for LexError {}
 
 pub struct Cursor<'a> {
     input: &'a str,
@@ -133,6 +152,11 @@ impl<'a> Lexer<'a> {
     /// 字句解析実行
     pub fn lex(mut self) -> LexResult {
         while !self.cursor.is_at_end() {
+            if self.cursor.pos() == 0 && self.cursor.peek() == Some('\u{FEFF}') {
+                self.cursor.advance();
+                continue;
+            }
+
             self.skip_whitespace_no_newline();
 
             if self.cursor.is_at_end() {
@@ -310,9 +334,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_double_quoted_string(&mut self, start_offset: usize) {
-        let mut terminated = false;
-        // 先頭の '"' を消費
-        self.cursor.advance();
+    let mut terminated = false;
+    // 開きの " は lex() の match_char('"') で既に消費済み
 
         while let Some(c) = self.cursor.peek() {
             if c == '"' {
@@ -437,7 +460,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        if c == '#' {
+        if c == '#' && self.is_hash_comment_start() {
             return true;
         }
         // 空白やカンマ・括弧などの記号でストップ
@@ -464,3 +487,4 @@ impl<'a> Lexer<'a> {
 fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
 }
+
