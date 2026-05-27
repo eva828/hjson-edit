@@ -1386,3 +1386,45 @@ pub fn detected_string_style_of_node(node: &RedNode) -> Option<QuoteStyle> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::{lexer::Lexer, RedNode, SyntaxKind};
+    use crate::syntax::parser::Parser;
+
+    fn parse_and_find_node(src: &str, kind: SyntaxKind) -> RedNode {
+        let tokens = Lexer::new(src).lex();
+        let parsed = Parser::new(tokens.tokens).parse();
+        let root = RedNode::new_root(parsed.green);
+        root.descendants()
+            .find(|node| node.kind() == kind)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_cast_value_node_to_mismatched_kinds_rejected() {
+        let value_node = parse_and_find_node("123", SyntaxKind::Value);
+
+        assert!(Object::cast(value_node.clone()).is_err());
+        assert!(Array::cast(value_node.clone()).is_err());
+        assert!(Document::cast(value_node.clone()).is_err());
+        assert!(Member::cast(value_node.clone()).is_err());
+        assert!(Key::cast(value_node.clone()).is_err());
+    }
+
+    #[test]
+    fn test_cast_object_node_to_mismatched_kinds_rejected() {
+        let object_node = parse_and_find_node("{}", SyntaxKind::Object);
+
+        assert!(Value::cast(object_node.clone()).is_err());
+        assert!(Array::cast(object_node.clone()).is_err());
+    }
+
+    #[test]
+    fn test_cast_comment_node_to_value_rejected() {
+        let comment_node = parse_and_find_node("// c", SyntaxKind::Comment);
+
+        assert!(Value::cast(comment_node.clone()).is_err());
+    }
+}

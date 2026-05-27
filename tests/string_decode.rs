@@ -137,3 +137,27 @@ fn decode_unquoted_returns_raw() {
         "hello"
     );
 }
+
+#[test]
+fn decode_double_quoted_with_isolated_high_surrogate_returns_raw() {
+    let result = QuoteStyle::DoubleQuoted.decode_body("\"\\uD83D\"");
+    assert_eq!(result, "\\uD83D");
+}
+
+#[test]
+fn decode_double_quoted_with_isolated_low_surrogate_returns_raw() {
+    let result = QuoteStyle::DoubleQuoted.decode_body("\"\\uDE00\"");
+    assert_eq!(result, "\\uDE00");
+}
+
+#[test]
+fn decode_double_quoted_with_invalid_hex_sequence_returns_raw() {
+    let result = QuoteStyle::DoubleQuoted.decode_body("\"\\u123Z\"");
+    assert_eq!(result, "\\u123Z");
+}
+
+#[test]
+fn decode_double_quoted_with_invalid_escape_returns_raw() {
+    let result = QuoteStyle::DoubleQuoted.decode_body("\"\\z\"");
+    assert_eq!(result, "\\z");
+}

@@ -28,3 +28,39 @@ impl DetectNewline for String {
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_newline_lf() {
+        assert_eq!("foo\nbar".detect_newline(), NewlineKind::Lf);
+        assert_eq!("\n".detect_newline(), NewlineKind::Lf);
+    }
+
+    #[test]
+    fn test_detect_newline_crlf() {
+        assert_eq!("foo\r\nbar".detect_newline(), NewlineKind::CrLf);
+        assert_eq!("\r\n".detect_newline(), NewlineKind::CrLf);
+    }
+
+    #[test]
+    fn test_detect_newline_mixed_lf_crlf_returns_crlf() {
+        assert_eq!("foo\nbar\r\nbaz".detect_newline(), NewlineKind::CrLf);
+        assert_eq!("foo\r\nbar\nbaz".detect_newline(), NewlineKind::CrLf);
+    }
+
+    #[test]
+    fn test_detect_newline_cr_only_or_none() {
+        // CR-only defaults to Lf
+        assert_eq!("foo\rbar".detect_newline(), NewlineKind::Lf);
+        assert_eq!("foo bar".detect_newline(), NewlineKind::Lf);
+        assert_eq!("".detect_newline(), NewlineKind::Lf);
+    }
+
+    #[test]
+    fn test_detect_newline_string() {
+        let s = String::from("foo\r\nbar");
+        assert_eq!(s.detect_newline(), NewlineKind::CrLf);
+    }
+}

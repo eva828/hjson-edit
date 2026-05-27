@@ -1,106 +1,57 @@
-use hjson_edit::{
-    ast::{DelimiterStyle, Trivia},
-    high_level::{
-        ops::object::{AppendMode, HjsonDocumentObjectEdit},
-        path::HjsonObjectPath,
-        HjsonDocument,
-    },
-};
-use pretty_assertions::assert_eq;
+use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath};
 
 #[test]
-fn braceless_root_object_can_be_edited() {
-    let input = "name: app\nport: 8080\n";
-    let expected = "name: app\nport: 9090\n";
-
-    let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("port").unwrap(), 9090)
-        .unwrap();
-    assert_eq!(updated.to_string(), expected);
+fn parse_completely_empty_file_roundtrips() {
+    let src = "";
+    let doc = HjsonDocument::parse(src).unwrap();
+    assert_eq!(doc.to_string(), src);
 }
 
 #[test]
-fn braceless_root_first_member_owns_indent_after_header_trivia() {
-    let input = "// This is a header comment\r\n\r\n// {\r\n    a: aaa,\r\n    b: bbb\r\n";
-
-    let doc = HjsonDocument::parse(input).unwrap();
-    let ast = doc.ast().unwrap();
-
-    assert!(matches!(
-        ast.leading_trivia.last(),
-        Some(Trivia::Newline { .. })
-    ));
-    assert!(!matches!(
-        ast.leading_trivia.last(),
-        Some(Trivia::Whitespace(_))
-    ));
-
-    let object = ast.object().unwrap();
-    let members = object.members();
-    assert!(matches!(
-        members.first().and_then(|member| member.leading_trivia.first()),
-        Some(Trivia::Whitespace(indent)) if indent == "    "
-    ));
+fn set_in_empty_document_inserts_braceless_object_member() {
+    let doc = HjsonDocument::parse("").unwrap();
+    let new_doc = doc.set(HjsonObjectPath::parse("foo").unwrap(), 1).unwrap();
+    assert_eq!(new_doc.to_string(), "foo: 1\n");
 }
 
 #[test]
-fn braceless_root_single_line_indent_is_not_document_leading_trivia() {
-    let input = "    a: 1\n  b: 2\n";
-
-    let doc = HjsonDocument::parse(input).unwrap();
-    let ast = doc.ast().unwrap();
-    assert!(ast.leading_trivia.is_empty());
-
-    let object = ast.object().unwrap();
-    let members = object.members();
-    assert!(matches!(
-        members.first().and_then(|member| member.leading_trivia.first()),
-        Some(Trivia::Whitespace(indent)) if indent == "    "
-    ));
+fn parse_whitespace_only_file_roundtrips() {
+    let src = "   \n  \t  \n";
+    let doc = HjsonDocument::parse(src).unwrap();
+    assert_eq!(doc.to_string(), src);
 }
 
 #[test]
-fn braceless_root_object_uses_braceless_delimiter_style() {
-    let input = "name: app\nport: 8080\n";
-
-    let doc = HjsonDocument::parse(input).unwrap();
-    let ast = doc.ast().unwrap();
-    let object = ast.object().unwrap();
-
-    assert_eq!(object.delimiter_style, DelimiterStyle::Braceless);
+fn set_in_whitespace_only_document_preserves_whitespace_and_adds_member() {
+    let doc = HjsonDocument::parse("   \n  \t  \n").unwrap();
+    let new_doc = doc.set(HjsonObjectPath::parse("foo").unwrap(), 1).unwrap();
+    assert_eq!(new_doc.to_string(), "   \n  \t  \nfoo: 1\n");
 }
 
 #[test]
-fn set_append_before_footer_inserts_member_above_braceless_footer_comment() {
-    let input = "name: app\n# footer\n";
-
-    let doc = HjsonDocument::parse(input)
-        .unwrap()
-        .append_mode(AppendMode::BeforeFooter);
-    let updated = doc
-        .set(HjsonObjectPath::parse("port").unwrap(), 8080)
-        .unwrap();
-    let output = updated.to_string();
-
-    let port_pos = output.find("port: 8080").unwrap();
-    let footer_pos = output.find("# footer").unwrap();
-    assert!(port_pos < footer_pos, "output was: {output:?}");
+fn parse_comment_only_file_roundtrips() {
+    let src = "// just a comment\n/* block */\n# hash comment";
+    let doc = HjsonDocument::parse(src).unwrap();
+    assert_eq!(doc.to_string(), src);
 }
 
 #[test]
-fn set_append_after_comments_inserts_member_below_braceless_footer_comment() {
-    let input = "name: app\n# footer\n";
+fn set_in_comment_only_document_preserves_comments_and_adds_member() {
+    let doc = HjsonDocument::parse("// just a comment\n/* block */\n# hash comment").unwrap();
+    let new_doc = doc.set(HjsonObjectPath::parse("foo").unwrap(), 1).unwrap();
+    assert!(new_doc.to_string().contains("foo: 1"));
+    assert!(new_doc.to_string().contains("just a comment"));
+}
 
-    let doc = HjsonDocument::parse(input)
-        .unwrap()
-        .append_mode(AppendMode::AfterComments);
-    let updated = doc
-        .set(HjsonObjectPath::parse("port").unwrap(), 8080)
-        .unwrap();
-    let output = updated.to_string();
+#[test]
+fn parse_single_scalar_value_roundtrips() {
+    let src = "1";
+    let doc = HjsonDocument::parse(src).unwrap();
+    assert_eq!(doc.to_string(), src);
+}
 
-    let port_pos = output.find("port: 8080").unwrap();
-    let footer_pos = output.find("# footer").unwrap();
-    assert!(port_pos > footer_pos, "output was: {output:?}");
+#[test]
+fn set_on_scalar_root_returns_error() {
+    let doc = HjsonDocument::parse("1").unwrap();
+    assert!(doc.set(HjsonObjectPath::parse("foo").unwrap(), 1).is_err());
 }

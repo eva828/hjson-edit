@@ -303,6 +303,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "rowan",
+ "tempfile",
  "thiserror",
 ]
 

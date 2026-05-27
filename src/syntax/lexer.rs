@@ -488,3 +488,80 @@ fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cursor_basics() {
+        let mut cursor = Cursor::new("aあb"); // 'a' (1 byte), 'あ' (3 bytes), 'b' (1 byte)
+        
+        assert_eq!(cursor.peek(), Some('a'));
+        assert_eq!(cursor.peek_n(1), Some('あ'));
+        assert_eq!(cursor.peek_prev(), None);
+
+        cursor.advance();
+        assert_eq!(cursor.peek(), Some('あ'));
+        assert_eq!(cursor.peek_prev(), Some('a'));
+        
+        cursor.advance();
+        assert_eq!(cursor.peek(), Some('b'));
+        assert_eq!(cursor.peek_prev(), Some('あ'));
+        
+        cursor.advance();
+        assert_eq!(cursor.peek(), None);
+        assert!(cursor.is_at_end());
+        
+        assert_eq!(cursor.advance(), None);
+    }
+
+    #[test]
+    fn test_cursor_match() {
+        let mut cursor = Cursor::new("foo bar");
+        
+        assert!(cursor.match_str("foo"));
+        assert_eq!(cursor.pos(), 3);
+        
+        assert!(!cursor.match_str("baz"));
+        assert_eq!(cursor.pos(), 3);
+        
+        assert!(cursor.match_char(' '));
+        assert_eq!(cursor.pos(), 4);
+    }
+
+    #[test]
+    fn test_lexer_hash_comment_start() {
+        let mut lexer = Lexer::new("# foo\n");
+        assert!(lexer.is_hash_comment_start());
+
+        let mut lexer = Lexer::new("  # foo\n");
+        lexer.cursor.advance();
+        lexer.cursor.advance();
+        assert!(lexer.is_hash_comment_start());
+
+        let mut lexer = Lexer::new("a# foo\n");
+        lexer.cursor.advance();
+        assert!(!lexer.is_hash_comment_start());
+    }
+
+    #[test]
+    fn test_lexer_invalid_escape_sequence_produces_error() {
+        let result = Lexer::new(r#""\x""#).lex();
+        assert!(!result.errors.is_empty());
+        assert!(result.errors[0].message.contains("Invalid escape sequence: \\x"));
+    }
+
+    #[test]
+    fn test_lexer_valid_escape_sequence_produces_no_error() {
+        let result = Lexer::new(r#""\"""#).lex();
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_lexer_eof_after_backslash_produces_error() {
+        let result = Lexer::new(r#""\"#).lex();
+        assert!(!result.errors.is_empty());
+        assert!(result.errors[0].message.contains("Unterminated string literal"));
+    }
+}

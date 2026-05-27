@@ -13,8 +13,7 @@ use hjson_edit::{
 // ------------------------------------------------------------------
 
 #[test]
-fn parse_01_becomes_string() {
-    // try page: 01 is treated as a string (leading zeros not allowed as number)
+fn root_number_with_leading_zero_returns_string() {
     let doc = HjsonDocument::parse("01").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
@@ -24,8 +23,7 @@ fn parse_01_becomes_string() {
 }
 
 #[test]
-fn parse_1_dot_becomes_float() {
-    // "1." has a decimal point, should be treated as Float.
+fn root_number_with_trailing_dot_returns_float() {
     let doc = HjsonDocument::parse("1.").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
@@ -35,8 +33,7 @@ fn parse_1_dot_becomes_float() {
 }
 
 #[test]
-fn parse_1e_becomes_string() {
-    // try page: 1e is treated as a string (incomplete exponent)
+fn root_number_with_incomplete_exponent_returns_string() {
     let doc = HjsonDocument::parse("1e").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
@@ -46,8 +43,7 @@ fn parse_1e_becomes_string() {
 }
 
 #[test]
-fn parse_plus_1_becomes_string() {
-    // RFC: plus sign is not allowed for numbers
+fn root_number_with_plus_sign_returns_string() {
     let doc = HjsonDocument::parse("+1").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
@@ -57,8 +53,7 @@ fn parse_plus_1_becomes_string() {
 }
 
 #[test]
-fn parse_hex_becomes_string() {
-    // RFC: hexadecimal is not allowed
+fn root_number_hex_returns_string() {
     let doc = HjsonDocument::parse("0x1").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
@@ -68,12 +63,34 @@ fn parse_hex_becomes_string() {
 }
 
 #[test]
-fn parse_bare_decimal_becomes_string() {
-    // RFC: .5 is not a valid number (must start with digit)
+fn root_number_bare_decimal_returns_string() {
     let doc = HjsonDocument::parse(".5").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
         HjsonValue::String(ref s) => assert_eq!(s, ".5"),
         ref other => panic!("expected String, got {:?}", other),
     }
+}
+
+#[test]
+fn root_number_over_i64_max_returns_error() {
+    let src = "9223372036854775808";
+    let doc = HjsonDocument::parse(src).unwrap();
+    let result = doc.get(HjsonObjectPath::parse("").unwrap());
+    assert!(result.is_err());
+}
+
+#[test]
+fn root_number_under_i64_min_returns_error() {
+    let src = "-9223372036854775809";
+    let doc = HjsonDocument::parse(src).unwrap();
+    let result = doc.get(HjsonObjectPath::parse("").unwrap());
+    assert!(result.is_err());
+}
+
+#[test]
+fn root_number_large_exponent_does_not_panic() {
+    let src = "1e99999999999999999999999999999999999999"; 
+    let doc = HjsonDocument::parse(src).unwrap();
+    let _ = doc.get(HjsonObjectPath::parse("").unwrap());
 }

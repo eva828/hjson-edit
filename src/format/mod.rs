@@ -29,3 +29,20 @@ impl Formatter {
         document.syntax().green().clone().into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::high_level::HjsonDocument;
+
+    #[test]
+    fn test_format_is_passthrough() {
+        let hjson = "{\n  // comment\n  foo: 123\n}";
+        let doc = HjsonDocument::parse(hjson).unwrap();
+        
+        let config = FormatConfig::default();
+        let formatted = Formatter::build(&doc.ast().unwrap(), config);
+        
+        assert_eq!(crate::syntax::RedNode::new_root(formatted).text().to_string(), hjson);
+    }
+}

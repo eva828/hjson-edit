@@ -861,3 +861,46 @@ impl Parser {
         self.builder.finish_node();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::lexer::Lexer;
+    use crate::ast::Document;
+    use crate::ast::AstNode;
+
+    fn parse_text(src: &str) -> ParseResult {
+        let tokens = Lexer::new(src).lex();
+        Parser::new(tokens.tokens).parse()
+    }
+
+    #[test]
+    fn test_parser_recover_from_missing_colon_reports_error_but_produces_ast() {
+        let parsed = parse_text("{\n  \"key\" \"value\"\n}");
+        assert!(!parsed.errors.is_empty());
+        
+        let doc = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
+        let root = doc.object().unwrap();
+        assert_eq!(root.members().len(), 1);
+    }
+
+    #[test]
+    fn test_parser_recover_unclosed_object_reports_error_but_produces_ast() {
+        let parsed = parse_text("{ \"a\": 1");
+        assert!(!parsed.errors.is_empty());
+        
+        let doc = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
+        let root = doc.object().unwrap();
+        assert_eq!(root.members().len(), 1);
+    }
+
+    #[test]
+    fn test_parser_recover_unclosed_array_reports_error_but_produces_ast() {
+        let parsed = parse_text("[ 1, 2");
+        assert!(!parsed.errors.is_empty());
+        
+        let doc = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
+        let root = doc.array().unwrap();
+        assert_eq!(root.items().len(), 2);
+    }
+}

@@ -315,3 +315,140 @@ fn is_simple_unquoted_text(text: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_simple_unquoted_text_accepts_alphanumeric_underscore_dash_dot() {
+        assert!(is_simple_unquoted_text("hello_world"));
+        assert!(is_simple_unquoted_text("foo"));
+        assert!(is_simple_unquoted_text("a-b.c_d-e0"));
+    }
+
+    #[test]
+    fn test_is_simple_unquoted_text_rejects_space_and_punctuation() {
+        assert!(!is_simple_unquoted_text("hello world"));
+        assert!(!is_simple_unquoted_text("foo!"));
+        assert!(!is_simple_unquoted_text(""));
+    }
+
+    #[test]
+    fn test_is_simple_unquoted_text_rejects_reserved_words() {
+        assert!(!is_simple_unquoted_text("true"));
+        assert!(!is_simple_unquoted_text("false"));
+        assert!(!is_simple_unquoted_text("null"));
+    }
+
+    #[test]
+    fn test_is_simple_unquoted_text_rejects_numeric_tokens() {
+        assert!(!is_simple_unquoted_text("123"));
+        assert!(!is_simple_unquoted_text("1.23"));
+    }
+
+    #[test]
+    fn test_wrap_container_elements_empty_container() {
+        let config = RenderConfig {
+            string_style: None,
+            pretty: true,
+            depth: 1,
+            newline: "\n",
+        };
+        let elements: Vec<GreenElement> = vec![
+            SyntaxKind::Value.create_token("a").into(),
+        ];
+
+        let wrap = config.wrap_container_elements(elements[0].clone(), true);
+        assert_eq!(wrap.len(), 4);
+        assert_eq!(wrap[0].kind(), SyntaxKind::Whitespace.into());
+        assert_eq!(wrap[1].kind(), SyntaxKind::Value.into());
+        assert_eq!(wrap[2].kind(), SyntaxKind::Newline.into());
+        assert_eq!(wrap[3].kind(), SyntaxKind::Whitespace.into());
+    }
+
+    #[test]
+    fn test_wrap_container_elements_pretty_not_empty() {
+        let config = RenderConfig {
+            string_style: None,
+            pretty: true,
+            depth: 1,
+            newline: "\n",
+        };
+        let elements: Vec<GreenElement> = vec![
+            SyntaxKind::Value.create_token("a").into(),
+        ];
+
+        let wrap = config.wrap_container_elements(elements[0].clone(), false);
+        assert_eq!(wrap.len(), 5);
+        assert_eq!(wrap[0].kind(), SyntaxKind::Newline.into());
+        assert_eq!(wrap[1].kind(), SyntaxKind::Whitespace.into());
+        assert_eq!(wrap[2].kind(), SyntaxKind::Value.into());
+        assert_eq!(wrap[3].kind(), SyntaxKind::Newline.into());
+        assert_eq!(wrap[4].kind(), SyntaxKind::Whitespace.into());
+    }
+
+    #[test]
+    fn test_wrap_container_elements_not_pretty_not_empty() {
+        let config = RenderConfig {
+            string_style: None,
+            pretty: false,
+            depth: 1,
+            newline: "\n",
+        };
+        let elements: Vec<GreenElement> = vec![
+            SyntaxKind::Value.create_token("a").into(),
+        ];
+
+        let wrap = config.wrap_container_elements(elements[0].clone(), false);
+        assert_eq!(wrap.len(), 1);
+        assert_eq!(wrap[0].kind(), SyntaxKind::Value.into());
+    }
+
+    #[test]
+    fn test_render_body_string_default_style() {
+        let config = RenderConfig::default();
+        let s = HjsonValue::String("foo".to_string());
+        let body = s.render_body(&config);
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0].kind(), SyntaxKind::UnquotedString.into());
+    }
+
+    #[test]
+    fn test_render_body_string_double_quoted_style() {
+        let config = RenderConfig {
+            string_style: Some(QuoteStyle::DoubleQuoted),
+            ..RenderConfig::default()
+        };
+        let s = HjsonValue::String("foo".to_string());
+        let body = s.render_body(&config);
+        assert_eq!(body[0].kind(), SyntaxKind::String.into());
+    }
+
+    #[test]
+    fn test_render_body_string_block_style() {
+        let config = RenderConfig {
+            string_style: Some(QuoteStyle::Block),
+            ..RenderConfig::default()
+        };
+        let s = HjsonValue::String("foo".to_string());
+        let body = s.render_body(&config);
+        assert_eq!(body[0].kind(), SyntaxKind::BlockString.into());
+    }
+
+    #[test]
+    fn test_render_body_array_empty() {
+        let config = RenderConfig::default();
+        let arr = HjsonValue::Array(vec![]);
+        let body = arr.render_body(&config);
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn test_render_body_object_empty() {
+        let config = RenderConfig::default();
+        let obj = HjsonValue::Object(vec![]);
+        let body = obj.render_body(&config);
+        assert_eq!(body.len(), 2);
+    }
+}

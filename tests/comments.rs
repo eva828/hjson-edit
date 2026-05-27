@@ -186,3 +186,30 @@ fn set_footer_comment_preserves_existing_blank_lines() {
         .unwrap();
     assert_eq!(updated.to_string(), "{\n  name: app\n}\n\n# done\n");
 }
+
+#[test]
+fn remove_missing_header_comment_is_noop() {
+    let src = "{\n  foo: 1\n}";
+    let doc = HjsonDocument::parse(src).unwrap();
+    let new_doc = doc.remove_comment(HjsonCommentPath::try_from(":header").unwrap()).unwrap();
+    assert_eq!(new_doc.to_string(), src);
+}
+
+#[test]
+fn set_before_comment_overwrites_existing() {
+    let src = "{\n  // old comment\n  foo: 1\n}";
+    let doc = HjsonDocument::parse(src).unwrap();
+    let new_doc = doc.set_comment(HjsonCommentPath::try_from("foo:before").unwrap(), "new comment").unwrap();
+    let expected = "{\n  /* new comment */\n  foo: 1\n}";
+    assert_eq!(new_doc.to_string(), expected);
+}
+
+#[test]
+fn set_multiline_header_comment_with_line_style_falls_back_to_block() {
+    let src = "{\n  foo: 1\n}";
+    let doc = HjsonDocument::parse(src).unwrap();
+    let new_doc = doc.comment_style(Prefer::Explicit(CommentKind::Line))
+        .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "line1\nline2").unwrap();
+    let expected = "/* line1\nline2 */\n{\n  foo: 1\n}";
+    assert_eq!(new_doc.to_string(), expected);
+}
