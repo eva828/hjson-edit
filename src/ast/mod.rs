@@ -372,10 +372,7 @@ impl DocumentItem {
 
 impl AstNode for Document {
     fn can_cast(kind: SyntaxKind) -> bool {
-        matches!(
-            kind,
-            SyntaxKind::Root | SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
-        )
+        kind == SyntaxKind::Root
     }
 
     fn cast(node: RedNode) -> Result<Self, HjsonEditError> {
