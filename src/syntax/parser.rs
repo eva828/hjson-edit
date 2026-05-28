@@ -267,14 +267,25 @@ impl Parser {
     pub fn parse(mut self) -> ParseResult {
         self.builder.start_node(SyntaxKind::Root.into());
 
+        let mut has_body = false;
+
         if !self.is_at_end() {
             if self.is_braceless_object_start() {
                 self.eat_root_header_trivia_for_braceless_object();
                 self.parse_braceless_object();
+                has_body = true;
             } else {
                 self.eat_trivia();
-                let _ = self.parse_value(ScalarContext::Root);
+                if !self.is_at_end() {
+                    let _ = self.parse_value(ScalarContext::Root);
+                    has_body = true;
+                }
             }
+        }
+
+        if !has_body {
+            self.builder.start_node(SyntaxKind::Object.into());
+            self.builder.finish_node();
         }
 
         self.eat_trivia();

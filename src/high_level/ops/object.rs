@@ -2,7 +2,7 @@ use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 use crate::{
     ast::{
-        detected_string_style_of_node, Array as AstArray, AstNode,
+        detected_string_style_of_node, Array as AstArray, AstNode, DelimiterStyle,
         Object as AstObject, QuoteStyle, Trivia,
     },
     high_level::{
@@ -290,7 +290,14 @@ fn set_object_child(
     let is_empty = object_ast.members().is_empty();
     if is_empty {
         let range_start = resolve_insert_range_start(parent, insert_pos);
-        let inserted = value.render_object_member_elements(key, None, &member_config, true);
+        let inserted = if object_ast.delimiter_style == DelimiterStyle::Braceless {
+            vec![
+                value.render_member_node(key, None, &member_config).into(),
+                SyntaxKind::Newline.create_token(newline).into(),
+            ]
+        } else {
+            value.render_object_member_elements(key, None, &member_config, true)
+        };
         return Ok(parent
             .green()
             .splice_children(range_start..insert_pos, inserted));
