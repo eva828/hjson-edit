@@ -1,6 +1,7 @@
 use rowan::GreenNode;
 
 use crate::ast::QuoteStyle;
+use crate::number::HjsonNumber;
 use crate::syntax::{GreenElement, SyntaxKind};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -314,6 +315,8 @@ fn is_simple_unquoted_text(text: &str) -> bool {
         && text
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        && !matches!(text, "true" | "false" | "null")
+        && !HjsonNumber::is_valid(text)
 }
 
 #[cfg(test)]
