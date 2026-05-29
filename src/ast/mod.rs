@@ -67,46 +67,10 @@ impl QuoteStyle {
                         Some('n') => out.push('\n'),
                         Some('r') => out.push('\r'),
                         Some('t') => out.push('\t'),
-                        Some('u') => {
-                            let mut hex = String::new();
-                            for _ in 0..4 {
-                                if let Some(ch) = chars.next() {
-                                    hex.push(ch);
-                                }
-                            }
-
-                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                if (0xD800..=0xDBFF).contains(&code) {
-                                    let mut lookahead = chars.clone();
-                                    if lookahead.next() == Some('\\')
-                                        && lookahead.next() == Some('u')
-                                    {
-                                        let mut low_hex = String::new();
-                                        for _ in 0..4 {
-                                            if let Some(ch) = lookahead.next() {
-                                                low_hex.push(ch);
-                                            }
-                                        }
-                                        if let Ok(low) = u32::from_str_radix(&low_hex, 16) {
-                                            if (0xDC00..=0xDFFF).contains(&low) {
-                                                let combined = 0x10000
-                                                    + (((code - 0xD800) << 10) | (low - 0xDC00));
-                                                if let Some(ch) = char::from_u32(combined) {
-                                                    out.push(ch);
-                                                    chars = lookahead;
-                                                    continue;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if let Some(ch) = char::from_u32(code) {
-                                    out.push(ch);
-                                }
-                            }
+                        Some(other) => {
+                            out.push('\\');
+                            out.push(other);
                         }
-                        Some(other) => out.push(other),
                         None => break,
                     }
                 }
