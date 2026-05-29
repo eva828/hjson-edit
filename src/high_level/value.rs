@@ -21,6 +21,7 @@ pub struct RenderConfig<'a> {
     pub pretty: bool,
     pub depth: usize,
     pub newline: &'a str,
+    pub is_braceless: bool,
 }
 
 impl<'a> RenderConfig<'a> {
@@ -35,19 +36,25 @@ impl<'a> RenderConfig<'a> {
     ) -> Vec<GreenElement> {
         let mut result = Vec::new();
         if container_is_empty {
-            let indent = "  ".repeat(self.depth + 1);
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            let indent = if self.is_braceless && self.depth == 1 {
+                String::new()
+            } else {
+                "  ".repeat(self.depth)
+            };
+            if !indent.is_empty() {
+                result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            }
             result.push(rendered);
             result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            if self.depth > 0 {
+            if self.depth > 1 {
                 result.push(
                     SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth))
+                        .create_token("  ".repeat(self.depth - 1))
                         .into(),
                 );
             }
         } else if self.pretty {
-            let indent = "  ".repeat(self.depth + 1);
+            let indent = "  ".repeat(self.depth);
             result.push(SyntaxKind::Newline.create_token(self.newline).into());
             result.push(SyntaxKind::Whitespace.create_token(&indent).into());
             result.push(rendered);
@@ -67,6 +74,7 @@ impl Default for RenderConfig<'_> {
             pretty: false,
             depth: 0,
             newline: "\n",
+            is_braceless: false,
         }
     }
 }
@@ -205,7 +213,7 @@ impl HjsonValue {
                     for (idx, item) in items.iter().enumerate() {
                         children.push(
                             SyntaxKind::Whitespace
-                                .create_token(indent(config.depth + 1).as_str())
+                                .create_token(indent(config.depth).as_str())
                                 .into(),
                         );
                         children.push(
@@ -219,7 +227,7 @@ impl HjsonValue {
                     children.push(SyntaxKind::Newline.create_token(config.newline).into());
                     children.push(
                         SyntaxKind::Whitespace
-                            .create_token(indent(config.depth).as_str())
+                            .create_token(indent(config.depth.saturating_sub(1)).as_str())
                             .into(),
                     );
                     children.push(SyntaxKind::RBracket.create_token("]").into());
@@ -241,7 +249,7 @@ impl HjsonValue {
                     for (idx, (key, value)) in entries.iter().enumerate() {
                         children.push(
                             SyntaxKind::Whitespace
-                                .create_token(indent(config.depth + 1).as_str())
+                                .create_token(indent(config.depth).as_str())
                                 .into(),
                         );
                         children.push(
@@ -256,7 +264,7 @@ impl HjsonValue {
                     children.push(SyntaxKind::Newline.create_token(config.newline).into());
                     children.push(
                         SyntaxKind::Whitespace
-                            .create_token(indent(config.depth).as_str())
+                            .create_token(indent(config.depth.saturating_sub(1)).as_str())
                             .into(),
                     );
                     children.push(SyntaxKind::RBrace.create_token("}").into());
@@ -355,8 +363,9 @@ mod tests {
         let config = RenderConfig {
             string_style: None,
             pretty: true,
-            depth: 1,
+            depth: 2,
             newline: "\n",
+            is_braceless: false,
         };
         let elements: Vec<GreenElement> = vec![
             SyntaxKind::Value.create_token("a").into(),
@@ -375,8 +384,9 @@ mod tests {
         let config = RenderConfig {
             string_style: None,
             pretty: true,
-            depth: 1,
+            depth: 2,
             newline: "\n",
+            is_braceless: false,
         };
         let elements: Vec<GreenElement> = vec![
             SyntaxKind::Value.create_token("a").into(),
@@ -398,6 +408,7 @@ mod tests {
             pretty: false,
             depth: 1,
             newline: "\n",
+            is_braceless: false,
         };
         let elements: Vec<GreenElement> = vec![
             SyntaxKind::Value.create_token("a").into(),

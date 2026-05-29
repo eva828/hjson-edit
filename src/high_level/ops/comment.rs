@@ -390,7 +390,7 @@ fn detect_indent_for_member(member: &Member) -> String {
     }
 
     if indent.is_empty() {
-        "  ".repeat(member.layout.depth)
+        "  ".repeat(member.layout.depth.saturating_sub(1))
     } else {
         indent
     }

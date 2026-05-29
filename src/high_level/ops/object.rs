@@ -88,8 +88,9 @@ pub(crate) fn replace_root_value(
     let config = RenderConfig {
         string_style: None,
         pretty: false,
-        depth: 0,
+        depth: 1,
         newline,
+        is_braceless: false,
     };
     let updated_child = render_value_like_node(&child, value, string_style, &config);
 
@@ -266,8 +267,9 @@ fn set_object_child(
         let replace_config = RenderConfig {
             string_style: None,
             pretty: false,
-            depth: 0,
+            depth: object_ast.layout.depth,
             newline,
+            is_braceless: false,
         };
         let updated = replace_member_value(&member_node, value, string_style, &replace_config)?;
         return Ok(parent.green().splice_children(
@@ -285,19 +287,13 @@ fn set_object_child(
         pretty: pretty_nested,
         depth: object_ast.layout.depth,
         newline,
+        is_braceless: object_ast.delimiter_style == DelimiterStyle::Braceless,
     };
 
     let is_empty = object_ast.members().is_empty();
     if is_empty {
         let range_start = resolve_insert_range_start(parent, insert_pos);
-        let inserted = if object_ast.delimiter_style == DelimiterStyle::Braceless {
-            vec![
-                value.render_member_node(key, None, &member_config).into(),
-                SyntaxKind::Newline.create_token(newline).into(),
-            ]
-        } else {
-            value.render_object_member_elements(key, None, &member_config, true)
-        };
+        let inserted = value.render_object_member_elements(key, None, &member_config, true);
         return Ok(parent
             .green()
             .splice_children(range_start..insert_pos, inserted));
@@ -367,8 +363,9 @@ fn set_array_child(
             let value_config = RenderConfig {
                 string_style: insert_style,
                 pretty: pretty_nested,
-                depth: array_ast.layout.depth + 1,
+                depth: array_ast.layout.depth,
                 newline,
+                is_braceless: false,
             };
             let updated = render_value_like_node(current_value.syntax(), value, string_style, &value_config);
             Ok(parent.green().splice_children(
@@ -387,6 +384,7 @@ fn set_array_child(
                     pretty: pretty_nested,
                     depth: array_ast.layout.depth,
                     newline,
+                    is_braceless: false,
                 };
 
                 let mut inserted = Vec::new();
@@ -420,8 +418,9 @@ fn set_array_child(
                 let insert_config = RenderConfig {
                     string_style: insert_style,
                     pretty: pretty_nested,
-                    depth: array_ast.layout.depth + 1,
+                    depth: array_ast.layout.depth,
                     newline,
+                    is_braceless: false,
                 };
                 let inserted = vec![value.render_value_node(&insert_config).into()];
 

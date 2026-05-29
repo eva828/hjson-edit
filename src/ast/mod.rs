@@ -1259,7 +1259,7 @@ fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
 }
 
 fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
-    let mut depth = 0usize;
+    let mut depth = 1usize;
     let mut current = node.parent();
     while let Some(parent) = current {
         if matches!(parent.kind(), SyntaxKind::Object | SyntaxKind::Array) {
