@@ -7,7 +7,6 @@ use crate::{
     },
     high_level::{
         error::HjsonEditError,
-        ext::RedNodeExt,
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         resolve::{resolve_body, ExistingPrefix, ParentResolution, PathResolver},
         value::{HjsonValue, RenderConfig},
@@ -39,9 +38,9 @@ pub trait HjsonDocumentObjectEdit {
 
 impl HjsonDocumentObjectEdit for HjsonDocument {
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
-        PathResolver::new(self.syntax_root().clone())
-            .resolve_node(&path)?
-            .node_to_value()
+        let resolved = PathResolver::new(self.syntax_root().clone())
+            .resolve_node(&path)?;
+        HjsonValue::from_node(&resolved)
     }
 
     fn set(
