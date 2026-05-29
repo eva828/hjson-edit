@@ -21,7 +21,6 @@ pub struct RenderConfig<'a> {
     pub pretty: bool,
     pub depth: usize,
     pub newline: &'a str,
-    pub is_braceless: bool,
 }
 
 impl<'a> RenderConfig<'a> {
@@ -36,11 +35,7 @@ impl<'a> RenderConfig<'a> {
     ) -> Vec<GreenElement> {
         let mut result = Vec::new();
         if container_is_empty {
-            let indent = if self.is_braceless && self.depth == 1 {
-                String::new()
-            } else {
-                "  ".repeat(self.depth)
-            };
+            let indent = "  ".repeat(self.depth);
             if !indent.is_empty() {
                 result.push(SyntaxKind::Whitespace.create_token(&indent).into());
             }
@@ -74,7 +69,6 @@ impl Default for RenderConfig<'_> {
             pretty: false,
             depth: 0,
             newline: "\n",
-            is_braceless: false,
         }
     }
 }
@@ -365,7 +359,6 @@ mod tests {
             pretty: true,
             depth: 2,
             newline: "\n",
-            is_braceless: false,
         };
         let elements: Vec<GreenElement> = vec![
             SyntaxKind::Value.create_token("a").into(),
@@ -386,7 +379,6 @@ mod tests {
             pretty: true,
             depth: 2,
             newline: "\n",
-            is_braceless: false,
         };
         let elements: Vec<GreenElement> = vec![
             SyntaxKind::Value.create_token("a").into(),
@@ -408,7 +400,6 @@ mod tests {
             pretty: false,
             depth: 1,
             newline: "\n",
-            is_braceless: false,
         };
         let elements: Vec<GreenElement> = vec![
             SyntaxKind::Value.create_token("a").into(),
