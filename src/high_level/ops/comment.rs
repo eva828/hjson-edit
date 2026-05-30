@@ -319,11 +319,7 @@ fn build_member_comment(
         .node()
         .parent()
         .ok_or(HjsonEditError::ParentNotFound)?;
-    let existing_style = trivia_comment_style(match location {
-        MemberCommentLocation::Before => &member.leading_trivia,
-        MemberCommentLocation::Inline => &member.trailing_trivia,
-    });
-    let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
+    let resolved_style = resolve_comment_style(preferred, &comment, None);
     let comment_node = make_comment_node(resolved_style, &comment);
 
     let (index, inserted): (usize, Vec<GreenElement>) = match location {
