@@ -37,26 +37,40 @@ impl<'a> RenderConfig<'a> {
     ) -> Vec<GreenElement> {
         let mut result = Vec::new();
         if container_is_empty {
-            let indent = "  ".repeat(self.depth);
-            if !indent.is_empty() {
-                result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            if self.depth > 0 {
+                result.push(
+                    SyntaxKind::Whitespace
+                        .create_token("  ".repeat(self.depth).as_str())
+                        .into(),
+                );
             }
             result.push(rendered);
             result.push(SyntaxKind::Newline.create_token(self.newline).into());
             if self.depth > 1 {
                 result.push(
                     SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth - 1))
+                        .create_token("  ".repeat(self.depth - 1).as_str())
                         .into(),
                 );
             }
         } else if self.pretty {
-            let indent = "  ".repeat(self.depth);
             result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            if self.depth > 0 {
+                result.push(
+                    SyntaxKind::Whitespace
+                        .create_token("  ".repeat(self.depth).as_str())
+                        .into(),
+                );
+            }
             result.push(rendered);
             result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            result.push(SyntaxKind::Whitespace.create_token(&indent).into());
+            if self.depth > 0 {
+                result.push(
+                    SyntaxKind::Whitespace
+                        .create_token("  ".repeat(self.depth).as_str())
+                        .into(),
+                );
+            }
         } else {
             result.push(rendered);
         }
