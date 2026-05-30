@@ -127,7 +127,7 @@ pub(crate) fn rebuild_tree_with_set(
         }
         Err(HjsonEditError::PathNotFound(_)) => {
             let ExistingPrefix { ancestor, consumed } = resolver.resolve_existing_prefix(path);
-            if consumed == 0 || consumed >= path.depth() {
+            if consumed == 0 {
                 return Err(HjsonEditError::PathNotFound(path.clone()));
             }
 
