@@ -559,3 +559,75 @@ fn resolve_insert_range_start(parent: &RedNode, insert_pos: usize) -> usize {
         insert_pos
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::QuoteStyle;
+
+    #[test]
+    fn test_resolve_quote_style() {
+        assert_eq!(
+            resolve_quote_style(Prefer::Preserve, Some(QuoteStyle::DoubleQuoted)),
+            QuoteStyle::DoubleQuoted
+        );
+        assert_eq!(
+            resolve_quote_style(Prefer::Preserve, None),
+            QuoteStyle::DoubleQuoted
+        );
+        assert_eq!(
+            resolve_quote_style(Prefer::Explicit(QuoteStyle::Unquoted), None),
+            QuoteStyle::Unquoted
+        );
+    }
+
+    #[test]
+    fn test_resolve_insert_style() {
+        assert_eq!(
+            resolve_insert_style(Prefer::Preserve, Some(QuoteStyle::DoubleQuoted)),
+            Some(QuoteStyle::DoubleQuoted)
+        );
+        assert_eq!(resolve_insert_style(Prefer::Preserve, None), None);
+        assert_eq!(
+            resolve_insert_style(Prefer::Explicit(QuoteStyle::Unquoted), Some(QuoteStyle::DoubleQuoted)),
+            Some(QuoteStyle::Unquoted)
+        );
+        assert_eq!(
+            resolve_insert_style(Prefer::Explicit(QuoteStyle::Unquoted), None),
+            Some(QuoteStyle::Unquoted)
+        );
+    }
+
+    #[test]
+    fn test_build_nested_value_single_key_wraps_in_object() {
+        let path = vec![PathSegment::Key("a".to_string())];
+        let result = build_nested_value(&path, HjsonValue::Integer(1));
+        assert_eq!(
+            result,
+            HjsonValue::Object(vec![("a".into(), HjsonValue::Integer(1))])
+        );
+    }
+
+    #[test]
+    fn test_build_nested_value_nested_keys() {
+        let path = vec![
+            PathSegment::Key("a".to_string()),
+            PathSegment::Key("b".to_string()),
+        ];
+        let result = build_nested_value(&path, HjsonValue::Integer(1));
+        assert_eq!(
+            result,
+            HjsonValue::Object(vec![(
+                "a".into(),
+                HjsonValue::Object(vec![("b".into(), HjsonValue::Integer(1))])
+            )])
+        );
+    }
+
+    #[test]
+    fn test_build_nested_value_array_segment() {
+        let path = vec![PathSegment::Array(ArrayPathSegment::Index(0))];
+        let result = build_nested_value(&path, HjsonValue::Integer(1));
+        assert_eq!(result, HjsonValue::Array(vec![HjsonValue::Integer(1)]));
+    }
+}

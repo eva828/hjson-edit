@@ -389,3 +389,180 @@ fn render_comment_text(style: CommentKind, comment: &str) -> String {
         CommentKind::Block => format!("/* {} */", comment),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::CommentTrivia;
+    use crate::high_level::path::HjsonObjectPath;
+
+    #[test]
+    fn test_render_comment_text() {
+        assert_eq!(render_comment_text(CommentKind::Line, "hello"), "// hello");
+        assert_eq!(render_comment_text(CommentKind::Hash, "hello"), "# hello");
+        assert_eq!(render_comment_text(CommentKind::Block, "hello"), "/* hello */");
+    }
+
+    #[test]
+    fn test_kind_from_style() {
+        assert_eq!(kind_from_style(CommentKind::Line), SyntaxKind::LineComment);
+        assert_eq!(kind_from_style(CommentKind::Hash), SyntaxKind::HashComment);
+        assert_eq!(kind_from_style(CommentKind::Block), SyntaxKind::BlockComment);
+    }
+
+    #[test]
+    fn test_resolve_comment_style_multiline_always_block() {
+        assert_eq!(
+            resolve_comment_style(Prefer::Explicit(CommentKind::Line), "line1\nline2", None),
+            CommentKind::Block
+        );
+    }
+
+    #[test]
+    fn test_resolve_comment_style_preserve_falls_back_to_block() {
+        assert_eq!(
+            resolve_comment_style(Prefer::Preserve, "hello", None),
+            CommentKind::Block
+        );
+    }
+
+    #[test]
+    fn test_resolve_comment_style_preserve_keeps_existing() {
+        assert_eq!(
+            resolve_comment_style(Prefer::Preserve, "hello", Some(CommentKind::Line)),
+            CommentKind::Line
+        );
+    }
+
+    #[test]
+    fn test_resolve_comment_style_explicit_overrides() {
+        assert_eq!(
+            resolve_comment_style(Prefer::Explicit(CommentKind::Hash), "hello", None),
+            CommentKind::Hash
+        );
+    }
+
+    #[test]
+    fn test_extract_comment_bodies_mixed_trivia() {
+        let trivia = vec![
+            Trivia::Whitespace("  ".to_string()),
+            Trivia::Comment(CommentTrivia {
+                kind: CommentKind::Line,
+                text: "// first".to_string(),
+                body: "first".to_string(),
+            }),
+            Trivia::Comment(CommentTrivia {
+                kind: CommentKind::Block,
+                text: "/* second */".to_string(),
+                body: "second".to_string(),
+            }),
+        ];
+        assert_eq!(
+            extract_comment_bodies(&trivia),
+            vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_extract_comment_bodies_no_comments() {
+        let trivia = vec![Trivia::Whitespace("  ".to_string())];
+        assert!(extract_comment_bodies(&trivia).is_empty());
+    }
+
+    #[test]
+    fn test_join_comment_bodies_empty_trivia() {
+        let trivia = vec![Trivia::Whitespace("  ".to_string())];
+        assert_eq!(join_comment_bodies(&trivia), None);
+    }
+
+    #[test]
+    fn test_join_comment_bodies_single_comment() {
+        let trivia = vec![Trivia::Comment(CommentTrivia {
+            kind: CommentKind::Line,
+            text: "// hello".to_string(),
+            body: "hello".to_string(),
+        })];
+        assert_eq!(join_comment_bodies(&trivia), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_join_comment_bodies_multiple_comments() {
+        let trivia = vec![
+            Trivia::Comment(CommentTrivia {
+                kind: CommentKind::Line,
+                text: "// first".to_string(),
+                body: "first".to_string(),
+            }),
+            Trivia::Comment(CommentTrivia {
+                kind: CommentKind::Block,
+                text: "/* second */".to_string(),
+                body: "second".to_string(),
+            }),
+        ];
+        assert_eq!(
+            join_comment_bodies(&trivia),
+            Some("first\nsecond".to_string())
+        );
+    }
+
+    #[test]
+    fn test_trivia_comment_style() {
+        let with_comments = vec![
+            Trivia::Whitespace("  ".to_string()),
+            Trivia::Comment(CommentTrivia {
+                kind: CommentKind::Line,
+                text: "// hi".to_string(),
+                body: "hi".to_string(),
+            }),
+            Trivia::Comment(CommentTrivia {
+                kind: CommentKind::Block,
+                text: "/* there */".to_string(),
+                body: "there".to_string(),
+            }),
+        ];
+        assert_eq!(trivia_comment_style(&with_comments), Some(CommentKind::Line));
+        let no_comments = vec![Trivia::Whitespace("  ".to_string())];
+        assert_eq!(trivia_comment_style(&no_comments), None);
+        assert_eq!(trivia_comment_style(&[]), None);
+    }
+
+    #[test]
+    fn test_resolve_comment_target_header() {
+        match resolve_comment_target(&HjsonCommentPath::Header) {
+            CommentTarget::Document { header: true } => {}
+            _ => panic!("expected Document header"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_comment_target_footer() {
+        match resolve_comment_target(&HjsonCommentPath::Footer) {
+            CommentTarget::Document { header: false } => {}
+            _ => panic!("expected Document footer"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_comment_target_before() {
+        let path = HjsonCommentPath::Before(HjsonObjectPath::parse("a").unwrap());
+        match resolve_comment_target(&path) {
+            CommentTarget::Member {
+                location: MemberCommentLocation::Before,
+                ..
+            } => {}
+            _ => panic!("expected Member Before"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_comment_target_inline() {
+        let path = HjsonCommentPath::Inline(HjsonObjectPath::parse("a").unwrap());
+        match resolve_comment_target(&path) {
+            CommentTarget::Member {
+                location: MemberCommentLocation::Inline,
+                ..
+            } => {}
+            _ => panic!("expected Member Inline"),
+        }
+    }
+}
