@@ -291,8 +291,10 @@ fn build_member_comment(
         .node()
         .parent()
         .ok_or(HjsonEditError::ParentNotFound)?;
+    let member_index = member.node().index();
 
-    let green_after_remove = if let Some((start, end)) = member_comment_range(&member, location) {
+    let comment_range = member_comment_range(&member, location);
+    let green_after_remove = if let Some((start, end)) = comment_range {
         parent.green().splice_children(start..end, vec![])
     } else {
         parent.green().clone().into_owned()
@@ -308,39 +310,27 @@ fn build_member_comment(
 
     let comment = comment.unwrap();
 
-    let new_root = RedNode::new_root(if parent.kind() == SyntaxKind::Root {
-        green_after_remove.clone()
-    } else {
-        parent.replace_with(green_after_remove.clone())
-    });
-
-    let member = PathResolver::new(new_root).resolve_member(path)?;
-    let parent = member
-        .node()
-        .parent()
-        .ok_or(HjsonEditError::ParentNotFound)?;
     let resolved_style = resolve_comment_style(preferred, &comment, None);
     let comment_node = make_comment_node(resolved_style, &comment);
 
-    let (index, inserted): (usize, Vec<GreenElement>) = match location {
+    let insert_index = match location {
+        MemberCommentLocation::Before => comment_range.map(|(start, _)| start).unwrap_or(member_index),
+        MemberCommentLocation::Inline => member_index + 1,
+    };
+
+    let inserted: Vec<GreenElement> = match location {
         MemberCommentLocation::Before => {
             let nl = SyntaxKind::Newline.create_token(newline);
             let indent = SyntaxKind::Whitespace.create_token(detect_indent_for_member(&member));
-            (
-                member.node().index(),
-                vec![comment_node.into(), nl.into(), indent.into()],
-            )
+            vec![comment_node.into(), nl.into(), indent.into()]
         }
         MemberCommentLocation::Inline => {
             let space = SyntaxKind::Whitespace.create_token(" ");
-            (
-                member.node().index() + 1,
-                vec![space.into(), comment_node.into()],
-            )
+            vec![space.into(), comment_node.into()]
         }
     };
 
-    let new_parent = parent.green().splice_children(index..index, inserted);
+    let new_parent = green_after_remove.splice_children(insert_index..insert_index, inserted);
     if parent.kind() == SyntaxKind::Root {
         Ok(new_parent)
     } else {
