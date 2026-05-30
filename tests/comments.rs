@@ -200,7 +200,7 @@ fn set_before_comment_overwrites_existing() {
     let src = "{\n  // old comment\n  foo: 1\n}";
     let doc = HjsonDocument::parse(src).unwrap();
     let new_doc = doc.set_comment(HjsonCommentPath::try_from("foo:before").unwrap(), "new comment").unwrap();
-    let expected = "{\n  /* new comment */\n  foo: 1\n}";
+    let expected = "{\n  // new comment\n  foo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }
 

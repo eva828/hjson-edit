@@ -293,6 +293,11 @@ fn build_member_comment(
         .ok_or(HjsonEditError::ParentNotFound)?;
     let member_index = member.node().index();
 
+    let existing_style = trivia_comment_style(match location {
+        MemberCommentLocation::Before => &member.leading_trivia,
+        MemberCommentLocation::Inline => &member.trailing_trivia,
+    });
+
     let comment_range = member_comment_range(&member, location);
     let green_after_remove = if let Some((start, end)) = comment_range {
         parent.green().splice_children(start..end, vec![])
@@ -309,8 +314,7 @@ fn build_member_comment(
     }
 
     let comment = comment.unwrap();
-
-    let resolved_style = resolve_comment_style(preferred, &comment, None);
+    let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
     let comment_node = make_comment_node(resolved_style, &comment);
 
     let insert_index = match location {
