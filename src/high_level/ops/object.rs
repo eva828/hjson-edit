@@ -346,8 +346,9 @@ fn set_array_child(
     let items = array_ast.items();
 
     // Normalize Push to InsertAt at the end
+    let push_target = ArrayPathSegment::InsertAt(items.len());
     let seg = match seg {
-        ArrayPathSegment::Push => &ArrayPathSegment::InsertAt(items.len()),
+        ArrayPathSegment::Push => &push_target,
         other => other,
     };
 
