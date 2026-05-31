@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_lexer_hash_comment_start() {
-        let mut lexer = Lexer::new("# foo\n");
+        let lexer = Lexer::new("# foo\n");
         assert!(lexer.is_hash_comment_start());
 
         let mut lexer = Lexer::new("  # foo\n");

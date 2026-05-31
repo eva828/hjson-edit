@@ -554,7 +554,7 @@ impl Parser {
 
             // consume trivia so it becomes sibling tokens of the upcoming Member
             self.eat_trivia();
-            let value_boundary = self.parse_member();
+            self.parse_member();
 
             // Memberの後のトリビアを消費（コメントなど）
             let had_newline = self.eat_trivia_and_report_newline();
@@ -856,7 +856,7 @@ impl Parser {
 
             // Memberが先行トリビアを吸収しないように、トリビアを消費する
             self.eat_trivia();
-            let value_boundary = self.parse_member();
+            self.parse_member();
 
             let had_separator_newline = self.eat_trivia_and_report_newline();
             if self.at(SyntaxKind::Comma) {
