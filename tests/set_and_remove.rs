@@ -50,7 +50,7 @@ fn set_array_insert_at_past_end_appends() {
 #[test]
 fn set_array_insert_at_inserts_in_middle() {
     let input = "{\n  items: [1, 3]\n}\n";
-    let expected = "{\n  items: [1,2 3]\n}\n";
+    let expected = "{\n  items: [1, 2, 3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -74,7 +74,7 @@ fn set_object_key_updates_existing_value() {
 #[test]
 fn set_nested_object_path_creates_member() {
     let input = "{\n  server: { host: localhost }\n}\n";
-    let expected = "{\n  server: { host: localhost , port: 8080}\n}\n";
+    let expected = "{\n  server: { host: localhost, port: 8080 }\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -134,7 +134,7 @@ fn set_existing_key_preserves_leading_comments() {
 #[test]
 fn set_preserves_crlf_line_endings() {
     let input = "{\n  items: [\r\n    1\r\n    2\r\n  ]\n}\n";
-    let expected = "{\n  items: [\r\n    1\r\n    2\r\n  3]\n}\n";
+    let expected = "{\n  items: [\r\n    1\r\n    2\r\n    3\r\n  ]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
