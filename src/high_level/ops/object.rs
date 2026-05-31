@@ -1,4 +1,4 @@
-use rowan::{GreenNode, GreenToken, NodeOrToken};
+use rowan::{GreenNode, NodeOrToken};
 
 use crate::{
     ast::{
@@ -272,9 +272,16 @@ fn set_object_child(
     };
 
     let is_empty = members.is_empty();
+    let (before_colon_trivia, after_colon_trivia) = if let Some(first_member) = members.first() {
+        (first_member.before_colon_trivia.clone(), first_member.after_colon_trivia.clone())
+    } else {
+        (vec![], vec![Trivia::Whitespace(" ".to_string())])
+    };
     if is_empty {
         let range_start = resolve_insert_range_start(parent, insert_pos);
-        let inserted = value.render_object_member_elements(key, None, &member_config, true);
+        let inserted = value.render_object_member_elements(
+            key, None, &member_config, &before_colon_trivia, &after_colon_trivia, true,
+        );
         return Ok(parent
             .green()
             .splice_children(range_start..insert_pos, inserted));
@@ -288,8 +295,8 @@ fn set_object_child(
                 .iter()
                 .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
             if needs_separator {
-                inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
+                inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
             }
         }
     }
@@ -297,10 +304,12 @@ fn set_object_child(
         key,
         None,
         &member_config,
+        &before_colon_trivia,
+        &after_colon_trivia,
         false,
     ));
     if !container_multi_line {
-        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+        inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
     }
 
     let splice_start = if !is_empty
@@ -407,8 +416,8 @@ fn set_array_child(
                             .iter()
                             .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
                         if needs_separator {
-                            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                            inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
+                            inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
                         }
                     }
                 }
@@ -455,8 +464,8 @@ fn set_array_child(
                             .iter()
                             .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
                         if needs_separator {
-                            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
-                            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                            inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
+                            inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
                         }
                     }
                 }
@@ -466,17 +475,17 @@ fn set_array_child(
                         .iter()
                         .any(|t| matches!(t, Trivia::Whitespace(_)))
                 {
-                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                    inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
                 }
                 inserted.push(value.render_value_node(&insert_config).into());
                 if !container_multi_line {
-                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                    inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
                     if !target_value
                         .leading_trivia
                         .iter()
                         .any(|t| matches!(t, Trivia::Whitespace(_)))
                     {
-                        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                        inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
                     }
                 }
 

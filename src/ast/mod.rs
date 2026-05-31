@@ -1,7 +1,7 @@
 use rowan::NodeOrToken;
 use std::ops::Range;
 
-use crate::syntax::NewlineKind;
+use crate::syntax::{GreenElement, NewlineKind};
 use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -122,8 +122,55 @@ impl QuoteStyle {
 
     pub fn encode_body(&self, body: &str) -> String {
         match self {
-            QuoteStyle::DoubleQuoted => body.replace('\\', "\\\\").replace('"', "\\\""),
+            QuoteStyle::DoubleQuoted => {
+                let mut out = String::with_capacity(body.len() + 2);
+                for c in body.chars() {
+                    match c {
+                        '\\' => out.push_str("\\\\"),
+                        '"' => out.push_str("\\\""),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        '\u{0008}' => out.push_str("\\b"),
+                        '\u{000C}' => out.push_str("\\f"),
+                        c if c.is_control() => {
+                            out.push_str(&format!("\\u{:04x}", c as u32));
+                        }
+                        c => out.push(c),
+                    }
+                }
+                out
+            }
             QuoteStyle::Block | QuoteStyle::Unquoted => body.to_string(),
+        }
+    }
+
+    pub fn is_valid_for_text(&self, text: &str) -> bool {
+        match self {
+            QuoteStyle::Unquoted => {
+                !text.is_empty()
+                    && text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                    && !matches!(text, "true" | "false" | "null")
+                    && !crate::number::HjsonNumber::is_valid(text)
+            }
+            QuoteStyle::DoubleQuoted | QuoteStyle::Block => true,
+        }
+    }
+
+    pub fn render(&self, body: &str) -> String {
+        let encoded = self.encode_body(body);
+        match self {
+            QuoteStyle::DoubleQuoted => format!("\"{}\"", encoded),
+            QuoteStyle::Block => format!("'''{}'''", encoded),
+            QuoteStyle::Unquoted => encoded,
+        }
+    }
+
+    pub fn syntax_kind(&self) -> SyntaxKind {
+        match self {
+            QuoteStyle::DoubleQuoted => SyntaxKind::String,
+            QuoteStyle::Block => SyntaxKind::BlockString,
+            QuoteStyle::Unquoted => SyntaxKind::UnquotedString,
         }
     }
 }
@@ -152,6 +199,33 @@ impl Trivia {
         match self {
             Self::Newline { kind, .. } => Some(*kind),
             _ => None,
+        }
+    }
+
+    pub fn to_green_element(&self) -> GreenElement {
+        match self {
+            Trivia::Whitespace(text) => {
+                SyntaxKind::Whitespace.create_token(text.as_str()).into()
+            }
+            Trivia::Newline { text, .. } => {
+                SyntaxKind::Newline.create_token(text.as_str()).into()
+            }
+            Trivia::Comment(comment) => {
+                let kind = match comment.kind {
+                    CommentKind::Line => SyntaxKind::LineComment,
+                    CommentKind::Hash => SyntaxKind::HashComment,
+                    CommentKind::Block => SyntaxKind::BlockComment,
+                };
+                let token: rowan::GreenToken = kind.create_token(comment.text.as_str());
+                let node = rowan::GreenNode::new(
+                    SyntaxKind::Comment.into(),
+                    vec![token.into()],
+                );
+                NodeOrToken::Node(node)
+            }
+            Trivia::Comma(text) => {
+                SyntaxKind::Comma.create_token(text.as_str()).into()
+            }
         }
     }
 }

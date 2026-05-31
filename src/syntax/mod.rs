@@ -154,6 +154,24 @@ impl SyntaxKind {
         rowan::GreenToken::new(self.into(), text.into().as_str())
     }
 
+    /// 構造的トークンの正準テキストを返す
+    pub fn canonical_text(self) -> &'static str {
+        match self {
+            SyntaxKind::Comma => ",",
+            SyntaxKind::Colon => ":",
+            SyntaxKind::LBrace => "{",
+            SyntaxKind::RBrace => "}",
+            SyntaxKind::LBracket => "[",
+            SyntaxKind::RBracket => "]",
+            SyntaxKind::Whitespace => " ",
+            SyntaxKind::True => "true",
+            SyntaxKind::False => "false",
+            SyntaxKind::Null => "null",
+            SyntaxKind::Newline => "\n",
+            _ => panic!("SyntaxKind::{:?} has no canonical text", self),
+        }
+    }
+
     /// トークンかどうか
     pub fn is_token(self) -> bool {
         use SyntaxKind::*;

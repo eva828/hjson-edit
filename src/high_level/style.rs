@@ -1,4 +1,22 @@
-use crate::syntax::NewlineKind;
+use crate::syntax::{NewlineKind, RedNode, SyntaxKind};
+use rowan::NodeOrToken;
+
+/// ASTのNewlineトークンから改行スタイルを検出する
+pub fn detect_newline_from_ast(root: &RedNode) -> NewlineKind {
+    let mut lf = 0usize;
+    let mut crlf = 0usize;
+    for token in root.descendants_with_tokens() {
+        if let NodeOrToken::Token(tok) = token {
+            if tok.kind() == SyntaxKind::Newline {
+                match NewlineKind::from_text(tok.text()) {
+                    Some(NewlineKind::CrLf) => crlf += 1,
+                    _ => lf += 1,
+                }
+            }
+        }
+    }
+    if crlf > 0 && crlf >= lf { NewlineKind::CrLf } else { NewlineKind::Lf }
+}
 
 /// 改行コードを検出可能な対象
 ///

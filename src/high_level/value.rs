@@ -1,8 +1,7 @@
 use rowan::{GreenNode, NodeOrToken};
 
-use crate::ast::{AstNode, Key, QuoteStyle};
+use crate::ast::{AstNode, Key, QuoteStyle, Trivia};
 use crate::high_level::error::HjsonEditError;
-use crate::number::HjsonNumber;
 use crate::syntax::{GreenElement, SyntaxKind};
 use crate::{RedNode, RedToken};
 
@@ -154,14 +153,28 @@ impl HjsonValue {
         key: &str,
         key_style: Option<QuoteStyle>,
         config: &RenderConfig<'_>,
+        before_colon_trivia: &[Trivia],
+        after_colon_trivia: &[Trivia],
     ) -> GreenNode {
-        let children: Vec<GreenElement> = vec![
-            render_key_node(key, key_style).into(),
-            SyntaxKind::Colon.create_token(":").into(),
-            SyntaxKind::Whitespace.create_token(" ").into(),
+        let mut children: Vec<GreenElement> = Vec::with_capacity(
+            3 + before_colon_trivia.len() + after_colon_trivia.len(),
+        );
+        children.push(render_key_node(key, key_style).into());
+        for trivia in before_colon_trivia {
+            children.push(trivia.to_green_element());
+        }
+        children.push(SyntaxKind::Colon.create_token(":").into());
+        if after_colon_trivia.is_empty() {
+            children.push(SyntaxKind::Whitespace.create_token(" ").into());
+        } else {
+            for trivia in after_colon_trivia {
+                children.push(trivia.to_green_element());
+            }
+        }
+        children.push(
             self.render_value_node(&config.with_depth(config.depth + 1))
                 .into(),
-        ];
+        );
         GreenNode::new(SyntaxKind::Member.into(), children)
     }
 
@@ -181,9 +194,13 @@ impl HjsonValue {
         key: &str,
         key_style: Option<QuoteStyle>,
         config: &RenderConfig<'_>,
+        before_colon_trivia: &[Trivia],
+        after_colon_trivia: &[Trivia],
         container_is_empty: bool,
     ) -> Vec<GreenElement> {
-        let rendered = self.render_member_node(key, key_style, config).into();
+        let rendered = self
+            .render_member_node(key, key_style, config, before_colon_trivia, after_colon_trivia)
+            .into();
         config.wrap_container_elements(rendered, container_is_empty)
     }
 
@@ -191,7 +208,7 @@ impl HjsonValue {
         match self {
             HjsonValue::String(s) => {
                 let style = config.string_style.unwrap_or_else(|| {
-                    if is_simple_unquoted_text(s) {
+                    if QuoteStyle::Unquoted.is_valid_for_text(s) {
                         QuoteStyle::Unquoted
                     } else {
                         QuoteStyle::DoubleQuoted
@@ -251,7 +268,7 @@ impl HjsonValue {
                     }
                     children.push(SyntaxKind::RBracket.create_token("]").into());
                 }
-                children
+                vec![GreenNode::new(SyntaxKind::Array.into(), children).into()]
             }
             HjsonValue::Object(entries) => {
                 let mut children = vec![SyntaxKind::LBrace.create_token("{").into()];
@@ -265,7 +282,12 @@ impl HjsonValue {
                         );
                         children.push(
                             value
-                                .render_member_node(key, None, &config.with_depth(config.depth + 1))
+                                .render_member_node(
+                                    key, None,
+                                    &config.with_depth(config.depth + 1),
+                                    &[],
+                                    &[Trivia::Whitespace(" ".to_string())],
+                                )
                                 .into(),
                         );
                         if idx + 1 != entries.len() {
@@ -281,14 +303,18 @@ impl HjsonValue {
                     children.push(SyntaxKind::RBrace.create_token("}").into());
                 } else {
                     for (idx, (key, value)) in entries.iter().enumerate() {
-                        children.push(value.render_member_node(key, None, config).into());
+                        children.push(
+                            value
+                                .render_member_node(key, None, config, &[], &[Trivia::Whitespace(" ".to_string())])
+                                .into(),
+                        );
                         if idx + 1 != entries.len() {
                             children.push(SyntaxKind::Comma.create_token(",").into());
                         }
                     }
                     children.push(SyntaxKind::RBrace.create_token("}").into());
                 }
-                children
+                vec![GreenNode::new(SyntaxKind::Object.into(), children).into()]
             }
         }
     }
@@ -413,7 +439,7 @@ fn render_key_node(key: &str, key_style: Option<QuoteStyle>) -> GreenNode {
     let (key_kind, key_text) = render_string(
         key,
         key_style.unwrap_or_else(|| {
-            if is_simple_unquoted_text(key) {
+            if QuoteStyle::Unquoted.is_valid_for_text(key) {
                 QuoteStyle::Unquoted
             } else {
                 QuoteStyle::DoubleQuoted
@@ -427,30 +453,11 @@ fn render_key_node(key: &str, key_style: Option<QuoteStyle>) -> GreenNode {
 }
 
 fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
-    match style {
-        QuoteStyle::DoubleQuoted => (
-            SyntaxKind::String,
-            format!("\"{}\"", style.encode_body(text)),
-        ),
-        QuoteStyle::Block => (
-            SyntaxKind::BlockString,
-            format!("'''{}'''", style.encode_body(text)),
-        ),
-        QuoteStyle::Unquoted => (SyntaxKind::UnquotedString, style.encode_body(text)),
-    }
+    (style.syntax_kind(), style.render(text))
 }
 
 fn indent(depth: usize) -> String {
     "  ".repeat(depth)
-}
-
-fn is_simple_unquoted_text(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-        && !matches!(text, "true" | "false" | "null")
-        && !HjsonNumber::is_valid(text)
 }
 
 #[cfg(test)]
@@ -459,29 +466,29 @@ mod tests {
 
     #[test]
     fn test_is_simple_unquoted_text_accepts_alphanumeric_underscore_dash_dot() {
-        assert!(is_simple_unquoted_text("hello_world"));
-        assert!(is_simple_unquoted_text("foo"));
-        assert!(is_simple_unquoted_text("a-b.c_d-e0"));
+        assert!(QuoteStyle::Unquoted.is_valid_for_text("hello_world"));
+        assert!(QuoteStyle::Unquoted.is_valid_for_text("foo"));
+        assert!(QuoteStyle::Unquoted.is_valid_for_text("a-b.c_d-e0"));
     }
 
     #[test]
     fn test_is_simple_unquoted_text_rejects_space_and_punctuation() {
-        assert!(!is_simple_unquoted_text("hello world"));
-        assert!(!is_simple_unquoted_text("foo!"));
-        assert!(!is_simple_unquoted_text(""));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("hello world"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("foo!"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text(""));
     }
 
     #[test]
     fn test_is_simple_unquoted_text_rejects_reserved_words() {
-        assert!(!is_simple_unquoted_text("true"));
-        assert!(!is_simple_unquoted_text("false"));
-        assert!(!is_simple_unquoted_text("null"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("true"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("false"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("null"));
     }
 
     #[test]
     fn test_is_simple_unquoted_text_rejects_numeric_tokens() {
-        assert!(!is_simple_unquoted_text("123"));
-        assert!(!is_simple_unquoted_text("1.23"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("123"));
+        assert!(!QuoteStyle::Unquoted.is_valid_for_text("1.23"));
     }
 
     #[test]
@@ -579,7 +586,7 @@ mod tests {
         let config = RenderConfig::default();
         let arr = HjsonValue::Array(vec![]);
         let body = arr.render_body(&config);
-        assert_eq!(body.len(), 2);
+        assert_eq!(body.len(), 1);
     }
 
     #[test]
@@ -587,6 +594,6 @@ mod tests {
         let config = RenderConfig::default();
         let obj = HjsonValue::Object(vec![]);
         let body = obj.render_body(&config);
-        assert_eq!(body.len(), 2);
+        assert_eq!(body.len(), 1);
     }
 }

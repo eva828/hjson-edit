@@ -13,7 +13,7 @@ use crate::ast as semantic_ast;
 use crate::ast::{AstNode, CommentKind, QuoteStyle};
 use crate::high_level::error::HjsonEditError;
 use crate::high_level::ops::object::AppendMode;
-use crate::high_level::style::DetectNewline;
+use crate::high_level::style::detect_newline_from_ast;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
 use crate::RedNode;
@@ -61,14 +61,14 @@ impl HjsonDocument {
         }
 
         let root = RedNode::new_root(result.green);
-        // let root = RedNode::new_root(result.green).clone_for_update();
+        let newline = detect_newline_from_ast(&root).as_str().to_string();
 
         Ok(Self {
             root,
             string_style: Prefer::default(),
             comment_style: Prefer::default(),
             append_mode: AppendMode::default(),
-            newline: input.detect_newline().as_str().to_string(),
+            newline,
         })
     }
 

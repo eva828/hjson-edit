@@ -225,7 +225,7 @@ fn build_document_comment(
             let mut end = trailing
                 .iter()
                 .rposition(|e| matches!(e, Trivia::Comment(_)))
-                .unwrap()
+                .expect("rposition succeeds because position() found at least one comment")
                 + 1;
             if end < trailing.len() && matches!(trailing[end], Trivia::Newline { .. }) {
                 end += 1;
@@ -305,15 +305,16 @@ fn build_member_comment(
         parent.green().clone().into_owned()
     };
 
-    if comment.is_none() {
-        return if parent.kind() == SyntaxKind::Root {
-            Ok(green_after_remove)
-        } else {
-            Ok(parent.replace_with(green_after_remove))
-        };
-    }
-
-    let comment = comment.unwrap();
+    let comment = match comment {
+        Some(comment) => comment,
+        None => {
+            return if parent.kind() == SyntaxKind::Root {
+                Ok(green_after_remove)
+            } else {
+                Ok(parent.replace_with(green_after_remove))
+            };
+        }
+    };
     let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
     let comment_node = make_comment_node(resolved_style, &comment);
 
