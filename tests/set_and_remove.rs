@@ -143,6 +143,31 @@ fn set_preserves_crlf_line_endings() {
     assert_eq!(updated.to_string(), expected);
 }
 
+#[test]
+fn append_to_multiline_object() {
+    let input = "{\n  a: 1\n}\n";
+    // Hjson uses newline as separator, no comma added
+    let expected = "{\n  a: 1\n  b: 2\n}\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("b").unwrap(), 2)
+        .unwrap();
+    assert_eq!(updated.to_string(), expected);
+}
+
+#[test]
+fn append_to_multiline_array() {
+    let input = "[\n  1\n]\n";
+    let expected = "[\n  1\n  2\n]\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("[-]").unwrap(), 2)
+        .unwrap();
+    assert_eq!(updated.to_string(), expected);
+}
+
 // ------------------------------------------------------------------
 // remove
 // ------------------------------------------------------------------

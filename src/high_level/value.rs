@@ -38,6 +38,7 @@ impl<'a> RenderConfig<'a> {
         let mut result = Vec::new();
         if container_is_empty {
             if self.depth > 0 {
+                result.push(SyntaxKind::Newline.create_token(self.newline).into());
                 result.push(
                     SyntaxKind::Whitespace
                         .create_token("  ".repeat(self.depth).as_str())
@@ -64,10 +65,10 @@ impl<'a> RenderConfig<'a> {
             }
             result.push(rendered);
             result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            if self.depth > 0 {
+            if self.depth > 1 {
                 result.push(
                     SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth).as_str())
+                        .create_token("  ".repeat(self.depth - 1).as_str())
                         .into(),
                 );
             }
@@ -496,11 +497,12 @@ mod tests {
         ];
 
         let wrap = config.wrap_container_elements(elements[0].clone(), true);
-        assert_eq!(wrap.len(), 4);
-        assert_eq!(wrap[0].kind(), SyntaxKind::Whitespace.into());
-        assert_eq!(wrap[1].kind(), SyntaxKind::Value.into());
-        assert_eq!(wrap[2].kind(), SyntaxKind::Newline.into());
-        assert_eq!(wrap[3].kind(), SyntaxKind::Whitespace.into());
+        assert_eq!(wrap.len(), 5);
+        assert_eq!(wrap[0].kind(), SyntaxKind::Newline.into());
+        assert_eq!(wrap[1].kind(), SyntaxKind::Whitespace.into());
+        assert_eq!(wrap[2].kind(), SyntaxKind::Value.into());
+        assert_eq!(wrap[3].kind(), SyntaxKind::Newline.into());
+        assert_eq!(wrap[4].kind(), SyntaxKind::Whitespace.into());
     }
 
     #[test]

@@ -108,14 +108,12 @@ pub(crate) fn rebuild_tree_with_set(
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
         Ok(ParentResolution { parent, last }) => {
-            let pretty = false;
             let new_parent = apply_set_to_node(
                 &parent,
                 &last,
                 value,
                 string_style,
                 append_mode,
-                pretty,
                 newline,
             )?;
 
@@ -133,14 +131,12 @@ pub(crate) fn rebuild_tree_with_set(
 
             let missing = &path.segments()[consumed];
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
-            let pretty = !path.segments()[consumed + 1..].is_empty();
             let new_parent = apply_set_to_node(
                 &ancestor,
                 missing,
                 &nested_value,
                 string_style,
                 append_mode,
-                pretty,
                 newline,
             )?;
 
@@ -197,34 +193,13 @@ fn apply_set_to_node(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    pretty_nested: bool,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     transform_node(
         node,
         last,
-        |node, last| {
-            set_object_child(
-                node,
-                last,
-                value,
-                string_style,
-                append_mode,
-                pretty_nested,
-                newline,
-            )
-        },
-        |node, last| {
-            set_array_child(
-                node,
-                last,
-                value,
-                string_style,
-                append_mode,
-                pretty_nested,
-                newline,
-            )
-        },
+        |node, last| set_object_child(node, last, value, string_style, append_mode, newline),
+        |node, last| set_array_child(node, last, value, string_style, append_mode, newline),
     )
 }
 
@@ -241,7 +216,6 @@ fn set_object_child(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    pretty_nested: bool,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
@@ -256,15 +230,24 @@ fn set_object_child(
 
     let object_ast = AstObject::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, object_ast.detected_string_style());
-    if let Some(member) = object_ast
-        .members()
-        .into_iter()
+    let members = object_ast.members();
+    let container_multi_line = if !members.is_empty() {
+        members.iter().any(|m| {
+            m.trailing_trivia.iter().any(|t| matches!(t, Trivia::Newline { .. }))
+        })
+    } else {
+        parent.children_with_tokens().any(|child| {
+            matches!(child.kind(), SyntaxKind::Newline)
+        })
+    };
+    if let Some(member) = members
+        .iter()
         .find(|member| member.member_key().as_deref() == Some(key.as_str()))
     {
         let member_node = member.syntax().clone();
         let replace_config = RenderConfig {
             string_style: None,
-            pretty: false,
+            pretty: container_multi_line,
             depth: object_ast.layout.depth,
             newline,
         };
@@ -283,12 +266,12 @@ fn set_object_child(
         object_ast.delimiter_style == DelimiterStyle::Braceless && object_ast.layout.depth == 1;
     let member_config = RenderConfig {
         string_style: insert_style,
-        pretty: pretty_nested,
+        pretty: container_multi_line,
         depth: if is_root_braceless { object_ast.layout.depth.saturating_sub(1) } else { object_ast.layout.depth },
         newline,
     };
 
-    let is_empty = object_ast.members().is_empty();
+    let is_empty = members.is_empty();
     if is_empty {
         let range_start = resolve_insert_range_start(parent, insert_pos);
         let inserted = value.render_object_member_elements(key, None, &member_config, true);
@@ -298,8 +281,8 @@ fn set_object_child(
     }
 
     let mut inserted: Vec<crate::GreenElement> = Vec::new();
-    if !pretty_nested {
-        if let Some(last_member) = object_ast.members().last() {
+    if !container_multi_line {
+        if let Some(last_member) = members.last() {
             let needs_separator = last_member
                 .trailing_trivia
                 .iter()
@@ -316,10 +299,27 @@ fn set_object_child(
         &member_config,
         false,
     ));
+    if !container_multi_line {
+        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+    }
+
+    let splice_start = if !is_empty
+        && object_ast.delimiter_style == DelimiterStyle::Braced
+    {
+        let removable_trailing = object_ast
+            .trailing_trivia
+            .iter()
+            .rev()
+            .take_while(|t| matches!(t, Trivia::Whitespace(_) | Trivia::Newline { .. }))
+            .count();
+        insert_pos.saturating_sub(removable_trailing)
+    } else {
+        insert_pos
+    };
 
     Ok(parent
         .green()
-        .splice_children(insert_pos..insert_pos, inserted))
+        .splice_children(splice_start..insert_pos, inserted))
 }
 
 fn set_array_child(
@@ -328,7 +328,6 @@ fn set_array_child(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    pretty_nested: bool,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let seg = match last {
@@ -344,6 +343,17 @@ fn set_array_child(
     let array_ast = AstArray::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, array_ast.detected_string_style());
     let items = array_ast.items();
+    let container_multi_line = if !items.is_empty() {
+        items.iter().any(|item| {
+            item.trailing_trivia
+                .iter()
+                .any(|t| matches!(t, Trivia::Newline { .. }))
+        })
+    } else {
+        parent.children_with_tokens().any(|child| {
+            matches!(child.kind(), SyntaxKind::Newline)
+        })
+    };
 
     // Normalize Push to InsertAt at the end
     let push_target = ArrayPathSegment::InsertAt(items.len());
@@ -359,13 +369,18 @@ fn set_array_child(
                     last.clone(),
                 ])));
             };
-                let value_config = RenderConfig {
-                    string_style: insert_style,
-                    pretty: pretty_nested,
-                    depth: array_ast.layout.depth,
-                    newline,
-                };
-                let updated = render_value_like_node(current_value.syntax(), value, string_style, &value_config);
+            let value_config = RenderConfig {
+                string_style: insert_style,
+                pretty: container_multi_line,
+                depth: array_ast.layout.depth,
+                newline,
+            };
+            let updated = render_value_like_node(
+                current_value.syntax(),
+                value,
+                string_style,
+                &value_config,
+            );
             Ok(parent.green().splice_children(
                 current_value.syntax().index()..current_value.syntax().index() + 1,
                 vec![updated.into()],
@@ -379,13 +394,13 @@ fn set_array_child(
                 };
                 let value_config = RenderConfig {
                     string_style: insert_style,
-                    pretty: pretty_nested,
+                    pretty: container_multi_line,
                     depth: array_ast.layout.depth,
                     newline,
                 };
 
                 let mut inserted = Vec::new();
-                if !pretty_nested && !items.is_empty() {
+                if !container_multi_line && !items.is_empty() {
                     if let Some(last_value) = items.last() {
                         let needs_separator = last_value
                             .trailing_trivia
@@ -406,19 +421,64 @@ fn set_array_child(
                         .splice_children(range_start..insert_pos, inserted));
                 }
 
+                let splice_start = if !items.is_empty()
+                    && array_ast.delimiter_style == DelimiterStyle::Braced
+                {
+                    let removable_trailing = array_ast
+                        .trailing_trivia
+                        .iter()
+                        .rev()
+                        .take_while(|t| matches!(t, Trivia::Whitespace(_) | Trivia::Newline { .. }))
+                        .count();
+                    insert_pos.saturating_sub(removable_trailing)
+                } else {
+                    insert_pos
+                };
+
                 Ok(parent
                     .green()
-                    .splice_children(insert_pos..insert_pos, inserted))
+                    .splice_children(splice_start..insert_pos, inserted))
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
                 let insert_config = RenderConfig {
                     string_style: insert_style,
-                    pretty: pretty_nested,
+                    pretty: container_multi_line,
                     depth: array_ast.layout.depth,
                     newline,
                 };
-                let inserted = vec![value.render_value_node(&insert_config).into()];
+                let mut inserted: Vec<crate::GreenElement> = Vec::new();
+                if !container_multi_line && *idx > 0 {
+                    if let Some(prev_value) = items.get(*idx - 1) {
+                        let needs_separator = prev_value
+                            .trailing_trivia
+                            .iter()
+                            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+                        if needs_separator {
+                            inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                            inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                        }
+                    }
+                }
+                if !container_multi_line
+                    && target_value
+                        .leading_trivia
+                        .iter()
+                        .any(|t| matches!(t, Trivia::Whitespace(_)))
+                {
+                    inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                }
+                inserted.push(value.render_value_node(&insert_config).into());
+                if !container_multi_line {
+                    inserted.push(GreenToken::new(SyntaxKind::Comma.into(), ",").into());
+                    if !target_value
+                        .leading_trivia
+                        .iter()
+                        .any(|t| matches!(t, Trivia::Whitespace(_)))
+                    {
+                        inserted.push(GreenToken::new(SyntaxKind::Whitespace.into(), " ").into());
+                    }
+                }
 
                 Ok(parent
                     .green()
@@ -548,16 +608,21 @@ fn resolve_insert_style(
 }
 
 fn resolve_insert_range_start(parent: &RedNode, insert_pos: usize) -> usize {
-    if insert_pos > 0
-        && matches!(
-            parent.children_with_tokens().nth(insert_pos - 1),
-            Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Whitespace
-        )
-    {
-        insert_pos - 1
-    } else {
-        insert_pos
+    let mut start = insert_pos;
+    while start > 0 {
+        let Some(elem) = parent.children_with_tokens().nth(start - 1) else {
+            break;
+        };
+        match &elem {
+            NodeOrToken::Token(token)
+                if matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline) =>
+            {
+                start -= 1;
+            }
+            _ => break,
+        }
     }
+    start
 }
 
 #[cfg(test)]
