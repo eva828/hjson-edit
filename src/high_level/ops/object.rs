@@ -180,7 +180,8 @@ fn transform_node(
         }
         SyntaxKind::Object => on_object(node, last),
         SyntaxKind::Array => on_array(node, last),
-        // resolve_parent の結果は常に Object/Array/Value/Root のいずれかなので到達しない
+        // resolve_parent は Object/Array/Value/Root を返すはずだが、
+        // 万一それ以外のノードが返った場合も安全のためフォールバックとする
         _ => Err(HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![
             last.clone(),
         ]))),

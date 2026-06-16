@@ -7,10 +7,6 @@ use hjson_edit::{
     },
 };
 
-// ------------------------------------------------------------------
-// Tests for Unicode in keys and values.
-// ------------------------------------------------------------------
-
 #[test]
 fn parse_unicode_key_and_value() {
     let doc = HjsonDocument::parse("日本語: 値").unwrap();

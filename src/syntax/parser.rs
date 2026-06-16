@@ -6,7 +6,7 @@ use super::SyntaxKind;
 use crate::number::HjsonNumber;
 use line_index::{LineIndex, TextSize};
 
-/// 構文解析エラー（オフセットのみ保持）
+/// 構文解析エラー（エラーメッセージと発生したバイトオフセットを保持）
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub message: String,
@@ -308,17 +308,14 @@ impl Parser {
         }
     }
 
-    /// 現在のトークン
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
 
-    /// 終了判定
     fn is_at_end(&self) -> bool {
         self.position >= self.tokens.len()
     }
 
-    /// 次のトークンを消費
     fn bump(&mut self) {
         if let Some(token) = self.tokens.get(self.position) {
             self.builder.token(token.kind.into(), &token.text);
@@ -336,24 +333,20 @@ impl Parser {
         }
     }
 
-    /// 特定の非トリビアトークンかチェック
     fn at(&self, kind: SyntaxKind) -> bool {
         self.current_kind() == Some(kind)
     }
 
-    /// いずれかの非トリビアトークンかチェック
     fn at_any(&self, kinds: &[SyntaxKind]) -> bool {
         self.current_kind()
             .map(|k| kinds.contains(&k))
             .unwrap_or(false)
     }
 
-    /// エラーノードを開始
     fn start_error_node(&mut self) {
         self.builder.start_node(SyntaxKind::Error.into());
     }
 
-    /// エラーノードを終了
     fn finish_error_node(&mut self) {
         self.builder.finish_node();
     }
@@ -440,7 +433,6 @@ impl Parser {
         }
     }
 
-    /// 次の非トリビアトークンの種類を取得
     fn current_kind(&self) -> Option<SyntaxKind> {
         let mut pos = self.position;
         while let Some(token) = self.tokens.get(pos) {
@@ -453,13 +445,11 @@ impl Parser {
         None
     }
 
-    /// 値を解析
     fn parse_value(&mut self, context: ScalarContext) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Value.into());
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
-        // 終了チェック（ストリーム終端）
-        if self.is_at_end() {
+            if self.is_at_end() {
             self.builder.finish_node();
             return ValueBoundary::Open;
         }
@@ -507,14 +497,12 @@ impl Parser {
         ValueBoundary::Closed
     }
 
-    /// オブジェクト { ... } を解析
     fn parse_object(&mut self) {
         self.builder.start_node(SyntaxKind::Object.into());
 
         // {
         self.bump();
 
-        // 空のオブジェクトかチェック
         if self.at(SyntaxKind::RBrace) {
             self.eat_trivia();
             self.bump();
@@ -529,7 +517,6 @@ impl Parser {
             return;
         }
 
-        // キー・バリューのペアを解析
         loop {
             if self.at(SyntaxKind::RBrace) {
                 break;
@@ -556,17 +543,14 @@ impl Parser {
             self.eat_trivia();
             self.parse_member();
 
-            // Memberの後のトリビアを消費（コメントなど）
             let had_newline = self.eat_trivia_and_report_newline();
 
             // 閉じ値の後は同一行でも次の member を許可する
             if self.at(SyntaxKind::Comma) {
                 self.bump();
 
-                // カンマ後のトリビア（改行・コメントなど）を消費
                 self.eat_trivia();
 
-                // 末尾カンマ対応：}が続く場合は終了
                 if self.at(SyntaxKind::RBrace) {
                     break;
                 }
@@ -611,14 +595,12 @@ impl Parser {
         self.finish_error_node();
     }
 
-    /// 配列 [ ... ] を解析
     fn parse_array(&mut self) {
         self.builder.start_node(SyntaxKind::Array.into());
 
         // [
         self.bump();
 
-        // 空の配列かチェック
         if self.at(SyntaxKind::RBracket) {
             self.eat_trivia();
             self.bump();
@@ -633,7 +615,6 @@ impl Parser {
             return;
         }
 
-        // 値を解析
         loop {
             if self.at(SyntaxKind::RBracket) {
                 break;
@@ -654,19 +635,14 @@ impl Parser {
             self.eat_trivia();
             let _ = self.parse_value(ScalarContext::ArrayItem);
 
-            // 同一行に複数の値がある場合はエラー（カンマまたは改行が必要）
-
-            // 値の後のトリビア（改行・コメントなど）を消費
             let had_newline = self.eat_trivia_and_report_newline();
 
             // カンマ
             if self.at(SyntaxKind::Comma) {
                 self.bump();
 
-                // カンマ後のトリビア（改行・コメントなど）を消費（複数行末尾カンマ対応）
                 self.eat_trivia();
 
-                // 末尾カンマ対応
                 if self.at(SyntaxKind::RBracket) {
                     break;
                 }
@@ -694,12 +670,10 @@ impl Parser {
         self.builder.finish_node();
     }
 
-    /// キー: 値 のペアを解析
     fn parse_member(&mut self) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Member.into());
         // Memberノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
-        // キー
         self.builder.start_node(SyntaxKind::Key.into());
 
         let token = self.current();
@@ -724,7 +698,6 @@ impl Parser {
 
         self.builder.finish_node();
 
-        // :
         if !self.at(SyntaxKind::Colon) {
             let offset = if let Some(t) = self.current() {
                 t.offset
@@ -844,8 +817,7 @@ impl Parser {
                 break;
             }
 
-            // トリビアをチェック（改行のみの場合は終了）
-            self.eat_trivia();
+        self.eat_trivia();
             if self.is_at_end() {
                 break;
             }

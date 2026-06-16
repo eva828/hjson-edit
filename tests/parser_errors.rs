@@ -1,8 +1,8 @@
 use hjson_edit::HjsonDocument;
 
 // ------------------------------------------------------------------
-// These tests expect correct parser behavior per RFC.
-// They FAIL with the current implementation due to RFC non-compliance.
+// パーサーが基本的な構文エラーを正しく検出することを確認するテスト。
+// これらのテストはすべて現在の実装でパスする。
 // ------------------------------------------------------------------
 
 #[test]
@@ -78,8 +78,8 @@ fn parser_multiple_root_values_produces_error() {
 }
 
 // ------------------------------------------------------------------
-// RFC non-compliance: these SHOULD error but currently parse successfully.
-// Changing these to assert!(result.is_err()) makes them FAIL.
+// RFC: これらの入力はエラーになるべき（空白/タブ区切りは許可しない）。
+// 現在の実装ではパーサーが正しくエラーを返す。
 // ------------------------------------------------------------------
 
 #[test]

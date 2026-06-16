@@ -7,10 +7,6 @@ use hjson_edit::{
     },
 };
 
-// ------------------------------------------------------------------
-// Tests for comment operations on deeply nested paths.
-// ------------------------------------------------------------------
-
 #[test]
 fn set_inline_comment_on_deep_path() {
     let input = "{\n  a: {\n    b: {\n      c: value\n    }\n  }\n}\n";

@@ -7,7 +7,7 @@ use super::SyntaxKind;
 /// エラー継続型：エラーがあっても解析を続行し、詳細なエラー情報を収集
 use crate::number::{HjsonNumber, NumberKind};
 
-/// 字句解析エラー（発生したバイトオフセットのみを記録）
+/// 字句解析エラー（エラーメッセージと発生したバイトオフセットを記録）
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexError {
     pub message: String,
@@ -108,7 +108,6 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    /// 前の文字を取得（peek_prevのエイリアス）
     pub fn prev(&self) -> Option<char> {
         self.peek_prev()
     }
@@ -371,7 +370,6 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_escape_sequence(&mut self, start_offset: usize) {
-        // '\'を消費
         self.cursor.advance();
         match self.cursor.advance() {
             Some('u') => {
@@ -412,7 +410,6 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_quoteless_token(&mut self, start_offset: usize) {
-        // 先頭が無効な文字でないかチェック
         let first = match self.cursor.peek() {
             Some(c) => c,
             None => return,
@@ -452,7 +449,6 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_quoteless_token_end(&self, c: char) -> bool {
-        // コメント開始でストップ
         if c == '/' {
             if let Some(next_char) = self.cursor.peek_n(1) {
                 if next_char == '/' || next_char == '*' {
@@ -463,7 +459,6 @@ impl<'a> Lexer<'a> {
         if c == '#' && self.is_hash_comment_start() {
             return true;
         }
-        // 空白やカンマ・括弧などの記号でストップ
         if c.is_whitespace() || is_punctuator(c) {
             return true;
         }

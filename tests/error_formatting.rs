@@ -6,10 +6,6 @@ use hjson_edit::{
     },
 };
 
-// ------------------------------------------------------------------
-// Tests for error message formatting.
-// ------------------------------------------------------------------
-
 #[test]
 fn parse_error_includes_line_and_column() {
     let result = HjsonDocument::parse("{\n  \"a\": 1");
@@ -32,7 +28,7 @@ fn path_not_found_error_includes_path() {
     let msg = err.to_string();
     assert!(
         msg.contains("missing") || msg.contains("path"),
-        "error message should contain the path, got: {}",
+        "error message should contain 'missing' or 'path', got: {}",
         msg
     );
 }

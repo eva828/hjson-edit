@@ -8,10 +8,9 @@ use hjson_edit::{
 };
 
 // ------------------------------------------------------------------
-// These tests expect try-page behavior for hash (#) comments.
-// try page: # is a comment ONLY at the start of a line.
-// Anywhere else, # is part of the quoteless string value.
-// These FAIL with the current implementation.
+// ハッシュ(#)コメントに関する動作テスト。
+// try-pageの仕様: # は行頭でのみコメント開始。それ以外では引用符なし文字列の一部。
+// 現在の実装ではこの仕様に正しく準拠している。
 // ------------------------------------------------------------------
 
 #[test]

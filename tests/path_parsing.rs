@@ -64,7 +64,7 @@ fn parse_plus_without_number_fails() {
 
 #[test]
 fn parse_double_dot_skips_empty_key() {
-    // "name..nested" -> "name" and "nested"; empty key between .. is skipped
+
     let path = HjsonObjectPath::parse("name..nested").unwrap();
     assert_eq!(path.depth(), 2);
 }

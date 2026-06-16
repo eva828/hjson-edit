@@ -74,6 +74,8 @@ fn decode_double_quoted_with_escaped_tab() {
 
 #[test]
 fn decode_double_quoted_unicode_escapes_preserved() {
+    // NOTE: RFC 8259 では \u0041 は 'A' にデコードされるべきだが、
+    // 現在の実装では生のテキストとして保持する（ラウンドトリップ保存のため）。
     assert_eq!(
         QuoteStyle::DoubleQuoted.decode_body("\"\\u0041\""),
         "\\u0041"
@@ -131,6 +133,8 @@ fn decode_unquoted_returns_raw() {
 
 #[test]
 fn decode_double_quoted_unknown_escapes_preserved() {
+    // NOTE: RFC 8259 では \z は不正なエスケープとしてエラーにすべきだが、
+    // 現在の実装では生のテキストとして保持する（ラウンドトリップ保存のため）。
     assert_eq!(
         QuoteStyle::DoubleQuoted.decode_body("\"\\z\""),
         "\\z"

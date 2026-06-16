@@ -7,8 +7,7 @@ use hjson_edit::{
 };
 
 // ------------------------------------------------------------------
-// Tests for root-level array operations.
-// These are currently untested in the existing test suite.
+// ルートレベル配列に対する操作（get/set/remove/push）のテスト
 // ------------------------------------------------------------------
 
 #[test]

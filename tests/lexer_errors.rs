@@ -1,8 +1,8 @@
 use hjson_edit::HjsonDocument;
 
 // ------------------------------------------------------------------
-// These tests expect correct lexer behavior per RFC/try page.
-// They FAIL with the current implementation due to known bugs.
+// レクサーが正しくエラー/成功を返すことを確認するテスト。
+// 注意: いくつかのテストはRFCに完全準拠していない場合がある（コメント参照）。
 // ------------------------------------------------------------------
 
 #[test]

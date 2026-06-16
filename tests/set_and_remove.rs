@@ -7,10 +7,6 @@ use hjson_edit::{
 };
 use pretty_assertions::assert_eq;
 
-// ------------------------------------------------------------------
-// set
-// ------------------------------------------------------------------
-
 #[test]
 fn set_array_push_appends_to_end() {
     let input = "{\n  items: [1, 2, 3]\n}\n";
@@ -167,10 +163,6 @@ fn append_to_multiline_array() {
         .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
-
-// ------------------------------------------------------------------
-// remove
-// ------------------------------------------------------------------
 
 #[test]
 fn remove_object_key_deletes_member() {
