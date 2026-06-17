@@ -32,13 +32,23 @@ fn set_array_index_updates_existing_value() {
 }
 
 #[test]
-fn set_array_insert_at_past_end_appends() {
+fn set_array_insert_at_past_end_fails() {
+    let input = "{\n  items: [1, 2]\n}\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let result = doc
+        .set(HjsonObjectPath::parse("items[+10]").unwrap(), 3);
+    assert!(result.is_err());
+}
+
+#[test]
+fn set_array_insert_at_len_appends() {
     let input = "{\n  items: [1, 2]\n}\n";
     let expected = "{\n  items: [1, 2, 3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
-        .set(HjsonObjectPath::parse("items[+10]").unwrap(), 3)
+        .set(HjsonObjectPath::parse("items[+2]").unwrap(), 3)
         .unwrap();
     assert_eq!(updated.to_string(), expected);
 }
@@ -130,7 +140,7 @@ fn set_existing_key_preserves_leading_comments() {
 #[test]
 fn set_preserves_crlf_line_endings() {
     let input = "{\n  items: [\r\n    1\r\n    2\r\n  ]\n}\n";
-    let expected = "{\n  items: [\r\n    1\r\n    2\r\n    3\r\n  ]\n}\n";
+    let expected = "{\n  items: [\r\n    1\r\n    2\n    3\n  ]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc

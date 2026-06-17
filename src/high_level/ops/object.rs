@@ -397,6 +397,12 @@ fn set_array_child(
             ))
         }
         ArrayPathSegment::InsertAt(idx) => {
+            if *idx > items.len() {
+                return Err(HjsonEditError::ArrayIndexOutOfBounds {
+                    index: *idx,
+                    len: items.len(),
+                });
+            }
             if *idx >= items.len() {
                 let insert_pos = match append_mode {
                     AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),

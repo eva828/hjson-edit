@@ -63,10 +63,9 @@ fn parse_plus_without_number_fails() {
 }
 
 #[test]
-fn parse_double_dot_skips_empty_key() {
-
-    let path = HjsonObjectPath::parse("name..nested").unwrap();
-    assert_eq!(path.depth(), 2);
+fn parse_double_dot_fails() {
+    let result = HjsonObjectPath::parse("name..nested");
+    assert!(result.is_err());
 }
 
 #[test]
@@ -100,10 +99,9 @@ fn parse_comment_path_nested_before_succeeds() {
 }
 
 #[test]
-fn parse_comment_path_unknown_suffix_defaults_to_before() {
-    // "name:unknown" does not match :inline/:header/:footer, so falls through to Before
-    let path = HjsonCommentPath::try_from("name:unknown").unwrap();
-    assert!(matches!(path, HjsonCommentPath::Before(_)));
+fn parse_comment_path_unknown_suffix_fails() {
+    let result = HjsonCommentPath::try_from("name:unknown");
+    assert!(result.is_err());
 }
 
 #[test]

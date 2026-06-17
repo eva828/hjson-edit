@@ -25,6 +25,8 @@ pub enum HjsonEditError {
         errors: Vec<LexError>,
         line_index: LineIndex,
     },
+    #[error("Array index out of bounds: index {index}, length {len}")]
+    ArrayIndexOutOfBounds { index: usize, len: usize },
 }
 
 fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex) -> String {

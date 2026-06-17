@@ -40,6 +40,10 @@ impl TryFrom<&str> for HjsonCommentPath {
             Ok(Self::Inline(HjsonObjectPath::parse(stripped.to_string())?))
         } else if let Some(stripped) = raw.strip_suffix(":before") {
             Ok(Self::Before(HjsonObjectPath::parse(stripped.to_string())?))
+        } else if raw.contains(':') {
+            Err(HjsonEditError::InvalidPath(format!(
+                "unknown comment suffix in path: {raw:?}"
+            )))
         } else {
             Ok(Self::Before(HjsonObjectPath::parse(raw.to_string())?))
         }
@@ -61,6 +65,23 @@ impl HjsonObjectPath {
 
     pub fn parse(path: impl Into<String>) -> Result<Self, HjsonEditError> {
         let path = path.into();
+
+        if path.starts_with('.') {
+            return Err(HjsonEditError::InvalidPath(format!(
+                "path must not start with '.': {path:?}"
+            )));
+        }
+        if path.ends_with('.') {
+            return Err(HjsonEditError::InvalidPath(format!(
+                "path must not end with '.': {path:?}"
+            )));
+        }
+        if path.contains("..") {
+            return Err(HjsonEditError::InvalidPath(format!(
+                "path must not contain consecutive dots: {path:?}"
+            )));
+        }
+
         let mut segments = Vec::new();
         let mut chars = path.chars().peekable();
 

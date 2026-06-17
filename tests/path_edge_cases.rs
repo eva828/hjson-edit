@@ -1,23 +1,23 @@
-use hjson_edit::{high_level::path::HjsonObjectPath, PathSegment};
+use hjson_edit::high_level::path::HjsonObjectPath;
 
 #[test]
-fn parse_leading_dot_skips_empty_key() {
-    let path = HjsonObjectPath::parse(".a").unwrap();
-    assert_eq!(path.segments(), &[PathSegment::Key("a".into())]);
+fn parse_leading_dot_fails() {
+    let result = HjsonObjectPath::parse(".a");
+    assert!(result.is_err());
 }
 
 
 #[test]
-fn parse_trailing_dot_skips_empty_key() {
-    let path = HjsonObjectPath::parse("a.").unwrap();
-    assert_eq!(path.segments(), &[PathSegment::Key("a".into())]);
+fn parse_trailing_dot_fails() {
+    let result = HjsonObjectPath::parse("a.");
+    assert!(result.is_err());
 }
 
 
 #[test]
-fn parse_multiple_consecutive_dots_skips_empty() {
-    let path = HjsonObjectPath::parse("a...b").unwrap();
-    assert_eq!(path.depth(), 2);
+fn parse_multiple_consecutive_dots_fails() {
+    let result = HjsonObjectPath::parse("a...b");
+    assert!(result.is_err());
 }
 
 #[test]

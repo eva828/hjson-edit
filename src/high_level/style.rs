@@ -15,7 +15,7 @@ pub fn detect_newline_from_ast(root: &RedNode) -> NewlineKind {
             }
         }
     }
-    if crlf > 0 && crlf >= lf { NewlineKind::CrLf } else { NewlineKind::Lf }
+    if crlf > lf { NewlineKind::CrLf } else { NewlineKind::Lf }
 }
 
 /// 改行コードを検出可能な対象
@@ -29,9 +29,11 @@ pub trait DetectNewline {
 
 impl DetectNewline for &str {
     fn detect_newline(&self) -> NewlineKind {
-        if self.contains("\r\n") {
+        let crlf = self.matches("\r\n").count();
+        let lf = self.matches('\n').count() - crlf;
+        if crlf > lf {
             NewlineKind::CrLf
-        } else if self.contains('\n') {
+        } else if lf > 0 {
             NewlineKind::Lf
         } else {
             NewlineKind::default()
@@ -63,9 +65,9 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_newline_mixed_lf_crlf_returns_crlf() {
-        assert_eq!("foo\nbar\r\nbaz".detect_newline(), NewlineKind::CrLf);
-        assert_eq!("foo\r\nbar\nbaz".detect_newline(), NewlineKind::CrLf);
+    fn test_detect_newline_mixed_uses_majority() {
+        assert_eq!("foo\nbar\nbaz\r\n".detect_newline(), NewlineKind::Lf);
+        assert_eq!("foo\r\nbar\r\nbaz\n".detect_newline(), NewlineKind::CrLf);
     }
 
     #[test]
