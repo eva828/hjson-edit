@@ -117,16 +117,16 @@
 #### 備考
 `[+]` だけでは不十分で `[+n]` の形式が必要
 
-### parse_double_dot_skips_empty_key (tests/path_parsing.rs)
+### parse_double_dot_fails (tests/path_parsing.rs)
 
 #### 入力
 `"name..nested"` をパース
 
 #### 期待動作
-パース成功。`depth()` が `2` を返す
+パース失敗（エラーを返す）
 
 #### 備考
-連続ドットは空キーとしてスキップされる
+連続ドットは不正なパスとしてエラーになる
 
 ### parse_comment_path_header_succeeds (tests/path_parsing.rs)
 
@@ -179,16 +179,16 @@
 #### 備考
 ネストパスに対する before コメント
 
-### parse_comment_path_unknown_suffix_defaults_to_before (tests/path_parsing.rs)
+### parse_comment_path_unknown_suffix_fails (tests/path_parsing.rs)
 
 #### 入力
 `"name:unknown"` をパース
 
 #### 期待動作
-`HjsonCommentPath::Before(_)` にマッチする
+パース失敗（エラーを返す）
 
 #### 備考
-`:header`, `:footer`, `:inline` 以外のサフィックスは Before と解釈される
+`:header`, `:footer`, `:before`, `:inline` 以外のサフィックスは不正なパスとしてエラーになる
 
 ### path_split_first_returns_first_and_rest (tests/path_parsing.rs)
 
@@ -220,38 +220,38 @@
 
 #### 備考
 
-### parse_leading_dot_skips_empty_key (tests/path_edge_cases.rs)
+### parse_leading_dot_fails (tests/path_edge_cases.rs)
 
 #### 入力
 `".a"` をパース
 
 #### 期待動作
-`segments()` が `[Key("a")]` を返す
+パース失敗（エラーを返す）
 
 #### 備考
-先頭ドットは空キーとしてスキップされる
+先頭ドットは不正なパスとしてエラーになる
 
-### parse_trailing_dot_skips_empty_key (tests/path_edge_cases.rs)
+### parse_trailing_dot_fails (tests/path_edge_cases.rs)
 
 #### 入力
 `"a."` をパース
 
 #### 期待動作
-`segments()` が `[Key("a")]` を返す
+パース失敗（エラーを返す）
 
 #### 備考
-末尾ドットは空キーとしてスキップされる
+末尾ドットは不正なパスとしてエラーになる
 
-### parse_multiple_consecutive_dots_skips_empty (tests/path_edge_cases.rs)
+### parse_multiple_consecutive_dots_fails (tests/path_edge_cases.rs)
 
 #### 入力
 `"a...b"` をパース
 
 #### 期待動作
-`depth()` が `2` を返す
+パース失敗（エラーを返す）
 
 #### 備考
-連続ドットは無視される
+連続ドット（2個以上）は不正なパスとしてエラーになる
 
 ### parse_unicode_segment_succeeds (tests/path_edge_cases.rs)
 
@@ -408,16 +408,16 @@ Unicode と ASCII の混在パス
 #### 備考
 既存インデックスの上書き
 
-### set_array_insert_at_past_end_appends
+### set_array_insert_at_past_end_fails
 
 #### 入力
 `"{\n  items: [1, 2]\n}\n"` に対し、パス `"items[+10]"` で値 `3` を set
 
 #### 期待動作
-`"{\n  items: [1, 2, 3]\n}\n"` が出力される
+`ArrayIndexOutOfBounds` エラーが返る
 
 #### 備考
-範囲外の `[+n]` は末尾追加になる
+`[+n]` は `n > items.len()` の場合エラーになる。`n == items.len()` の場合は末尾追加として動作する
 
 ### set_array_insert_at_inserts_in_middle
 
@@ -429,6 +429,17 @@ Unicode と ASCII の混在パス
 
 #### 備考
 `[+1]` でインデックス1の位置に挿入
+
+### set_array_insert_at_len_appends
+
+#### 入力
+`"{\n  items: [1, 2]\n}\n"` に対し、パス `"items[+2]"`（配列長と一致）で値 `3` を set
+
+#### 期待動作
+`"{\n  items: [1, 2, 3]\n}\n"` が出力される（末尾追加）
+
+#### 備考
+`[+n]` で `n == items.len()` の場合は末尾追加として扱われる
 
 ### set_object_key_updates_existing_value
 
@@ -720,16 +731,16 @@ set → get → remove のラウンドトリップ
 #### 備考
 既存の before コメントは上書きされる
 
-### set_multiline_header_comment_with_line_style_falls_back_to_block (tests/comments.rs)
+### set_multiline_header_comment_with_line_style_splits_into_lines (tests/comments.rs)
 
 #### 入力
 `"{\n  foo: 1\n}"` に対し、`comment_style(Line)` で `":header"` に複数行テキスト `"line1\nline2"` を set_comment
 
 #### 期待動作
-`"/* line1\nline2 */\n{\n  foo: 1\n}"` が出力される（複数行は自動的に Block スタイルに）
+`"// line1\n// line2\n{\n  foo: 1\n}"` が出力される（行ごとに独立した `//` コメントに分割）
 
 #### 備考
-Line スタイルを指定しても複数行コメントは Block にフォールバック
+Line スタイルが明示された場合、複数行コメントは行分割されて出力される
 
 ### set_inline_comment_on_deep_path (tests/deep_comments.rs)
 
@@ -778,10 +789,10 @@ Line スタイルを指定しても複数行コメントは Block にフォー�
 既存のヘッダーコメントがあるドキュメントに対し、`:header` に `"second"` を append_comment
 
 #### 期待動作
-`"/* first\nsecond */\n{\n  name: app\n}\n"` が出力される（複数行は Block スタイルに）
+`"// first\n// second\n{\n  name: app\n}\n"` が出力される（行ごとに `//` コメントを追加）
 
 #### 備考
-append_comment は `\n` で連結し、複数行は Block に強制される
+append_comment は `\n` で連結し、既存の Line スタイルを継承して行分割される
 
 ### append_comment_to_existing_inline_appends_inline (tests/append_comment.rs)
 
@@ -811,9 +822,10 @@ append_comment は `\n` で連結し、複数行は Block に強制される
 既存のフッターコメントがあるドキュメントに対し、`:footer` に `"second"` を append_comment
 
 #### 期待動作
-`"{\n  name: app\n}\n/* first\nsecond */\n"` が出力される
+`"{\n  name: app\n}\n# first\n# second\n"` が出力される（行ごとに `#` コメントを追加）
 
 #### 備考
+既存の Hash スタイルを継承して行分割される
 
 ---
 
@@ -2224,12 +2236,13 @@ Comment ノードを Value としてキャスト
 ### test_render_comment_text (src/high_level/ops/comment.rs)
 
 #### 入力
-3種の CommentKind（Line / Hash / Block）とテキスト `"hello"`
+3種の CommentKind（Line / Hash / Block）とテキスト `"hello"`、空文字 `""`
 
 #### 期待動作
-`render_comment_text` がそれぞれ `"// hello"`, `"# hello"`, `"/* hello */"` を返す
+`render_comment_text` がそれぞれ `"// hello"`, `"//"`, `"# hello"`, `"#"`, `"/* hello */"` を返す
 
 #### 備考
+空ボディの場合、Line / Hash は余分スペースを付けずに `//` / `#` のみを返す
 
 ### test_kind_from_style (src/high_level/ops/comment.rs)
 
@@ -2241,16 +2254,16 @@ Comment ノードを Value としてキャスト
 
 #### 備考
 
-### test_resolve_comment_style_multiline_always_block (src/high_level/ops/comment.rs)
+### test_resolve_comment_style_explicit_respects_multiline_line (src/high_level/ops/comment.rs)
 
 #### 入力
-`Prefer::Explicit(CommentKind::Line)` で複数行テキスト `"line1\nline2"`
+`Prefer::Explicit(CommentKind::Line)`
 
 #### 期待動作
-`CommentKind::Block` が返る
+`CommentKind::Line` が返る
 
 #### 備考
-複数行は常に Block スタイル
+`resolve_comment_style` はボディの改行有無にかかわらず指定されたスタイルを返す。行分割は呼び出し側（`make_comment_nodes`）で行われる
 
 ### test_resolve_comment_style_preserve_falls_back_to_block (src/high_level/ops/comment.rs)
 
@@ -2753,16 +2766,16 @@ Preserve かつ既存スタイルなしのデフォルトは DoubleQuoted
 
 #### 備考
 
-### test_detect_newline_mixed_lf_crlf_returns_crlf (src/high_level/style.rs)
+### test_detect_newline_mixed_uses_majority (src/high_level/style.rs)
 
 #### 入力
-`"foo\nbar\r\nbaz"`, `"foo\r\nbar\nbaz"`
+`"foo\nbar\nbaz\r\n"`（LF=2, CRLF=1）、`"foo\r\nbar\r\nbaz\n"`（LF=1, CRLF=2）
 
 #### 期待動作
-`NewlineKind::CrLf` が返る
+前者は `NewlineKind::Lf`、後者は `NewlineKind::CrLf` が返る
 
 #### 備考
-混在時は CRLF が優先
+混在時は多数決で判定される（同数の場合は LF 優先）
 
 ### test_detect_newline_cr_only_or_none (src/high_level/style.rs)
 
