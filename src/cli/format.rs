@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use hjson_edit::high_level::HjsonDocument;
-use hjson_edit::{FormatConfig, Formatter, IndentStyle};
+use hjson_edit::{Format, FormatConfig, IndentStyle};
 use hjson_edit::RedNode;
 use std::path::PathBuf;
 
@@ -28,7 +28,7 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
         .with_newline(newline);
 
     let ast = doc.ast().context("Failed to build semantic AST")?;
-    let formatted = Formatter::build(&ast, config);
+    let formatted = ast.format(&config);
     let result = RedNode::new_root(formatted).text().to_string();
 
     print!("{}", result);
