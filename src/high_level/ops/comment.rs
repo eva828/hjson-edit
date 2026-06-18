@@ -140,6 +140,20 @@ fn make_comment_node(style: CommentKind, text: &str) -> rowan::GreenNode {
     )
 }
 
+fn make_comment_nodes(style: CommentKind, body: &str, newline: &str) -> Vec<GreenElement> {
+    if style == CommentKind::Block || !body.contains('\n') {
+        return vec![make_comment_node(style, body).into()];
+    }
+    let mut nodes = Vec::new();
+    for (i, line) in body.split('\n').enumerate() {
+        if i > 0 {
+            nodes.push(SyntaxKind::Newline.create_token(newline).into());
+        }
+        nodes.push(make_comment_node(style, line).into());
+    }
+    nodes
+}
+
 fn trivia_comment_style(trivia: &[Trivia]) -> Option<CommentKind> {
     trivia.iter().find_map(|elem| match elem {
         Trivia::Comment(comment) => Some(comment.kind),
@@ -240,14 +254,11 @@ fn build_document_comment(
     };
 
     if let Some(comment) = comment {
-        let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
-        let comment_node = make_comment_node(resolved_style, &comment);
+        let resolved_style = resolve_comment_style(preferred, existing_style);
+        let comment_elements = make_comment_nodes(resolved_style, &comment, newline);
 
-        let inserted: Vec<GreenElement> = if header {
-            vec![
-                comment_node.into(),
-                SyntaxKind::Newline.create_token(newline).into(),
-            ]
+        let mut inserted: Vec<GreenElement> = if header {
+            comment_elements
         } else {
             let needs_leading_newline = if insert_at > 0 {
                 match root.children_with_tokens().nth(insert_at - 1) {
@@ -259,19 +270,15 @@ fn build_document_comment(
             } else {
                 true
             };
-            if needs_leading_newline {
-                vec![
-                    SyntaxKind::Newline.create_token(newline).into(),
-                    comment_node.into(),
-                    SyntaxKind::Newline.create_token(newline).into(),
-                ]
+            let mut v = if needs_leading_newline {
+                vec![SyntaxKind::Newline.create_token(newline).into()]
             } else {
-                vec![
-                    comment_node.into(),
-                    SyntaxKind::Newline.create_token(newline).into(),
-                ]
-            }
+                vec![]
+            };
+            v.extend(comment_elements);
+            v
         };
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
         green = green.splice_children(insert_at..insert_at, inserted);
     }
 
@@ -315,8 +322,7 @@ fn build_member_comment(
             };
         }
     };
-    let resolved_style = resolve_comment_style(preferred, &comment, existing_style);
-    let comment_node = make_comment_node(resolved_style, &comment);
+    let resolved_style = resolve_comment_style(preferred, existing_style);
 
     let insert_index = match location {
         MemberCommentLocation::Before => comment_range.map(|(start, _)| start).unwrap_or(member_index),
@@ -326,12 +332,30 @@ fn build_member_comment(
     let inserted: Vec<GreenElement> = match location {
         MemberCommentLocation::Before => {
             let nl = SyntaxKind::Newline.create_token(newline);
-            let indent = SyntaxKind::Whitespace.create_token(detect_indent_for_member(&member));
-            vec![comment_node.into(), nl.into(), indent.into()]
+            let indent_str = detect_indent_for_member(&member);
+            let indent = SyntaxKind::Whitespace.create_token(&indent_str);
+            let mut inserted: Vec<GreenElement> = Vec::new();
+            for (i, line) in comment.split('\n').enumerate() {
+                if i > 0 {
+                    inserted.push(nl.clone().into());
+                    inserted.push(indent.clone().into());
+                }
+                inserted.push(
+                    make_comment_node(resolved_style, line).into(),
+                );
+            }
+            inserted.push(nl.into());
+            inserted.push(indent.into());
+            inserted
         }
         MemberCommentLocation::Inline => {
+            let resolved_style = if comment.contains('\n') {
+                CommentKind::Block
+            } else {
+                resolved_style
+            };
             let space = SyntaxKind::Whitespace.create_token(" ");
-            vec![space.into(), comment_node.into()]
+            vec![space.into(), make_comment_node(resolved_style, &comment).into()]
         }
     };
 
@@ -353,13 +377,8 @@ fn kind_from_style(style: CommentKind) -> SyntaxKind {
 
 fn resolve_comment_style(
     preferred: Prefer<CommentKind>,
-    comment: &str,
     existing_style: Option<CommentKind>,
 ) -> CommentKind {
-    if comment.contains('\n') || comment.contains('\r') {
-        return CommentKind::Block;
-    }
-
     match preferred {
         Prefer::Preserve => existing_style.unwrap_or(CommentKind::Block),
         Prefer::Explicit(kind) => kind,
@@ -389,8 +408,20 @@ fn detect_indent_for_member(member: &Member) -> String {
 
 fn render_comment_text(style: CommentKind, comment: &str) -> String {
     match style {
-        CommentKind::Line => format!("// {}", comment),
-        CommentKind::Hash => format!("# {}", comment),
+        CommentKind::Line => {
+            if comment.is_empty() {
+                String::from("//")
+            } else {
+                format!("// {}", comment)
+            }
+        }
+        CommentKind::Hash => {
+            if comment.is_empty() {
+                String::from("#")
+            } else {
+                format!("# {}", comment)
+            }
+        }
         CommentKind::Block => format!("/* {} */", comment),
     }
 }
@@ -404,7 +435,9 @@ mod tests {
     #[test]
     fn test_render_comment_text() {
         assert_eq!(render_comment_text(CommentKind::Line, "hello"), "// hello");
+        assert_eq!(render_comment_text(CommentKind::Line, ""), "//");
         assert_eq!(render_comment_text(CommentKind::Hash, "hello"), "# hello");
+        assert_eq!(render_comment_text(CommentKind::Hash, ""), "#");
         assert_eq!(render_comment_text(CommentKind::Block, "hello"), "/* hello */");
     }
 
@@ -416,17 +449,17 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_comment_style_multiline_always_block() {
+    fn test_resolve_comment_style_explicit_respects_multiline_line() {
         assert_eq!(
-            resolve_comment_style(Prefer::Explicit(CommentKind::Line), "line1\nline2", None),
-            CommentKind::Block
+            resolve_comment_style(Prefer::Explicit(CommentKind::Line), None),
+            CommentKind::Line
         );
     }
 
     #[test]
     fn test_resolve_comment_style_preserve_falls_back_to_block() {
         assert_eq!(
-            resolve_comment_style(Prefer::Preserve, "hello", None),
+            resolve_comment_style(Prefer::Preserve, None),
             CommentKind::Block
         );
     }
@@ -434,7 +467,7 @@ mod tests {
     #[test]
     fn test_resolve_comment_style_preserve_keeps_existing() {
         assert_eq!(
-            resolve_comment_style(Prefer::Preserve, "hello", Some(CommentKind::Line)),
+            resolve_comment_style(Prefer::Preserve, Some(CommentKind::Line)),
             CommentKind::Line
         );
     }
@@ -442,7 +475,7 @@ mod tests {
     #[test]
     fn test_resolve_comment_style_explicit_overrides() {
         assert_eq!(
-            resolve_comment_style(Prefer::Explicit(CommentKind::Hash), "hello", None),
+            resolve_comment_style(Prefer::Explicit(CommentKind::Hash), None),
             CommentKind::Hash
         );
     }

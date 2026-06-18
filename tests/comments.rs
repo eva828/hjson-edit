@@ -205,11 +205,11 @@ fn set_before_comment_overwrites_existing() {
 }
 
 #[test]
-fn set_multiline_header_comment_with_line_style_falls_back_to_block() {
+fn set_multiline_header_comment_with_line_style_splits_into_lines() {
     let src = "{\n  foo: 1\n}";
     let doc = HjsonDocument::parse(src).unwrap();
     let new_doc = doc.comment_style(Prefer::Explicit(CommentKind::Line))
         .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "line1\nline2").unwrap();
-    let expected = "/* line1\nline2 */\n{\n  foo: 1\n}";
+    let expected = "// line1\n// line2\n{\n  foo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }

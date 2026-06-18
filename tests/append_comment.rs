@@ -24,11 +24,9 @@ fn append_comment_to_existing_header_appends_below() {
         .append_comment(HjsonCommentPath::try_from(":header").unwrap(), "second")
         .unwrap();
 
-    // Note: append_comment concatenates with \n, then set_comment sees
-    // multi-line text and forces Block style.
     assert_eq!(
         appended.to_string(),
-        "/* first\nsecond */\n{\n  name: app\n}\n"
+        "// first\n// second\n{\n  name: app\n}\n"
     );
 }
 
@@ -81,9 +79,8 @@ fn append_comment_to_footer_appends_below_existing() {
         .append_comment(HjsonCommentPath::try_from(":footer").unwrap(), "second")
         .unwrap();
 
-    // Multi-line text forces Block style.
     assert_eq!(
         appended.to_string(),
-        "{\n  name: app\n}\n/* first\nsecond */\n"
+        "{\n  name: app\n}\n# first\n# second\n"
     );
 }
