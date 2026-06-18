@@ -213,3 +213,15 @@ fn set_multiline_header_comment_with_line_style_splits_into_lines() {
     let expected = "// line1\n// line2\n{\n  foo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }
+
+#[test]
+fn set_multiline_header_comment_with_hash_style_splits_into_lines() {
+    let src = "{\n  foo: 1\n}";
+    let doc = HjsonDocument::parse(src).unwrap();
+    let new_doc = doc
+        .comment_style(Prefer::Explicit(CommentKind::Hash))
+        .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "line1\nline2")
+        .unwrap();
+    let expected = "# line1\n# line2\n{\n  foo: 1\n}";
+    assert_eq!(new_doc.to_string(), expected);
+}
