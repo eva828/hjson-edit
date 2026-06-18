@@ -1,9 +1,8 @@
 use rowan::{GreenNode, NodeOrToken};
 
 use crate::ast::{
-    self, Array as AstArray, AstNode, CommentKind, CommentTrivia,
-    DelimiterStyle, Document, DocumentItem, Member, Object as AstObject, Trivia,
-    Value as AstValue,
+    self, Array as AstArray, AstNode, CommentKind, CommentTrivia, DelimiterStyle, Document,
+    DocumentItem, Member, Object as AstObject, Trivia, Value as AstValue,
 };
 use crate::syntax::{GreenElement, SyntaxKind};
 
@@ -125,14 +124,22 @@ impl Format for AstObject {
 
         for triv in &self.leading_trivia {
             if let Trivia::Comment(ct) = triv {
-                children.push(SyntaxKind::Whitespace.create_token(indent_str.as_str()).into());
+                children.push(
+                    SyntaxKind::Whitespace
+                        .create_token(indent_str.as_str())
+                        .into(),
+                );
                 children.push(make_comment_node(ct));
                 children.push(SyntaxKind::Newline.create_token(nl).into());
             }
         }
 
         for (i, member) in members.iter().enumerate() {
-            children.push(SyntaxKind::Whitespace.create_token(indent_str.as_str()).into());
+            children.push(
+                SyntaxKind::Whitespace
+                    .create_token(indent_str.as_str())
+                    .into(),
+            );
 
             if i > 0 {
                 for triv in &member.leading_trivia {
@@ -140,7 +147,9 @@ impl Format for AstObject {
                         children.push(make_comment_node(ct));
                         children.push(SyntaxKind::Newline.create_token(nl).into());
                         children.push(
-                            SyntaxKind::Whitespace.create_token(indent_str.as_str()).into(),
+                            SyntaxKind::Whitespace
+                                .create_token(indent_str.as_str())
+                                .into(),
                         );
                     }
                 }
@@ -186,7 +195,9 @@ impl Format for AstObject {
                         continue;
                     }
                     children.push(
-                        SyntaxKind::Whitespace.create_token(indent_str.as_str()).into(),
+                        SyntaxKind::Whitespace
+                            .create_token(indent_str.as_str())
+                            .into(),
                     );
                     children.push(make_comment_node(ct));
                     children.push(SyntaxKind::Newline.create_token(nl).into());
@@ -196,7 +207,9 @@ impl Format for AstObject {
             for triv in &self.trailing_trivia {
                 if let Trivia::Comment(ct) = triv {
                     children.push(
-                        SyntaxKind::Whitespace.create_token(indent_str.as_str()).into(),
+                        SyntaxKind::Whitespace
+                            .create_token(indent_str.as_str())
+                            .into(),
                     );
                     children.push(make_comment_node(ct));
                     children.push(SyntaxKind::Newline.create_token(nl).into());
@@ -207,7 +220,11 @@ impl Format for AstObject {
         if is_braced {
             let needs_closing_indent = !members.is_empty() || has_leading_comments;
             if needs_closing_indent && depth > 0 {
-                children.push(SyntaxKind::Whitespace.create_token(parent_indent.as_str()).into());
+                children.push(
+                    SyntaxKind::Whitespace
+                        .create_token(parent_indent.as_str())
+                        .into(),
+                );
             }
             children.push(SyntaxKind::RBrace.create_token("}").into());
         }
@@ -244,14 +261,22 @@ impl Format for AstArray {
 
         for triv in &self.leading_trivia {
             if let Trivia::Comment(ct) = triv {
-                children.push(SyntaxKind::Whitespace.create_token(indent_str.as_str()).into());
+                children.push(
+                    SyntaxKind::Whitespace
+                        .create_token(indent_str.as_str())
+                        .into(),
+                );
                 children.push(make_comment_node(ct));
                 children.push(SyntaxKind::Newline.create_token(nl).into());
             }
         }
 
         for (i, item) in items.iter().enumerate() {
-            children.push(SyntaxKind::Whitespace.create_token(indent_str.as_str()).into());
+            children.push(
+                SyntaxKind::Whitespace
+                    .create_token(indent_str.as_str())
+                    .into(),
+            );
 
             if i > 0 {
                 for triv in &item.leading_trivia {
@@ -259,7 +284,9 @@ impl Format for AstArray {
                         children.push(make_comment_node(ct));
                         children.push(SyntaxKind::Newline.create_token(nl).into());
                         children.push(
-                            SyntaxKind::Whitespace.create_token(indent_str.as_str()).into(),
+                            SyntaxKind::Whitespace
+                                .create_token(indent_str.as_str())
+                                .into(),
                         );
                     }
                 }
@@ -285,7 +312,11 @@ impl Format for AstArray {
         if has_trailing_comments {
             for triv in &self.trailing_trivia {
                 if let Trivia::Comment(ct) = triv {
-                    children.push(SyntaxKind::Whitespace.create_token(indent_str.as_str()).into());
+                    children.push(
+                        SyntaxKind::Whitespace
+                            .create_token(indent_str.as_str())
+                            .into(),
+                    );
                     children.push(make_comment_node(ct));
                     children.push(SyntaxKind::Newline.create_token(nl).into());
                 }
@@ -295,7 +326,11 @@ impl Format for AstArray {
         if is_braced {
             let needs_closing_indent = !items.is_empty() || has_leading_comments;
             if needs_closing_indent && depth > 0 {
-                children.push(SyntaxKind::Whitespace.create_token(parent_indent.as_str()).into());
+                children.push(
+                    SyntaxKind::Whitespace
+                        .create_token(parent_indent.as_str())
+                        .into(),
+                );
             }
             children.push(SyntaxKind::RBracket.create_token("]").into());
         }
@@ -334,10 +369,7 @@ impl Format for Member {
             replacements.push(SyntaxKind::Whitespace.create_token(" ").into());
             replacements.push(formatted_value.into());
 
-            return member_green.splice_children(
-                replace_start..value_index + 1,
-                replacements,
-            );
+            return member_green.splice_children(replace_start..value_index + 1, replacements);
         }
 
         let value_index = self
@@ -348,10 +380,7 @@ impl Format for Member {
             })
             .unwrap_or(0);
 
-        member_green.splice_children(
-            value_index..value_index + 1,
-            vec![formatted_value.into()],
-        )
+        member_green.splice_children(value_index..value_index + 1, vec![formatted_value.into()])
     }
 }
 
@@ -384,10 +413,6 @@ fn make_comment_node(ct: &CommentTrivia) -> GreenElement {
     let node = rowan::GreenNode::new(SyntaxKind::Comment.into(), vec![token.into()]);
     NodeOrToken::Node(node)
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -611,9 +636,6 @@ mod tests {
         let doc = HjsonDocument::parse(hjson).unwrap();
         let config = default_config();
         let formatted = doc.ast().unwrap().format(&config);
-        assert_eq!(
-            RedNode::new_root(formatted).text().to_string(),
-            hjson
-        );
+        assert_eq!(RedNode::new_root(formatted).text().to_string(), hjson);
     }
 }
