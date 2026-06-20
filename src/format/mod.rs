@@ -166,6 +166,54 @@ mod tests {
         assert_eq!(format(input, &default_config()), expected);
     }
 
+    #[test]
+    fn test_format_array_inline_comments() {
+        assert_eq!(
+            format("[1// comment\n]", &default_config()),
+            "[\n  1 // comment\n]"
+        );
+        assert_eq!(
+            format("[1// a\n,2]", &default_config()),
+            "[\n  1 // a\n  2\n]"
+        );
+        assert_eq!(
+            format("[1// a\n,2// b\n]", &default_config()),
+            "[\n  1 // a\n  2 // b\n]"
+        );
+        assert_eq!(
+            format("[1// inline\n// trailing\n]", &default_config()),
+            "[\n  1 // inline\n  // trailing\n]"
+        );
+        assert_eq!(
+            format("[\n  1 // comment\n]\n", &default_config()),
+            "[\n  1 // comment\n]\n"
+        );
+    }
+
+    #[test]
+    fn test_format_object_inline_comments() {
+        assert_eq!(
+            format("{a:1// comment\n}", &default_config()),
+            "{\n  a: 1 // comment\n}"
+        );
+        assert_eq!(
+            format("{a:1// a\n,b:2}", &default_config()),
+            "{\n  a: 1 // a\n  b: 2\n}"
+        );
+        assert_eq!(
+            format("{a:1// a\n,b:2// b\n}", &default_config()),
+            "{\n  a: 1 // a\n  b: 2 // b\n}"
+        );
+        assert_eq!(
+            format("{a:1// inline\n// trailing\n}", &default_config()),
+            "{\n  a: 1 // inline\n  // trailing\n}"
+        );
+        assert_eq!(
+            format("{\n  a: 1 // comment\n}\n", &default_config()),
+            "{\n  a: 1 // comment\n}\n"
+        );
+    }
+
     // --- Config: indent size ---
 
     #[test]

@@ -1119,6 +1119,23 @@ fn collect_container_leading_trivia(
     collect_trivia_slice(&children[start..leading_end])
 }
 
+fn trailing_trivia_end(
+    children: &[NodeOrToken<RedNode, RedToken>],
+    start: usize,
+) -> usize {
+    let mut cursor = start;
+    while cursor < children.len() {
+        let Some(item) = trivia_from_element(&children[cursor]) else {
+            break;
+        };
+        cursor += 1;
+        if matches!(item, Trivia::Newline { .. }) {
+            break;
+        }
+    }
+    cursor
+}
+
 fn collect_container_trailing_trivia(
     node: &RedNode,
     item_kind: SyntaxKind,
@@ -1144,7 +1161,8 @@ fn collect_container_trailing_trivia(
         .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == item_kind))
         .map(|relative| start + relative);
 
-    let trailing_start = last_item_index.map_or(start, |idx| idx + 1);
+    let trailing_start = last_item_index
+        .map_or(start, |idx| trailing_trivia_end(&children, idx + 1));
     collect_trivia_slice(&children[trailing_start..end])
 }
 
@@ -1288,27 +1306,12 @@ fn collect_trailing_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
         node.children_with_tokens().collect::<Vec<_>>()
     };
 
-    let index = node.index();
-    let mut trivia = Vec::new();
-    for elem in children.iter().skip(index + 1) {
-        let Some(item) = trivia_from_element(elem) else {
-            break;
-        };
-
-        match item {
-            Trivia::Whitespace(text) => trivia.push(Trivia::Whitespace(text)),
-            Trivia::Comma(text) => trivia.push(Trivia::Comma(text)),
-            Trivia::Comment(comment) => {
-                trivia.push(Trivia::Comment(comment));
-            }
-            Trivia::Newline { kind, text } => {
-                trivia.push(Trivia::Newline { kind, text });
-                break;
-            }
-        }
-    }
-
-    trivia
+    let start = node.index() + 1;
+    let end = trailing_trivia_end(&children, start);
+    children[start..end]
+        .iter()
+        .filter_map(trivia_from_element)
+        .collect()
 }
 
 fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {

@@ -1,6 +1,6 @@
 use rowan::GreenNode;
 
-use super::{Format, FormatConfig, make_comment_node};
+use super::{make_comment_node, Format, FormatConfig};
 use crate::ast::{DelimiterStyle, Object as AstObject, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
 
@@ -87,31 +87,7 @@ impl Format for AstObject {
             }
         }
 
-        if has_trailing_comments && !members.is_empty() {
-            let last_member = &members[members.len() - 1];
-            let last_member_inline_count = last_member
-                .trailing_trivia
-                .iter()
-                .filter(|t| matches!(t, Trivia::Comment(_)))
-                .count();
-
-            let mut skipped = 0;
-            for triv in &self.trailing_trivia {
-                if let Trivia::Comment(ct) = triv {
-                    if skipped < last_member_inline_count {
-                        skipped += 1;
-                        continue;
-                    }
-                    children.push(
-                        SyntaxKind::Whitespace
-                            .create_token(indent_str.as_str())
-                            .into(),
-                    );
-                    children.push(make_comment_node(ct));
-                    children.push(SyntaxKind::Newline.create_token(nl).into());
-                }
-            }
-        } else if has_trailing_comments {
+        if has_trailing_comments {
             for triv in &self.trailing_trivia {
                 if let Trivia::Comment(ct) = triv {
                     children.push(

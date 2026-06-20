@@ -175,6 +175,42 @@ fn append_to_multiline_array() {
 }
 
 #[test]
+fn append_to_object_with_trailing_comment_preserves_comment() {
+    let input = "{\n  a: 1\n  // trailing\n}\n";
+    let expected = "{\n  a: 1\n  // trailing\n  b: 2\n}\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("b").unwrap(), 2)
+        .unwrap();
+    assert_eq!(updated.to_string(), expected);
+}
+
+#[test]
+fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
+    let input = "{\n  a: 1 // inline\n  // trailing\n}\n";
+    let expected = "{\n  a: 1 // inline\n  // trailing\n  b: 2\n}\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("b").unwrap(), 2)
+        .unwrap();
+    assert_eq!(updated.to_string(), expected);
+}
+
+#[test]
+fn append_to_array_with_trailing_comment_preserves_comment() {
+    let input = "[\n  1\n  // trailing\n]\n";
+    let expected = "[\n  1\n  // trailing\n  2\n]\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("[-]").unwrap(), 2)
+        .unwrap();
+    assert_eq!(updated.to_string(), expected);
+}
+
+#[test]
 fn remove_object_key_deletes_member() {
     let input = "{\n  server: { host: localhost, port: 8080 }\n}\n";
     let expected = "{\n  server: { host: localhost,}\n}\n";

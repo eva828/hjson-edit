@@ -313,15 +313,29 @@ fn set_object_child(
         inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
     }
 
-    let splice_start = if !is_empty
-        && object_ast.delimiter_style == DelimiterStyle::Braced
+    let splice_start = if object_ast.delimiter_style == DelimiterStyle::Braced
     {
-        let removable_trailing = object_ast
-            .trailing_trivia
-            .iter()
-            .rev()
-            .take_while(|t| matches!(t, Trivia::Whitespace(_) | Trivia::Newline { .. }))
-            .count();
+        let mut removable_trailing = 0usize;
+        let mut found_non_trivial_in_container = false;
+        for triv in object_ast.trailing_trivia.iter().rev() {
+            if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
+                removable_trailing += 1;
+            } else {
+                found_non_trivial_in_container = true;
+                break;
+            }
+        }
+        if !found_non_trivial_in_container {
+            if let Some(last_member) = members.last() {
+                for triv in last_member.trailing_trivia.iter().rev() {
+                    if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
+                        removable_trailing += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
         insert_pos.saturating_sub(removable_trailing)
     } else {
         insert_pos
@@ -437,15 +451,29 @@ fn set_array_child(
                         .splice_children(range_start..insert_pos, inserted));
                 }
 
-                let splice_start = if !items.is_empty()
-                    && array_ast.delimiter_style == DelimiterStyle::Braced
+                let splice_start = if array_ast.delimiter_style == DelimiterStyle::Braced
                 {
-                    let removable_trailing = array_ast
-                        .trailing_trivia
-                        .iter()
-                        .rev()
-                        .take_while(|t| matches!(t, Trivia::Whitespace(_) | Trivia::Newline { .. }))
-                        .count();
+                    let mut removable_trailing = 0usize;
+                    let mut found_non_trivial_in_container = false;
+                    for triv in array_ast.trailing_trivia.iter().rev() {
+                        if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
+                            removable_trailing += 1;
+                        } else {
+                            found_non_trivial_in_container = true;
+                            break;
+                        }
+                    }
+                    if !found_non_trivial_in_container {
+                        if let Some(last_item) = items.last() {
+                            for triv in last_item.trailing_trivia.iter().rev() {
+                                if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
+                                    removable_trailing += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     insert_pos.saturating_sub(removable_trailing)
                 } else {
                     insert_pos
