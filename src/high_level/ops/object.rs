@@ -50,21 +50,13 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         let append_mode = self.current_append_mode();
         let value = value.into();
-        let newline = self.current_newline();
 
         let root = self.syntax_root().clone();
         let string_style = self.current_string_style();
         let updated = if path.depth() == 0 {
-            replace_root_value(&root, &value, string_style, newline)?
+            replace_root_value(&root, &value, string_style)?
         } else {
-            rebuild_tree_with_set(
-                root.clone(),
-                &path,
-                &value,
-                string_style,
-                append_mode,
-                newline,
-            )?
+            rebuild_tree_with_set(root.clone(), &path, &value, string_style, append_mode)?
         };
 
         Ok(self.root(updated))
@@ -81,15 +73,9 @@ pub(crate) fn replace_root_value(
     root: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let child = resolve_body(root)?;
-    let config = RenderConfig {
-        string_style: None,
-        pretty: false,
-        depth: 1,
-        newline,
-    };
+    let config = RenderConfig { string_style: None };
     let updated_child = render_value_like_node(&child, value, string_style, &config);
 
     Ok(root
@@ -103,18 +89,12 @@ pub(crate) fn rebuild_tree_with_set(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
         Ok(ParentResolution { parent, last }) => {
             let new_parent = apply_set_to_node(
-                &parent,
-                &last,
-                value,
-                string_style,
-                append_mode,
-                newline,
+                &parent, &last, value, string_style, append_mode,
             )?;
 
             if parent.kind() == SyntaxKind::Root {
@@ -132,12 +112,7 @@ pub(crate) fn rebuild_tree_with_set(
             let missing = &path.segments()[consumed];
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
             let new_parent = apply_set_to_node(
-                &ancestor,
-                missing,
-                &nested_value,
-                string_style,
-                append_mode,
-                newline,
+                &ancestor, missing, &nested_value, string_style, append_mode,
             )?;
 
             if ancestor.kind() == SyntaxKind::Root {
@@ -194,13 +169,12 @@ fn apply_set_to_node(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     transform_node(
         node,
         last,
-        |node, last| set_object_child(node, last, value, string_style, append_mode, newline),
-        |node, last| set_array_child(node, last, value, string_style, append_mode, newline),
+        |node, last| set_object_child(node, last, value, string_style, append_mode),
+        |node, last| set_array_child(node, last, value, string_style, append_mode),
     )
 }
 
@@ -217,7 +191,6 @@ fn set_object_child(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
         PathSegment::Key(key) => key,
@@ -232,26 +205,13 @@ fn set_object_child(
     let object_ast = AstObject::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, object_ast.detected_string_style());
     let members = object_ast.members();
-    let container_multi_line = if !members.is_empty() {
-        members.iter().any(|m| {
-            m.trailing_trivia.iter().any(|t| matches!(t, Trivia::Newline { .. }))
-        })
-    } else {
-        parent.children_with_tokens().any(|child| {
-            matches!(child.kind(), SyntaxKind::Newline)
-        })
-    };
+
     if let Some(member) = members
         .iter()
         .find(|member| member.member_key().as_deref() == Some(key.as_str()))
     {
         let member_node = member.syntax().clone();
-        let replace_config = RenderConfig {
-            string_style: None,
-            pretty: container_multi_line,
-            depth: object_ast.layout.depth,
-            newline,
-        };
+        let replace_config = RenderConfig { string_style: None };
         let updated = replace_member_value(&member_node, value, string_style, &replace_config)?;
         return Ok(parent.green().splice_children(
             member_node.index()..member_node.index() + 1,
@@ -263,13 +223,8 @@ fn set_object_child(
         AppendMode::BeforeFooter => object_ast.append_member_index_before_footer(),
         AppendMode::AfterComments => object_ast.append_member_index_after_comments(),
     };
-    let is_root_braceless =
-        object_ast.delimiter_style == DelimiterStyle::Braceless && object_ast.layout.depth == 1;
     let member_config = RenderConfig {
         string_style: insert_style,
-        pretty: container_multi_line,
-        depth: if is_root_braceless { object_ast.layout.depth.saturating_sub(1) } else { object_ast.layout.depth },
-        newline,
     };
 
     let is_empty = members.is_empty();
@@ -280,38 +235,32 @@ fn set_object_child(
     };
     if is_empty {
         let range_start = resolve_insert_range_start(parent, insert_pos);
-        let inserted = value.render_object_member_elements(
-            key, None, &member_config, &before_colon_trivia, &after_colon_trivia, true,
-        );
+        let inserted = vec![value.render_member_node(
+            key, None, &member_config, &before_colon_trivia, &after_colon_trivia,
+        ).into()];
         return Ok(parent
             .green()
             .splice_children(range_start..insert_pos, inserted));
     }
 
     let mut inserted: Vec<crate::GreenElement> = Vec::new();
-    if !container_multi_line {
-        if let Some(last_member) = members.last() {
-            let needs_separator = last_member
-                .trailing_trivia
-                .iter()
-                .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-            if needs_separator {
-                inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
-                inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
-            }
+    if let Some(last_member) = members.last() {
+        let needs_separator = last_member
+            .trailing_trivia
+            .iter()
+            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+        if needs_separator {
+            inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
+            inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
         }
     }
-    inserted.extend(value.render_object_member_elements(
+    inserted.push(value.render_member_node(
         key,
         None,
         &member_config,
         &before_colon_trivia,
         &after_colon_trivia,
-        false,
-    ));
-    if !container_multi_line {
-        inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
-    }
+    ).into());
 
     let splice_start = if object_ast.delimiter_style == DelimiterStyle::Braced
     {
@@ -352,7 +301,6 @@ fn set_array_child(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     append_mode: AppendMode,
-    newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let seg = match last {
         PathSegment::Array(seg) => seg,
@@ -367,17 +315,6 @@ fn set_array_child(
     let array_ast = AstArray::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, array_ast.detected_string_style());
     let items = array_ast.items();
-    let container_multi_line = if !items.is_empty() {
-        items.iter().any(|item| {
-            item.trailing_trivia
-                .iter()
-                .any(|t| matches!(t, Trivia::Newline { .. }))
-        })
-    } else {
-        parent.children_with_tokens().any(|child| {
-            matches!(child.kind(), SyntaxKind::Newline)
-        })
-    };
 
     // Normalize Push to InsertAt at the end
     let push_target = ArrayPathSegment::InsertAt(items.len());
@@ -395,9 +332,6 @@ fn set_array_child(
             };
             let value_config = RenderConfig {
                 string_style: insert_style,
-                pretty: container_multi_line,
-                depth: array_ast.layout.depth,
-                newline,
             };
             let updated = render_value_like_node(
                 current_value.syntax(),
@@ -424,13 +358,10 @@ fn set_array_child(
                 };
                 let value_config = RenderConfig {
                     string_style: insert_style,
-                    pretty: container_multi_line,
-                    depth: array_ast.layout.depth,
-                    newline,
                 };
 
                 let mut inserted = Vec::new();
-                if !container_multi_line && !items.is_empty() {
+                if !items.is_empty() {
                     if let Some(last_value) = items.last() {
                         let needs_separator = last_value
                             .trailing_trivia
@@ -442,7 +373,7 @@ fn set_array_child(
                         }
                     }
                 }
-                inserted.extend(value.render_array_item_elements(&value_config, items.is_empty()));
+                inserted.push(value.render_value_node(&value_config).into());
 
                 if items.is_empty() {
                     let range_start = resolve_insert_range_start(parent, insert_pos);
@@ -487,12 +418,9 @@ fn set_array_child(
                 let insert_pos = target_value.insert_before_index();
                 let insert_config = RenderConfig {
                     string_style: insert_style,
-                    pretty: container_multi_line,
-                    depth: array_ast.layout.depth,
-                    newline,
                 };
                 let mut inserted: Vec<crate::GreenElement> = Vec::new();
-                if !container_multi_line && *idx > 0 {
+                if *idx > 0 {
                     if let Some(prev_value) = items.get(*idx - 1) {
                         let needs_separator = prev_value
                             .trailing_trivia
@@ -504,25 +432,8 @@ fn set_array_child(
                         }
                     }
                 }
-                if !container_multi_line
-                    && target_value
-                        .leading_trivia
-                        .iter()
-                        .any(|t| matches!(t, Trivia::Whitespace(_)))
-                {
-                    inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
-                }
                 inserted.push(value.render_value_node(&insert_config).into());
-                if !container_multi_line {
-                    inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
-                    if !target_value
-                        .leading_trivia
-                        .iter()
-                        .any(|t| matches!(t, Trivia::Whitespace(_)))
-                    {
-                        inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
-                    }
-                }
+                inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
 
                 Ok(parent
                     .green()
@@ -606,13 +517,12 @@ fn render_value_like_node(
     node: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    config: &RenderConfig<'_>,
+    _config: &RenderConfig,
 ) -> GreenNode {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
     value.render_value_node(&RenderConfig {
         string_style: Some(quote_style),
-        ..*config
     })
 }
 
@@ -620,7 +530,7 @@ fn replace_member_value(
     member: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    config: &RenderConfig<'_>,
+    config: &RenderConfig,
 ) -> Result<GreenNode, HjsonEditError> {
     let value_child = member
         .children()

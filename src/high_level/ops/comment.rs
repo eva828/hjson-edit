@@ -1,4 +1,4 @@
-use rowan::{GreenNode, NodeOrToken};
+use rowan::GreenNode;
 
 use crate::{
     ast::{AstNode, CommentKind, Document, Member, Trivia},
@@ -257,28 +257,10 @@ fn build_document_comment(
         let resolved_style = resolve_comment_style(preferred, existing_style);
         let comment_elements = make_comment_nodes(resolved_style, &comment, newline);
 
-        let mut inserted: Vec<GreenElement> = if header {
-            comment_elements
-        } else {
-            let needs_leading_newline = if insert_at > 0 {
-                match root.children_with_tokens().nth(insert_at - 1) {
-                    Some(NodeOrToken::Token(token)) if token.kind() == SyntaxKind::Newline => {
-                        false
-                    }
-                    _ => true,
-                }
-            } else {
-                true
-            };
-            let mut v = if needs_leading_newline {
-                vec![SyntaxKind::Newline.create_token(newline).into()]
-            } else {
-                vec![]
-            };
-            v.extend(comment_elements);
-            v
-        };
-        inserted.push(SyntaxKind::Newline.create_token(newline).into());
+        let mut inserted: Vec<GreenElement> = comment_elements;
+        if header {
+            inserted.push(SyntaxKind::Newline.create_token(newline).into());
+        }
         green = green.splice_children(insert_at..insert_at, inserted);
     }
 
@@ -332,20 +314,14 @@ fn build_member_comment(
     let inserted: Vec<GreenElement> = match location {
         MemberCommentLocation::Before => {
             let nl = SyntaxKind::Newline.create_token(newline);
-            let indent_str = detect_indent_for_member(&member);
-            let indent = SyntaxKind::Whitespace.create_token(&indent_str);
             let mut inserted: Vec<GreenElement> = Vec::new();
             for (i, line) in comment.split('\n').enumerate() {
                 if i > 0 {
                     inserted.push(nl.clone().into());
-                    inserted.push(indent.clone().into());
                 }
-                inserted.push(
-                    make_comment_node(resolved_style, line).into(),
-                );
+                inserted.push(make_comment_node(resolved_style, line).into());
             }
             inserted.push(nl.into());
-            inserted.push(indent.into());
             inserted
         }
         MemberCommentLocation::Inline => {
@@ -354,8 +330,7 @@ fn build_member_comment(
             } else {
                 resolved_style
             };
-            let space = SyntaxKind::Whitespace.create_token(" ");
-            vec![space.into(), make_comment_node(resolved_style, &comment).into()]
+            vec![make_comment_node(resolved_style, &comment).into()]
         }
     };
 
@@ -382,27 +357,6 @@ fn resolve_comment_style(
     match preferred {
         Prefer::Preserve => existing_style.unwrap_or(CommentKind::Block),
         Prefer::Explicit(kind) => kind,
-    }
-}
-
-fn detect_indent_for_member(member: &Member) -> String {
-    let mut indent = String::new();
-    for elem in member.leading_trivia.iter().rev() {
-        match elem {
-            Trivia::Whitespace(text) => {
-                if indent.is_empty() {
-                    indent = text.clone();
-                }
-            }
-            Trivia::Newline { .. } => break,
-            _ => {}
-        }
-    }
-
-    if indent.is_empty() {
-        "  ".repeat(member.layout.depth.saturating_sub(1))
-    } else {
-        indent
     }
 }
 

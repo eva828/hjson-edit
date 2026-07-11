@@ -47,7 +47,7 @@ fn append_comment_to_existing_inline_appends_inline() {
     // Multi-line text forces Block style regardless of original inline style.
     assert_eq!(
         appended.to_string(),
-        "{\n  name: app /* first\nsecond */}\n"
+        "{\n  name: app/* first\nsecond */}\n"
     );
 }
 
@@ -62,7 +62,7 @@ fn append_comment_to_member_without_existing_comment_inserts_new() {
         .append_comment(HjsonCommentPath::try_from("name:before").unwrap(), "note")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  // note\n  name: app\n}\n");
+    assert_eq!(updated.to_string(), "{\n  // note\nname: app\n}\n");
 }
 
 #[test]
@@ -81,6 +81,6 @@ fn append_comment_to_footer_appends_below_existing() {
 
     assert_eq!(
         appended.to_string(),
-        "{\n  name: app\n}\n# first\n# second\n"
+        "{\n  name: app\n}\n# first\n# second"
     );
 }

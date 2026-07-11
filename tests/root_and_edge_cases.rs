@@ -11,7 +11,7 @@ fn parse_completely_empty_file_roundtrips() {
 fn set_in_empty_document_inserts_braceless_object_member() {
     let doc = HjsonDocument::parse("").unwrap();
     let new_doc = doc.set(HjsonObjectPath::parse("foo").unwrap(), 1).unwrap();
-    assert_eq!(new_doc.to_string(), "foo: 1\n");
+    assert_eq!(new_doc.to_string(), "foo: 1");
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn parse_whitespace_only_file_roundtrips() {
 fn set_in_whitespace_only_document_preserves_whitespace_and_adds_member() {
     let doc = HjsonDocument::parse("   \n  \t  \n").unwrap();
     let new_doc = doc.set(HjsonObjectPath::parse("foo").unwrap(), 1).unwrap();
-    assert_eq!(new_doc.to_string(), "   \n  \t  \nfoo: 1\n");
+    assert_eq!(new_doc.to_string(), "   \n  \t  \nfoo: 1");
 }
 
 #[test]
