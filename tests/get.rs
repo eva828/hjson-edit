@@ -85,3 +85,23 @@ fn get_array_then_object_path_returns_string_value() {
     let value = doc.get(HjsonObjectPath::parse("items[0].name").unwrap()).unwrap();
     assert!(matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "a"));
 }
+
+#[test]
+fn get_value_with_brackets() {
+    let input = "{ spawn: x[i:CalamityEntropy/ProphecyToken]y }";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let value = doc.get(HjsonObjectPath::parse("spawn").unwrap()).unwrap();
+    assert!(
+        matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "x[i:CalamityEntropy/ProphecyToken]y")
+    );
+}
+
+#[test]
+fn get_value_with_braces() {
+    let input = "{ value: a{1}b }";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let value = doc.get(HjsonObjectPath::parse("value").unwrap()).unwrap();
+    assert!(
+        matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "a{1}b")
+    );
+}

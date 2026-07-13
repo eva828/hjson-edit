@@ -124,25 +124,7 @@ impl<'a> ScalarScanner<'a> {
     }
 
     fn is_collectable_token(&self, kind: SyntaxKind) -> bool {
-        matches!(
-            kind,
-            SyntaxKind::Whitespace
-                | SyntaxKind::UnquotedString
-                | SyntaxKind::Integer
-                | SyntaxKind::Float
-                | SyntaxKind::True
-                | SyntaxKind::False
-                | SyntaxKind::Null
-                | SyntaxKind::String
-                | SyntaxKind::BlockString
-                | SyntaxKind::LineComment
-                | SyntaxKind::HashComment
-                | SyntaxKind::BlockComment
-                | SyntaxKind::Comma
-                | SyntaxKind::Colon
-                | SyntaxKind::LBrace
-                | SyntaxKind::LBracket
-        )
+        kind != SyntaxKind::Newline
     }
 
     fn is_closing_rbrace(&self, pos: usize) -> bool {

@@ -114,3 +114,15 @@ fn parser_string_values_without_comma_should_error() {
     let result = HjsonDocument::parse("[\"a\" \"b\"]");
     assert!(result.is_err());
 }
+
+#[test]
+fn unquoted_value_with_bracket_is_valid() {
+    let result = HjsonDocument::parse("{ v: x[y]z }");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn unquoted_value_with_brace_is_valid() {
+    let result = HjsonDocument::parse("{ v: x{y}z }");
+    assert!(result.is_ok());
+}
