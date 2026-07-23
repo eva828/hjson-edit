@@ -50,7 +50,7 @@ impl HjsonDocument {
             });
         }
 
-        let parser = Parser::new(lex_result.tokens);
+        let parser = Parser::new(input, lex_result.tokens);
         let result = parser.parse();
 
         if !result.errors.is_empty() {

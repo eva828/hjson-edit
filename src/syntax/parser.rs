@@ -1,7 +1,7 @@
 /// HJSON構文解析器
 ///
 /// Lexerのトークン列をGreen Treeに変換
-use super::lexer::Token;
+use super::lexer::{Cursor, Token};
 use super::SyntaxKind;
 use crate::number::HjsonNumber;
 use line_index::{LineIndex, TextSize};
@@ -46,18 +46,12 @@ pub struct ParseResult {
 }
 
 /// 構文解析器
-pub struct Parser {
+pub struct Parser<'a> {
+    source: &'a str,
     tokens: Vec<Token>,
     position: usize,
     builder: rowan::GreenNodeBuilder<'static>,
     errors: Vec<ParseError>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ScalarContext {
-    Root,
-    ObjectValue,
-    ArrayItem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,174 +60,11 @@ enum ValueBoundary {
     Open,
 }
 
-struct ScalarScanner<'a> {
-    tokens: &'a [Token],
-    start: usize,
-    context: ScalarContext,
-}
+impl<'a> Parser<'a> {
 
-impl<'a> ScalarScanner<'a> {
-    fn new(tokens: &'a [Token], start: usize, context: ScalarContext) -> Self {
+    pub fn new(source: &'a str, tokens: Vec<Token>) -> Self {
         Self {
-            tokens,
-            start,
-            context,
-        }
-    }
-
-    fn collect(&self) -> (String, usize) {
-        let mut pos = self.start;
-        let mut text = String::new();
-        let mut last_non_ws_len = 0usize;
-        let mut last_non_ws_pos = self.start;
-
-        while let Some(token) = self.tokens.get(pos) {
-            if self.is_terminator(token.kind, pos, &text) {
-                break;
-            }
-
-            if self.is_collectable_token(token.kind) {
-                text.push_str(&token.text);
-                pos += 1;
-                if token.kind != SyntaxKind::Whitespace {
-                    last_non_ws_len = text.len();
-                    last_non_ws_pos = pos;
-                }
-            } else {
-                break;
-            }
-        }
-
-        text.truncate(last_non_ws_len);
-        (text, last_non_ws_pos - self.start)
-    }
-
-    fn is_terminator(&self, kind: SyntaxKind, pos: usize, text: &str) -> bool {
-        match kind {
-            SyntaxKind::Newline => true,
-            SyntaxKind::RBrace if self.is_closing_rbrace(pos) => true,
-            SyntaxKind::RBracket if self.is_closing_rbracket(pos) => true,
-            SyntaxKind::Comma if self.is_separator_comma(pos) => true,
-            SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment
-                if self.starts_inline_comment_after_scalar(text, kind) =>
-            {
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn is_collectable_token(&self, kind: SyntaxKind) -> bool {
-        kind != SyntaxKind::Newline
-    }
-
-    fn is_closing_rbrace(&self, pos: usize) -> bool {
-        matches!(self.context, ScalarContext::ObjectValue) && self.followed_by_terminator(pos + 1)
-    }
-
-    fn is_closing_rbracket(&self, pos: usize) -> bool {
-        matches!(self.context, ScalarContext::ArrayItem) && self.followed_by_terminator(pos + 1)
-    }
-
-    fn followed_by_terminator(&self, mut pos: usize) -> bool {
-        while let Some(token) = self.tokens.get(pos) {
-            match token.kind {
-                SyntaxKind::Whitespace => pos += 1,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
-                    return true;
-                }
-                SyntaxKind::Newline
-                | SyntaxKind::Comma
-                | SyntaxKind::RBrace
-                | SyntaxKind::RBracket => return true,
-                _ => return false,
-            }
-        }
-        true
-    }
-
-    fn starts_inline_comment_after_scalar(&self, current_text: &str, kind: SyntaxKind) -> bool {
-        if current_text.is_empty() {
-            return true;
-        }
-
-        let trimmed = current_text.trim_end_matches([' ', '\t']);
-        if trimmed.is_empty() {
-            return true;
-        }
-
-        // コメントの前のテキストがリテラル（数値、true/false/null）の場合、
-        // その後のコメントトークンはインラインコメント終了子として扱う。
-        // それ以外（例：アンクオート文字列）の場合、コメントトークンはスカラー値のテキストの一部として扱う。
-        match kind {
-            SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
-                HjsonNumber::is_valid(trimmed) || matches!(trimmed, "true" | "false" | "null")
-            }
-            _ => false,
-        }
-    }
-
-    fn is_separator_comma(&self, comma_pos: usize) -> bool {
-        match self.context {
-            ScalarContext::Root => false,
-            ScalarContext::ArrayItem => self.array_has_next_item_after_comma(comma_pos + 1),
-            ScalarContext::ObjectValue => self.object_has_next_member_after_comma(comma_pos + 1),
-        }
-    }
-
-    fn array_has_next_item_after_comma(&self, mut pos: usize) -> bool {
-        while let Some(token) = self.tokens.get(pos) {
-            match token.kind {
-                SyntaxKind::Whitespace => pos += 1,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
-                    return true;
-                }
-                SyntaxKind::Newline | SyntaxKind::RBracket => return true,
-                SyntaxKind::LBrace
-                | SyntaxKind::LBracket
-                | SyntaxKind::String
-                | SyntaxKind::BlockString
-                | SyntaxKind::UnquotedString
-                | SyntaxKind::Integer
-                | SyntaxKind::Float
-                | SyntaxKind::True
-                | SyntaxKind::False
-                | SyntaxKind::Null => return true,
-                _ => return false,
-            }
-        }
-        true
-    }
-
-    fn object_has_next_member_after_comma(&self, mut pos: usize) -> bool {
-        while let Some(token) = self.tokens.get(pos) {
-            match token.kind {
-                SyntaxKind::Whitespace => pos += 1,
-                SyntaxKind::LineComment | SyntaxKind::HashComment | SyntaxKind::BlockComment => {
-                    return true;
-                }
-                SyntaxKind::Newline | SyntaxKind::RBrace => return true,
-                SyntaxKind::UnquotedString | SyntaxKind::String => {
-                    pos += 1;
-                    while let Some(next) = self.tokens.get(pos) {
-                        if next.kind.is_trivia() {
-                            pos += 1;
-                        } else {
-                            return next.kind == SyntaxKind::Colon;
-                        }
-                    }
-                    return false;
-                }
-                _ => return false,
-            }
-        }
-        true
-    }
-}
-
-impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Self {
+            source,
             tokens,
             position: 0,
             builder: rowan::GreenNodeBuilder::new(),
@@ -243,6 +74,64 @@ impl Parser {
 
     fn error(&mut self, offset: usize, message: impl Into<String>) {
         self.errors.push(ParseError::new(offset, message));
+    }
+
+    fn is_hjson_delimiter(&self, cursor: &Cursor) -> bool {
+        let c = cursor.peek().unwrap();
+        c == ','
+            || c == '}'
+            || c == ']'
+            || c == '#'
+            || (c == '/'
+                && cursor.peek_n(1).map_or(false, |n| n == '/' || n == '*'))
+    }
+
+    fn is_keyword_or_number(text: &str) -> bool {
+        matches!(text.trim(), "true" | "false" | "null")
+            || HjsonNumber::is_valid(text.trim())
+    }
+
+    /// 生のソーステキストから quoteless value を文字単位で読み取る。
+    fn read_raw_value(&self, start_offset: usize) -> (String, usize) {
+        let sub = &self.source[start_offset..];
+        let mut cursor = Cursor::new(sub);
+        let mut last_good_pos = 0usize;
+
+        loop {
+            if cursor.is_at_end() {
+                break;
+            }
+            let c = cursor.peek().unwrap();
+
+            if c == '\n' {
+                break;
+            }
+            if c == '\r' {
+                cursor.advance();
+                continue;
+            }
+
+            if self.is_hjson_delimiter(&cursor) {
+                if Self::is_keyword_or_number(&sub[..cursor.pos()]) {
+                    break;
+                }
+                cursor.advance();
+                last_good_pos = cursor.pos();
+                continue;
+            }
+
+            cursor.advance();
+            last_good_pos = cursor.pos();
+        }
+
+        let end = if last_good_pos > 0 {
+            last_good_pos
+        } else {
+            cursor.pos()
+        };
+        let raw = &sub[..end];
+        let trimmed = raw.trim_end();
+        (trimmed.to_string(), trimmed.len())
     }
 
     /// 構文解析実行
@@ -259,7 +148,7 @@ impl Parser {
             } else {
                 self.eat_trivia();
                 if !self.is_at_end() {
-                    let _ = self.parse_value(ScalarContext::Root);
+                    let _ = self.parse_value();
                     has_body = true;
                 }
             }
@@ -427,7 +316,25 @@ impl Parser {
         None
     }
 
-    fn parse_value(&mut self, context: ScalarContext) -> ValueBoundary {
+    fn can_start_value(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Some(
+                SyntaxKind::String
+                    | SyntaxKind::BlockString
+                    | SyntaxKind::LBrace
+                    | SyntaxKind::LBracket
+                    | SyntaxKind::UnquotedString
+                    | SyntaxKind::Integer
+                    | SyntaxKind::Float
+                    | SyntaxKind::True
+                    | SyntaxKind::False
+                    | SyntaxKind::Null,
+            )
+        )
+    }
+
+    fn parse_value(&mut self) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Value.into());
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
@@ -457,7 +364,7 @@ impl Parser {
                 | SyntaxKind::True
                 | SyntaxKind::False
                 | SyntaxKind::Null => {
-                    let boundary = self.parse_scalar_value(context);
+                    let boundary = self.parse_scalar_value();
                     self.builder.finish_node();
                     return boundary;
                 }
@@ -615,7 +522,18 @@ impl Parser {
 
             // 値ノードの兄弟としてトリビアを消費する
             self.eat_trivia();
-            let _ = self.parse_value(ScalarContext::ArrayItem);
+
+            let is_brace_delimited = matches!(
+                self.current_kind(),
+                Some(
+                    SyntaxKind::String
+                        | SyntaxKind::BlockString
+                        | SyntaxKind::LBrace
+                        | SyntaxKind::LBracket
+                )
+            );
+
+            let _ = self.parse_value();
 
             let had_newline = self.eat_trivia_and_report_newline();
 
@@ -632,6 +550,10 @@ impl Parser {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
                 if had_newline {
                     // カンマなし・改行ありは有効な区切り → ループ継続
+                    continue;
+                }
+                let whitespace_separator_allowed = is_brace_delimited && self.can_start_value();
+                if whitespace_separator_allowed {
                     continue;
                 }
                 // 改行もなくカンマもない → エラー
@@ -660,7 +582,15 @@ impl Parser {
 
         let token = self.current();
         match token.map(|t| t.kind) {
-            Some(SyntaxKind::String) | Some(SyntaxKind::UnquotedString) => {
+            Some(
+                SyntaxKind::String
+                | SyntaxKind::UnquotedString
+                | SyntaxKind::Integer
+                | SyntaxKind::Float
+                | SyntaxKind::True
+                | SyntaxKind::False
+                | SyntaxKind::Null,
+            ) => {
                 self.bump();
             }
             _ => {
@@ -711,32 +641,40 @@ impl Parser {
         // 値
         // ':'と値の間のトリビアを消費して、Valueノードをトリビアフリーにする
         self.eat_trivia();
-        let boundary = self.parse_value(ScalarContext::ObjectValue);
+        let boundary = self.parse_value();
 
         self.builder.finish_node();
         boundary
     }
 
-    fn parse_scalar_value(&mut self, context: ScalarContext) -> ValueBoundary {
+    fn parse_scalar_value(&mut self) -> ValueBoundary {
         if let Some(token) = self.current() {
             let kind = token.kind;
             return match kind {
-                SyntaxKind::String
-                | SyntaxKind::BlockString
-                | SyntaxKind::Integer
-                | SyntaxKind::Float
-                | SyntaxKind::True
-                | SyntaxKind::False
-                | SyntaxKind::Null => {
+                SyntaxKind::String | SyntaxKind::BlockString => {
                     self.bump();
                     ValueBoundary::Closed
                 }
-                SyntaxKind::UnquotedString => {
-                    let (text, consumed) =
-                        ScalarScanner::new(&self.tokens, self.position, context).collect();
+                SyntaxKind::Integer
+                | SyntaxKind::Float
+                | SyntaxKind::True
+                | SyntaxKind::False
+                | SyntaxKind::Null
+                | SyntaxKind::UnquotedString => {
+                    let start_offset = token.offset;
+                    let (text, byte_len) = self.read_raw_value(start_offset);
+                    let end_offset = start_offset + byte_len;
+
+                    let mut consumed = 0;
+                    let mut i = self.position;
+                    while i < self.tokens.len() && self.tokens[i].offset < end_offset {
+                        consumed += 1;
+                        i += 1;
+                    }
+
                     if consumed == 1 {
                         self.bump();
-                        ValueBoundary::Open
+                        ValueBoundary::Closed
                     } else {
                         self.builder.token(SyntaxKind::UnquotedString.into(), &text);
                         self.position += consumed;
@@ -764,7 +702,16 @@ impl Parser {
             }
 
             if !consumed_key {
-                if matches!(token.kind, SyntaxKind::UnquotedString | SyntaxKind::String) {
+                if matches!(
+                    token.kind,
+                    SyntaxKind::UnquotedString
+                        | SyntaxKind::String
+                        | SyntaxKind::Integer
+                        | SyntaxKind::Float
+                        | SyntaxKind::True
+                        | SyntaxKind::False
+                        | SyntaxKind::Null,
+                ) {
                     consumed_key = true;
                     pos += 1;
                     continue;
@@ -787,7 +734,13 @@ impl Parser {
     fn is_object_member_start(&self) -> bool {
         matches!(
             self.current_kind(),
-            Some(SyntaxKind::UnquotedString) | Some(SyntaxKind::String)
+            Some(SyntaxKind::UnquotedString)
+                | Some(SyntaxKind::String)
+                | Some(SyntaxKind::Integer)
+                | Some(SyntaxKind::Float)
+                | Some(SyntaxKind::True)
+                | Some(SyntaxKind::False)
+                | Some(SyntaxKind::Null),
         ) && self.has_colon_after_key()
     }
 
@@ -836,7 +789,7 @@ mod tests {
 
     fn parse_text(src: &str) -> ParseResult {
         let tokens = Lexer::new(src).lex();
-        Parser::new(tokens.tokens).parse()
+        Parser::new(src, tokens.tokens).parse()
     }
 
     #[test]

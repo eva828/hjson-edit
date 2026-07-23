@@ -410,21 +410,6 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_quoteless_token(&mut self, start_offset: usize) {
-        let first = match self.cursor.peek() {
-            Some(c) => c,
-            None => return,
-        };
-
-        if is_punctuator(first) {
-            let c = self.cursor.advance().unwrap();
-            self.errors.push(LexError::new(
-                start_offset,
-                format!("Unexpected character: {}", c),
-            ));
-            return;
-        }
-
-        // HJSONの仕様に基づいて、トークンが終了する条件まで進める
         while let Some(c) = self.cursor.peek() {
             if self.is_quoteless_token_end(c) {
                 break;
@@ -459,7 +444,7 @@ impl<'a> Lexer<'a> {
         if c == '#' && self.is_hash_comment_start() {
             return true;
         }
-        if c.is_whitespace() || is_punctuator(c) {
+        if c == ' ' || c == '\t' || c == '\n' || c == '\r' || is_punctuator(c) {
             return true;
         }
         false

@@ -1433,7 +1433,7 @@ mod tests {
 
     fn parse_and_find_node(src: &str, kind: SyntaxKind) -> RedNode {
         let tokens = Lexer::new(src).lex();
-        let parsed = Parser::new(tokens.tokens).parse();
+        let parsed = Parser::new(src, tokens.tokens).parse();
         let root = RedNode::new_root(parsed.green);
         root.descendants()
             .find(|node| node.kind() == kind)

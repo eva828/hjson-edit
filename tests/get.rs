@@ -24,7 +24,7 @@ fn get_nonexistent_key_errors_path_not_found() {
 
 #[test]
 fn get_nested_path_returns_string_value() {
-    let input = "{\n  server: { host: localhost }\n}\n";
+    let input = "{\n  server: { host: localhost\n}\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
     let value = doc.get(HjsonObjectPath::parse("server.host").unwrap()).unwrap();
     assert!(matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "localhost"));
@@ -72,7 +72,7 @@ fn get_root_braceless_object_value_returns_integer_value() {
 
 #[test]
 fn get_deeply_nested_path_returns_string_value() {
-    let input = "{\n  a: { b: { c: value } }\n}\n";
+    let input = "{\n  a: { b: { c: value\n} }\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
     let value = doc.get(HjsonObjectPath::parse("a.b.c").unwrap()).unwrap();
     assert!(matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "value"));
@@ -80,7 +80,7 @@ fn get_deeply_nested_path_returns_string_value() {
 
 #[test]
 fn get_array_then_object_path_returns_string_value() {
-    let input = "{\n  items: [{ name: a }, { name: b }]\n}\n";
+    let input = "{\n  items: [{ name: a\n}, { name: b\n}]\n}\n";
     let doc = HjsonDocument::parse(input).unwrap();
     let value = doc.get(HjsonObjectPath::parse("items[0].name").unwrap()).unwrap();
     assert!(matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "a"));
@@ -88,7 +88,7 @@ fn get_array_then_object_path_returns_string_value() {
 
 #[test]
 fn get_value_with_brackets() {
-    let input = "{ spawn: x[i:CalamityEntropy/ProphecyToken]y }";
+    let input = "{ spawn: x[i:CalamityEntropy/ProphecyToken]y\n}";
     let doc = HjsonDocument::parse(input).unwrap();
     let value = doc.get(HjsonObjectPath::parse("spawn").unwrap()).unwrap();
     assert!(
@@ -98,7 +98,7 @@ fn get_value_with_brackets() {
 
 #[test]
 fn get_value_with_braces() {
-    let input = "{ value: a{1}b }";
+    let input = "{ value: a{1}b\n}";
     let doc = HjsonDocument::parse(input).unwrap();
     let value = doc.get(HjsonObjectPath::parse("value").unwrap()).unwrap();
     assert!(

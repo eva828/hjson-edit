@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn resolve_node_nested_key() {
-        let root = parse("{\n  server: { host: localhost }\n}\n");
+        let root = parse("{\n  server: { host: localhost\n}\n}\n");
         let resolver = PathResolver::new(root);
         let node = resolver
             .resolve_node(&HjsonObjectPath::parse("server.host").unwrap())
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn resolve_parent_nested_object() {
-        let root = parse("{\n  server: { host: localhost }\n}\n");
+        let root = parse("{\n  server: { host: localhost\n}\n}\n");
         let resolver = PathResolver::new(root);
         let res = resolver
             .resolve_parent(&HjsonObjectPath::parse("server.host").unwrap())
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn resolve_parent_partial_ok() {
-        let root = parse("{\n  server: { host: localhost }\n}\n");
+        let root = parse("{\n  server: { host: localhost\n}\n}\n");
         let resolver = PathResolver::new(root);
         // parent path "server" resolves fine; only the final segment is "missing"
         let res = resolver
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn resolve_existing_prefix_fully_resolved() {
-        let root = parse("{\n  server: { host: localhost }\n}\n");
+        let root = parse("{\n  server: { host: localhost\n}\n}\n");
         let resolver = PathResolver::new(root);
         let prefix =
             resolver.resolve_existing_prefix(&HjsonObjectPath::parse("server.host").unwrap());
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn resolve_existing_prefix_array_then_key() {
-        let root = parse("{\n  items: [{ name: a }, { name: b }]\n}\n");
+        let root = parse("{\n  items: [{ name: a\n}, { name: b\n}]\n}\n");
         let resolver = PathResolver::new(root);
         let prefix =
             resolver.resolve_existing_prefix(&HjsonObjectPath::parse("items[0].name").unwrap());
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn resolve_member_nested() {
-        let root = parse("{\n  server: { host: localhost }\n}\n");
+        let root = parse("{\n  server: { host: localhost\n}\n}\n");
         let resolver = PathResolver::new(root);
         let member = resolver
             .resolve_member(&HjsonObjectPath::parse("server.host").unwrap())
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn resolve_member_array_then_key() {
-        let root = parse("{\n  items: [{ name: a }]\n}\n");
+        let root = parse("{\n  items: [{ name: a\n}]\n}\n");
         let resolver = PathResolver::new(root);
         let member = resolver
             .resolve_member(&HjsonObjectPath::parse("items[0].name").unwrap())
