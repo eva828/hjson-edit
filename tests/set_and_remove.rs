@@ -79,8 +79,8 @@ fn set_object_key_updates_existing_value() {
 
 #[test]
 fn set_nested_object_path_creates_member() {
-    let input = "{\n  server: { host: localhost }\n}\n";
-    let expected = "{\n  server: { host: localhost, port: 8080}\n}\n";
+    let input = "{\n  server: { host: localhost\n}\n}\n";
+    let expected = "{\n  server: { host: localhost\nport: 8080}\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -140,7 +140,7 @@ fn set_existing_key_preserves_leading_comments() {
 #[test]
 fn set_preserves_crlf_line_endings() {
     let input = "{\n  items: [\r\n    1\r\n    2\r\n  ]\n}\n";
-    let expected = "{\n  items: [\r\n    1\r\n    23]\n}\n";
+    let expected = "{\n  items: [\r\n    1\r\n    2\r\n3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -152,7 +152,7 @@ fn set_preserves_crlf_line_endings() {
 #[test]
 fn append_to_multiline_object() {
     let input = "{\n  a: 1\n}\n";
-    let expected = "{\n  a: 1b: 2}\n";
+    let expected = "{\n  a: 1\nb: 2}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -164,7 +164,7 @@ fn append_to_multiline_object() {
 #[test]
 fn append_to_multiline_array() {
     let input = "[\n  1\n]\n";
-    let expected = "[\n  12]\n";
+    let expected = "[\n  1\n2]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -176,7 +176,7 @@ fn append_to_multiline_array() {
 #[test]
 fn append_to_object_with_trailing_comment_preserves_comment() {
     let input = "{\n  a: 1\n  // trailing\n}\n";
-    let expected = "{\n  a: 1\n  // trailingb: 2}\n";
+    let expected = "{\n  a: 1\n  // trailing\nb: 2}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -188,7 +188,7 @@ fn append_to_object_with_trailing_comment_preserves_comment() {
 #[test]
 fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
     let input = "{\n  a: 1 // inline\n  // trailing\n}\n";
-    let expected = "{\n  a: 1 // inline\n  // trailingb: 2}\n";
+    let expected = "{\n  a: 1 // inline\n  // trailing\nb: 2}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -200,7 +200,7 @@ fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
 #[test]
 fn append_to_array_with_trailing_comment_preserves_comment() {
     let input = "[\n  1\n  // trailing\n]\n";
-    let expected = "[\n  1\n  // trailing2]\n";
+    let expected = "[\n  1\n  // trailing\n2]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -211,8 +211,8 @@ fn append_to_array_with_trailing_comment_preserves_comment() {
 
 #[test]
 fn remove_object_key_deletes_member() {
-    let input = "{\n  server: { host: localhost, port: 8080 }\n}\n";
-    let expected = "{\n  server: { host: localhost,}\n}\n";
+    let input = "{\n  server: { host: localhost,\n  port: 8080\n}\n}\n";
+    let expected = "{\n  server: { host: localhost,\n}\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc

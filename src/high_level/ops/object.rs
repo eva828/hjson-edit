@@ -252,6 +252,13 @@ fn set_object_child(
         if needs_separator {
             inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
             inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
+        } else {
+            let kind = last_member
+                .trailing_trivia
+                .iter()
+                .find_map(|t| t.newline_kind())
+                .unwrap_or_default();
+            inserted.push(SyntaxKind::Newline.create_token(kind.as_str()).into());
         }
     }
     inserted.push(value.render_member_node(
@@ -370,6 +377,13 @@ fn set_array_child(
                         if needs_separator {
                             inserted.push(SyntaxKind::Comma.create_token(SyntaxKind::Comma.canonical_text()).into());
                             inserted.push(SyntaxKind::Whitespace.create_token(SyntaxKind::Whitespace.canonical_text()).into());
+                        } else {
+                            let kind = last_value
+                                .trailing_trivia
+                                .iter()
+                                .find_map(|t| t.newline_kind())
+                                .unwrap_or_default();
+                            inserted.push(SyntaxKind::Newline.create_token(kind.as_str()).into());
                         }
                     }
                 }
