@@ -17,6 +17,7 @@ pub(crate) mod syntax;
 pub use format::{Format, FormatConfig, IndentStyle};
 pub use high_level::{
     error::HjsonEditError,
+    ops::merge::HjsonDocumentMerge,
     ops::object::{AppendMode, HjsonDocumentObjectEdit},
     path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
     value::HjsonValue,
