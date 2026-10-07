@@ -131,8 +131,8 @@ impl HjsonObjectPath {
                 // Parse the operation
                 if op_str == "-" {
                     segments.push(PathSegment::Array(ArrayPathSegment::Push));
-                } else if op_str.starts_with('+') {
-                    let idx: usize = op_str[1..]
+                } else if let Some(stripped) = op_str.strip_prefix('+') {
+                    let idx: usize = stripped
                         .parse()
                         .map_err(|_| HjsonEditError::InvalidPath(path.clone()))?;
                     segments.push(PathSegment::Array(ArrayPathSegment::InsertAt(idx)));

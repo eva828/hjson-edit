@@ -117,8 +117,10 @@ impl HjsonDocument {
     pub fn ast(&self) -> Result<semantic_ast::Document, HjsonEditError> {
         semantic_ast::Document::cast(self.root.clone())
     }
+}
 
-    pub fn to_string(&self) -> String {
-        self.root.to_string()
+impl std::fmt::Display for HjsonDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.root)
     }
 }

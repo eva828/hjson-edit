@@ -375,7 +375,7 @@ impl<'a> Lexer<'a> {
             Some('u') => {
                 self.validate_unicode_escape(start_offset);
             }
-            Some(escaped) if matches!(escaped, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
+            Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
             Some(escaped) => {
                 self.errors.push(LexError::new(
                     start_offset,

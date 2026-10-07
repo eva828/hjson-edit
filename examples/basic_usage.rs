@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .remove(HjsonObjectPath::parse("name").unwrap())?; // Removes a key
 
     println!("\n=== Modified ===");
-    println!("{}", updated.to_string());
+    println!("{}", updated);
 
     Ok(())
 }

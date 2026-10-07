@@ -435,7 +435,8 @@ mod tests {
         assert!(matches!(CliValueParser::parse_value("null"), HjsonValue::Null));
 
         assert!(matches!(CliValueParser::parse_value("123"), HjsonValue::Integer(123)));
-        assert!(matches!(CliValueParser::parse_value("3.14"), HjsonValue::Float(n) if (n - 3.14).abs() < f64::EPSILON));
+        let expected: f64 = "3.14".parse().unwrap();
+        assert!(matches!(CliValueParser::parse_value("3.14"), HjsonValue::Float(n) if n == expected));
     }
 
     #[test]

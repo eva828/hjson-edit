@@ -30,9 +30,10 @@ impl Format for Member {
                 .unwrap_or(0);
 
             let replace_start = col_idx + 1;
-            let mut replacements: Vec<GreenElement> = Vec::new();
-            replacements.push(SyntaxKind::Whitespace.create_token(" ").into());
-            replacements.push(formatted_value.into());
+            let replacements: Vec<GreenElement> = vec![
+                SyntaxKind::Whitespace.create_token(" ").into(),
+                formatted_value.into(),
+            ];
 
             return member_green.splice_children(replace_start..value_index + 1, replacements);
         }

@@ -16,15 +16,9 @@ pub enum HjsonValue {
     Object(Vec<(String, HjsonValue)>),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RenderConfig {
     pub string_style: Option<QuoteStyle>,
-}
-
-impl Default for RenderConfig {
-    fn default() -> Self {
-        Self { string_style: None }
-    }
 }
 
 impl From<&str> for HjsonValue {
@@ -349,7 +343,6 @@ mod tests {
     fn test_render_body_string_double_quoted_style() {
         let config = RenderConfig {
             string_style: Some(QuoteStyle::DoubleQuoted),
-            ..RenderConfig::default()
         };
         let s = HjsonValue::String("foo".to_string());
         let body = s.render_body(&config);
@@ -360,7 +353,6 @@ mod tests {
     fn test_render_body_string_block_style() {
         let config = RenderConfig {
             string_style: Some(QuoteStyle::Block),
-            ..RenderConfig::default()
         };
         let s = HjsonValue::String("foo".to_string());
         let body = s.render_body(&config);

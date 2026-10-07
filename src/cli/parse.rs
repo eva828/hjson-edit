@@ -57,9 +57,7 @@ impl ConsoleConfig {
         let no_color = std::env::var("NO_COLOR").is_ok();
         let is_tty = std::io::stdout().is_terminal();
 
-        let colored = if simple {
-            false
-        } else if no_color {
+        let colored = if simple || no_color {
             false
         } else {
             match color_mode {
@@ -156,7 +154,7 @@ impl TreeViewBuilder {
             "{}{}{}{:?}",
             self.indent(),
             self.connector(is_root, is_last),
-            &kind,
+            kind,
             node.text_range()
         )?;
 
@@ -667,7 +665,7 @@ where
             return Some(item);
         }
 
-        while let Some(item) = self.iter.next() {
+        for item in self.iter.by_ref() {
             match &item {
                 rowan::NodeOrToken::Token(t) if t.kind().is_trivia() && !self.show_trivia => {
                     continue
@@ -689,7 +687,7 @@ where
             return self.peeked.as_ref();
         }
 
-        while let Some(item) = self.iter.next() {
+        for item in self.iter.by_ref() {
             match &item {
                 rowan::NodeOrToken::Token(t) if t.kind().is_trivia() && !self.show_trivia => {
                     continue

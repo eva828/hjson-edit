@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         )?;
 
     println!("=== Modified Document ===");
-    println!("{}", doc.to_string());
+    println!("{}", doc);
 
     Ok(())
 }

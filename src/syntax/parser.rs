@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
             || c == ']'
             || c == '#'
             || (c == '/'
-                && cursor.peek_n(1).map_or(false, |n| n == '/' || n == '*'))
+                && cursor.peek_n(1).is_some_and(|n| n == '/' || n == '*'))
     }
 
     fn is_keyword_or_number(text: &str) -> bool {
@@ -769,9 +769,9 @@ impl<'a> Parser<'a> {
             if self.at(SyntaxKind::Comma) {
                 self.bump();
                 self.eat_trivia();
-            } else if self.at(SyntaxKind::RBrace) {
-                break;
-            } else if !self.is_at_end() && !had_separator_newline {
+            } else if self.at(SyntaxKind::RBrace)
+                || (!self.is_at_end() && !had_separator_newline)
+            {
                 break;
             }
         }
