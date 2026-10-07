@@ -1,6 +1,6 @@
 use line_index::LineIndex;
 
-use crate::{ParseError, SyntaxKind, high_level::path::HjsonObjectPath, syntax::lexer::LexError};
+use crate::{high_level::path::HjsonObjectPath, syntax::lexer::LexError, ParseError, SyntaxKind};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum HjsonEditError {

@@ -1,9 +1,5 @@
-use hjson_edit::{
-    high_level::{
-        ops::object::HjsonDocumentObjectEdit,
-        path::HjsonObjectPath,
-        HjsonDocument,
-    },
+use hjson_edit::high_level::{
+    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, HjsonDocument,
 };
 
 // ------------------------------------------------------------------

@@ -3,8 +3,7 @@ use rowan::GreenNode;
 use crate::{
     ast::{AstNode, CommentKind, Document, Member, Trivia},
     high_level::{
-        error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, Prefer,
-        HjsonDocument,
+        error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, HjsonDocument, Prefer,
     },
     syntax::{GreenElement, RedNode, SyntaxKind},
 };
@@ -43,8 +42,7 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
                 Ok(trivia.and_then(join_comment_bodies))
             }
             CommentTarget::Member { path, location } => {
-                let member =
-                    PathResolver::new(self.syntax_root().clone()).resolve_member(path)?;
+                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(path)?;
                 let trivia = match location {
                     MemberCommentLocation::Before => &member.leading_trivia,
                     MemberCommentLocation::Inline => &member.trailing_trivia,
@@ -90,7 +88,9 @@ enum MemberCommentLocation {
 }
 
 enum CommentTarget<'a> {
-    Document { header: bool },
+    Document {
+        header: bool,
+    },
     Member {
         path: &'a crate::high_level::path::HjsonObjectPath,
         location: MemberCommentLocation,
@@ -169,14 +169,17 @@ fn member_comment_range(
     match location {
         MemberCommentLocation::Before => {
             let trivia = &member.leading_trivia;
-            let start_rel = trivia.iter().position(|elem| matches!(elem, Trivia::Comment(_)))?;
+            let start_rel = trivia
+                .iter()
+                .position(|elem| matches!(elem, Trivia::Comment(_)))?;
             let base = parent_index.saturating_sub(trivia.len());
             Some((base + start_rel, parent_index))
         }
         MemberCommentLocation::Inline => {
             let trivia = &member.trailing_trivia;
-            let comment_rel =
-                trivia.iter().position(|elem| matches!(elem, Trivia::Comment(_)))?;
+            let comment_rel = trivia
+                .iter()
+                .position(|elem| matches!(elem, Trivia::Comment(_)))?;
             let mut start_rel = comment_rel;
             while start_rel > 0 && matches!(trivia[start_rel - 1], Trivia::Whitespace(_)) {
                 start_rel -= 1;
@@ -235,7 +238,10 @@ fn build_document_comment(
         }
     } else {
         let trailing = &ast.trailing_trivia;
-        if let Some(start) = trailing.iter().position(|e| matches!(e, Trivia::Comment(_))) {
+        if let Some(start) = trailing
+            .iter()
+            .position(|e| matches!(e, Trivia::Comment(_)))
+        {
             let mut end = trailing
                 .iter()
                 .rposition(|e| matches!(e, Trivia::Comment(_)))
@@ -307,7 +313,9 @@ fn build_member_comment(
     let resolved_style = resolve_comment_style(preferred, existing_style);
 
     let insert_index = match location {
-        MemberCommentLocation::Before => comment_range.map(|(start, _)| start).unwrap_or(member_index),
+        MemberCommentLocation::Before => comment_range
+            .map(|(start, _)| start)
+            .unwrap_or(member_index),
         MemberCommentLocation::Inline => member_index + 1,
     };
 
@@ -392,14 +400,20 @@ mod tests {
         assert_eq!(render_comment_text(CommentKind::Line, ""), "//");
         assert_eq!(render_comment_text(CommentKind::Hash, "hello"), "# hello");
         assert_eq!(render_comment_text(CommentKind::Hash, ""), "#");
-        assert_eq!(render_comment_text(CommentKind::Block, "hello"), "/* hello */");
+        assert_eq!(
+            render_comment_text(CommentKind::Block, "hello"),
+            "/* hello */"
+        );
     }
 
     #[test]
     fn test_kind_from_style() {
         assert_eq!(kind_from_style(CommentKind::Line), SyntaxKind::LineComment);
         assert_eq!(kind_from_style(CommentKind::Hash), SyntaxKind::HashComment);
-        assert_eq!(kind_from_style(CommentKind::Block), SyntaxKind::BlockComment);
+        assert_eq!(
+            kind_from_style(CommentKind::Block),
+            SyntaxKind::BlockComment
+        );
     }
 
     #[test]
@@ -512,7 +526,10 @@ mod tests {
                 body: "there".to_string(),
             }),
         ];
-        assert_eq!(trivia_comment_style(&with_comments), Some(CommentKind::Line));
+        assert_eq!(
+            trivia_comment_style(&with_comments),
+            Some(CommentKind::Line)
+        );
         let no_comments = vec![Trivia::Whitespace("  ".to_string())];
         assert_eq!(trivia_comment_style(&no_comments), None);
         assert_eq!(trivia_comment_style(&[]), None);

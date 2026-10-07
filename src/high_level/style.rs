@@ -15,7 +15,11 @@ pub fn detect_newline_from_ast(root: &RedNode) -> NewlineKind {
             }
         }
     }
-    if crlf > lf { NewlineKind::CrLf } else { NewlineKind::Lf }
+    if crlf > lf {
+        NewlineKind::CrLf
+    } else {
+        NewlineKind::Lf
+    }
 }
 
 /// 改行コードを検出可能な対象
@@ -46,7 +50,6 @@ impl DetectNewline for String {
         self.as_str().detect_newline()
     }
 }
-
 
 #[cfg(test)]
 mod tests {

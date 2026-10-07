@@ -3,9 +3,7 @@ use std::convert::TryFrom;
 use hjson_edit::{
     ast::CommentKind,
     high_level::{
-        ops::comment::HjsonDocumentCommentEdit,
-        path::HjsonCommentPath,
-        Prefer, HjsonDocument,
+        ops::comment::HjsonDocumentCommentEdit, path::HjsonCommentPath, HjsonDocument, Prefer,
     },
 };
 use pretty_assertions::assert_eq;
@@ -191,7 +189,9 @@ fn set_footer_comment_preserves_existing_blank_lines() {
 fn remove_missing_header_comment_is_noop() {
     let src = "{\n  foo: 1\n}";
     let doc = HjsonDocument::parse(src).unwrap();
-    let new_doc = doc.remove_comment(HjsonCommentPath::try_from(":header").unwrap()).unwrap();
+    let new_doc = doc
+        .remove_comment(HjsonCommentPath::try_from(":header").unwrap())
+        .unwrap();
     assert_eq!(new_doc.to_string(), src);
 }
 
@@ -199,7 +199,12 @@ fn remove_missing_header_comment_is_noop() {
 fn set_before_comment_overwrites_existing() {
     let src = "{\n  // old comment\n  foo: 1\n}";
     let doc = HjsonDocument::parse(src).unwrap();
-    let new_doc = doc.set_comment(HjsonCommentPath::try_from("foo:before").unwrap(), "new comment").unwrap();
+    let new_doc = doc
+        .set_comment(
+            HjsonCommentPath::try_from("foo:before").unwrap(),
+            "new comment",
+        )
+        .unwrap();
     let expected = "{\n  // new comment\nfoo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }
@@ -208,8 +213,13 @@ fn set_before_comment_overwrites_existing() {
 fn set_multiline_header_comment_with_line_style_splits_into_lines() {
     let src = "{\n  foo: 1\n}";
     let doc = HjsonDocument::parse(src).unwrap();
-    let new_doc = doc.comment_style(Prefer::Explicit(CommentKind::Line))
-        .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "line1\nline2").unwrap();
+    let new_doc = doc
+        .comment_style(Prefer::Explicit(CommentKind::Line))
+        .set_comment(
+            HjsonCommentPath::try_from(":header").unwrap(),
+            "line1\nline2",
+        )
+        .unwrap();
     let expected = "// line1\n// line2\n{\n  foo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }

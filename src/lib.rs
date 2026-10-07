@@ -21,7 +21,7 @@ pub use high_level::{
     ops::object::{AppendMode, HjsonDocumentObjectEdit},
     path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
     value::HjsonValue,
-    Prefer, HjsonDocument,
+    HjsonDocument, Prefer,
 };
 pub use line_index::LineIndex;
 pub use syntax::parser::ParseError;

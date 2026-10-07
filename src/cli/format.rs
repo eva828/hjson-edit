@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use hjson_edit::high_level::HjsonDocument;
-use hjson_edit::{Format, FormatConfig, IndentStyle};
 use hjson_edit::RedNode;
+use hjson_edit::{Format, FormatConfig, IndentStyle};
 use std::path::PathBuf;
 
 pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
@@ -14,7 +14,10 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
         Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
     };
 
-    let indent = match matches.get_one::<String>("indent-style").map(String::as_str) {
+    let indent = match matches
+        .get_one::<String>("indent-style")
+        .map(String::as_str)
+    {
         Some("tabs") => IndentStyle::Tabs,
         _ => IndentStyle::Spaces(*matches.get_one::<u8>("indent-width").unwrap_or(&2)),
     };

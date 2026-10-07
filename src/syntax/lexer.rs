@@ -333,8 +333,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_double_quoted_string(&mut self, start_offset: usize) {
-    let mut terminated = false;
-    // 開きの " は lex() の match_char('"') で既に消費済み
+        let mut terminated = false;
+        // 開きの " は lex() の match_char('"') で既に消費済み
 
         while let Some(c) = self.cursor.peek() {
             if c == '"' {
@@ -468,7 +468,6 @@ fn is_punctuator(c: char) -> bool {
     matches!(c, '{' | '}' | '[' | ']' | ',' | ':')
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,7 +475,7 @@ mod tests {
     #[test]
     fn test_cursor_basics() {
         let mut cursor = Cursor::new("aあb"); // 'a' (1 byte), 'あ' (3 bytes), 'b' (1 byte)
-        
+
         assert_eq!(cursor.peek(), Some('a'));
         assert_eq!(cursor.peek_n(1), Some('あ'));
         assert_eq!(cursor.peek_prev(), None);
@@ -484,28 +483,28 @@ mod tests {
         cursor.advance();
         assert_eq!(cursor.peek(), Some('あ'));
         assert_eq!(cursor.peek_prev(), Some('a'));
-        
+
         cursor.advance();
         assert_eq!(cursor.peek(), Some('b'));
         assert_eq!(cursor.peek_prev(), Some('あ'));
-        
+
         cursor.advance();
         assert_eq!(cursor.peek(), None);
         assert!(cursor.is_at_end());
-        
+
         assert_eq!(cursor.advance(), None);
     }
 
     #[test]
     fn test_cursor_match() {
         let mut cursor = Cursor::new("foo bar");
-        
+
         assert!(cursor.match_str("foo"));
         assert_eq!(cursor.pos(), 3);
-        
+
         assert!(!cursor.match_str("baz"));
         assert_eq!(cursor.pos(), 3);
-        
+
         assert!(cursor.match_char(' '));
         assert_eq!(cursor.pos(), 4);
     }
@@ -529,7 +528,9 @@ mod tests {
     fn test_lexer_invalid_escape_sequence_produces_error() {
         let result = Lexer::new(r#""\x""#).lex();
         assert!(!result.errors.is_empty());
-        assert!(result.errors[0].message.contains("Invalid escape sequence: \\x"));
+        assert!(result.errors[0]
+            .message
+            .contains("Invalid escape sequence: \\x"));
     }
 
     #[test]
@@ -542,6 +543,8 @@ mod tests {
     fn test_lexer_eof_after_backslash_produces_error() {
         let result = Lexer::new(r#""\"#).lex();
         assert!(!result.errors.is_empty());
-        assert!(result.errors[0].message.contains("Unterminated string literal"));
+        assert!(result.errors[0]
+            .message
+            .contains("Unterminated string literal"));
     }
 }

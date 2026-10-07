@@ -2,10 +2,7 @@ use hjson_edit::ast::QuoteStyle;
 
 #[test]
 fn decode_double_quoted_simple() {
-    assert_eq!(
-        QuoteStyle::DoubleQuoted.decode_body("\"hello\""),
-        "hello"
-    );
+    assert_eq!(QuoteStyle::DoubleQuoted.decode_body("\"hello\""), "hello");
 }
 
 #[test]
@@ -84,27 +81,18 @@ fn decode_double_quoted_unicode_escapes_preserved() {
 
 #[test]
 fn decode_block_simple() {
-    assert_eq!(
-        QuoteStyle::Block.decode_body("'''hello'''"),
-        "hello"
-    );
+    assert_eq!(QuoteStyle::Block.decode_body("'''hello'''"), "hello");
 }
 
 #[test]
 fn decode_block_empty() {
-    assert_eq!(
-        QuoteStyle::Block.decode_body("''''''"),
-        ""
-    );
+    assert_eq!(QuoteStyle::Block.decode_body("''''''"), "");
 }
 
 #[test]
 fn decode_block_strips_common_indent() {
     let raw = "'''\n  line1\n  line2\n'''";
-    assert_eq!(
-        QuoteStyle::Block.decode_body(raw),
-        "line1\nline2"
-    );
+    assert_eq!(QuoteStyle::Block.decode_body(raw), "line1\nline2");
 }
 
 #[test]
@@ -125,18 +113,12 @@ fn decode_block_cr_normalized() {
 
 #[test]
 fn decode_unquoted_returns_raw() {
-    assert_eq!(
-        QuoteStyle::Unquoted.decode_body("hello"),
-        "hello"
-    );
+    assert_eq!(QuoteStyle::Unquoted.decode_body("hello"), "hello");
 }
 
 #[test]
 fn decode_double_quoted_unknown_escapes_preserved() {
     // NOTE: RFC 8259 では \z は不正なエスケープとしてエラーにすべきだが、
     // 現在の実装では生のテキストとして保持する（ラウンドトリップ保存のため）。
-    assert_eq!(
-        QuoteStyle::DoubleQuoted.decode_body("\"\\z\""),
-        "\\z"
-    );
+    assert_eq!(QuoteStyle::DoubleQuoted.decode_body("\"\\z\""), "\\z");
 }

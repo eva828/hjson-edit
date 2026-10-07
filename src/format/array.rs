@@ -1,6 +1,6 @@
 use rowan::GreenNode;
 
-use super::{Format, FormatConfig, make_comment_node};
+use super::{make_comment_node, Format, FormatConfig};
 use crate::ast::{Array as AstArray, DelimiterStyle, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
 

@@ -32,8 +32,5 @@ fn decode_block_comment_strips_delimiters_and_trims() {
 
 #[test]
 fn decode_block_comment_strips_delimiters_with_extra_whitespace() {
-    assert_eq!(
-        CommentKind::Block.decode_body("/*  comment  */"),
-        "comment"
-    );
+    assert_eq!(CommentKind::Block.decode_body("/*  comment  */"), "comment");
 }

@@ -1,9 +1,5 @@
-use hjson_edit::{
-    high_level::{
-        ops::object::HjsonDocumentObjectEdit,
-        path::HjsonObjectPath,
-        HjsonDocument,
-    },
+use hjson_edit::high_level::{
+    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, HjsonDocument,
 };
 use pretty_assertions::assert_eq;
 
@@ -36,8 +32,7 @@ fn set_array_insert_at_past_end_fails() {
     let input = "{\n  items: [1, 2]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let result = doc
-        .set(HjsonObjectPath::parse("items[+10]").unwrap(), 3);
+    let result = doc.set(HjsonObjectPath::parse("items[+10]").unwrap(), 3);
     assert!(result.is_err());
 }
 
@@ -119,9 +114,7 @@ fn set_into_empty_array_inserts_item() {
     let expected = "[1]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("[-]").unwrap(), 1)
-        .unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 1).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -155,9 +148,7 @@ fn append_to_multiline_object() {
     let expected = "{\n  a: 1\nb: 2}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("b").unwrap(), 2)
-        .unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -167,9 +158,7 @@ fn append_to_multiline_array() {
     let expected = "[\n  1\n2]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("[-]").unwrap(), 2)
-        .unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 2).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -179,9 +168,7 @@ fn append_to_object_with_trailing_comment_preserves_comment() {
     let expected = "{\n  a: 1\n  // trailing\nb: 2}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("b").unwrap(), 2)
-        .unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -191,9 +178,7 @@ fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
     let expected = "{\n  a: 1 // inline\n  // trailing\nb: 2}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("b").unwrap(), 2)
-        .unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 
@@ -203,9 +188,7 @@ fn append_to_array_with_trailing_comment_preserves_comment() {
     let expected = "[\n  1\n  // trailing\n2]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
-    let updated = doc
-        .set(HjsonObjectPath::parse("[-]").unwrap(), 2)
-        .unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 2).unwrap();
     assert_eq!(updated.to_string(), expected);
 }
 

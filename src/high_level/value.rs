@@ -88,9 +88,8 @@ impl HjsonValue {
         before_colon_trivia: &[Trivia],
         after_colon_trivia: &[Trivia],
     ) -> GreenNode {
-        let mut children: Vec<GreenElement> = Vec::with_capacity(
-            3 + before_colon_trivia.len() + after_colon_trivia.len(),
-        );
+        let mut children: Vec<GreenElement> =
+            Vec::with_capacity(3 + before_colon_trivia.len() + after_colon_trivia.len());
         children.push(render_key_node(key, key_style).into());
         for trivia in before_colon_trivia {
             children.push(trivia.to_green_element());
@@ -147,11 +146,7 @@ impl HjsonValue {
             HjsonValue::Object(entries) => {
                 let mut children = vec![SyntaxKind::LBrace.create_token("{").into()];
                 for (idx, (key, value)) in entries.iter().enumerate() {
-                    children.push(
-                        value
-                            .render_member_node(key, None, config, &[], &[])
-                            .into(),
-                    );
+                    children.push(value.render_member_node(key, None, config, &[], &[]).into());
                     if idx + 1 != entries.len() {
                         children.push(SyntaxKind::Comma.create_token(",").into());
                     }
@@ -170,26 +165,22 @@ impl HjsonValue {
             SyntaxKind::String => Ok(HjsonValue::String(
                 QuoteStyle::DoubleQuoted.decode_body(text),
             )),
-            SyntaxKind::BlockString => {
-                Ok(HjsonValue::String(QuoteStyle::Block.decode_body(text)))
-            }
+            SyntaxKind::BlockString => Ok(HjsonValue::String(QuoteStyle::Block.decode_body(text))),
             SyntaxKind::UnquotedString => {
                 Ok(HjsonValue::String(QuoteStyle::Unquoted.decode_body(text)))
             }
-            SyntaxKind::Integer => text
-                .parse::<i64>()
-                .map(HjsonValue::Integer)
-                .map_err(|_| HjsonEditError::UnexpectedStructure {
+            SyntaxKind::Integer => text.parse::<i64>().map(HjsonValue::Integer).map_err(|_| {
+                HjsonEditError::UnexpectedStructure {
                     expected: SyntaxKind::Integer,
                     found: token.kind(),
-                }),
-            SyntaxKind::Float => text
-                .parse::<f64>()
-                .map(HjsonValue::Float)
-                .map_err(|_| HjsonEditError::UnexpectedStructure {
+                }
+            }),
+            SyntaxKind::Float => text.parse::<f64>().map(HjsonValue::Float).map_err(|_| {
+                HjsonEditError::UnexpectedStructure {
                     expected: SyntaxKind::Float,
                     found: token.kind(),
-                }),
+                }
+            }),
             SyntaxKind::True => Ok(HjsonValue::Bool(true)),
             SyntaxKind::False => Ok(HjsonValue::Bool(false)),
             SyntaxKind::Null => Ok(HjsonValue::Null),

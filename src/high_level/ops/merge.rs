@@ -2,10 +2,10 @@ use rowan::GreenNode;
 
 use crate::ast::{AstNode, Member, Object as AstObject, QuoteStyle, ValueContent};
 use crate::high_level::{
-    HjsonDocument,
     error::HjsonEditError,
     path::{HjsonObjectPath, PathSegment},
     resolve::resolve_body,
+    HjsonDocument,
 };
 use crate::syntax::{RedNode, SyntaxKind};
 
@@ -299,8 +299,8 @@ fn render_key_node(key: &str) -> GreenNode {
 mod tests {
     use super::*;
     use crate::high_level::{
-        HjsonDocument, ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath,
-        value::HjsonValue,
+        ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue,
+        HjsonDocument,
     };
     use crate::{Format, FormatConfig, RedNode};
 

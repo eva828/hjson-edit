@@ -3,9 +3,7 @@ use std::convert::TryFrom;
 use hjson_edit::{
     ast::CommentKind,
     high_level::{
-        ops::comment::HjsonDocumentCommentEdit,
-        path::HjsonCommentPath,
-        Prefer, HjsonDocument,
+        ops::comment::HjsonDocumentCommentEdit, path::HjsonCommentPath, HjsonDocument, Prefer,
     },
 };
 use pretty_assertions::assert_eq;
@@ -45,10 +43,7 @@ fn append_comment_to_existing_inline_appends_inline() {
         .unwrap();
 
     // Multi-line text forces Block style regardless of original inline style.
-    assert_eq!(
-        appended.to_string(),
-        "{\n  name: app/* first\nsecond */}\n"
-    );
+    assert_eq!(appended.to_string(), "{\n  name: app/* first\nsecond */}\n");
 }
 
 #[test]
@@ -79,8 +74,5 @@ fn append_comment_to_footer_appends_below_existing() {
         .append_comment(HjsonCommentPath::try_from(":footer").unwrap(), "second")
         .unwrap();
 
-    assert_eq!(
-        appended.to_string(),
-        "{\n  name: app\n}\n# first\n# second"
-    );
+    assert_eq!(appended.to_string(), "{\n  name: app\n}\n# first\n# second");
 }

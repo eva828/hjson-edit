@@ -1,10 +1,5 @@
-use hjson_edit::{
-    high_level::{
-        ops::object::HjsonDocumentObjectEdit,
-        path::HjsonObjectPath,
-        value::HjsonValue,
-        HjsonDocument,
-    },
+use hjson_edit::high_level::{
+    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 
 #[test]
@@ -26,6 +21,8 @@ fn get_and_set_with_unicode_path() {
         ref other => panic!("expected String, got {:?}", other),
     }
 
-    let updated = doc.set(HjsonObjectPath::parse("日本語").unwrap(), "新値").unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("日本語").unwrap(), "新値")
+        .unwrap();
     assert!(updated.to_string().contains("新値"));
 }

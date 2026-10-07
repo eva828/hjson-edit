@@ -18,10 +18,7 @@ fn encode_double_quoted_escapes_quote() {
 
 #[test]
 fn encode_double_quoted_no_special_chars_is_identity() {
-    assert_eq!(
-        QuoteStyle::DoubleQuoted.encode_body("hello"),
-        "hello"
-    );
+    assert_eq!(QuoteStyle::DoubleQuoted.encode_body("hello"), "hello");
 }
 
 #[test]
@@ -34,8 +31,5 @@ fn encode_block_is_identity() {
 
 #[test]
 fn encode_unquoted_is_identity() {
-    assert_eq!(
-        QuoteStyle::Unquoted.encode_body("hello"),
-        "hello"
-    );
+    assert_eq!(QuoteStyle::Unquoted.encode_body("hello"), "hello");
 }

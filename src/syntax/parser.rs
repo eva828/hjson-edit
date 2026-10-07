@@ -61,7 +61,6 @@ enum ValueBoundary {
 }
 
 impl<'a> Parser<'a> {
-
     pub fn new(source: &'a str, tokens: Vec<Token>) -> Self {
         Self {
             source,
@@ -82,13 +81,11 @@ impl<'a> Parser<'a> {
             || c == '}'
             || c == ']'
             || c == '#'
-            || (c == '/'
-                && cursor.peek_n(1).is_some_and(|n| n == '/' || n == '*'))
+            || (c == '/' && cursor.peek_n(1).is_some_and(|n| n == '/' || n == '*'))
     }
 
     fn is_keyword_or_number(text: &str) -> bool {
-        matches!(text.trim(), "true" | "false" | "null")
-            || HjsonNumber::is_valid(text.trim())
+        matches!(text.trim(), "true" | "false" | "null") || HjsonNumber::is_valid(text.trim())
     }
 
     /// 生のソーステキストから quoteless value を文字単位で読み取る。
@@ -338,7 +335,7 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::Value.into());
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
-            if self.is_at_end() {
+        if self.is_at_end() {
             self.builder.finish_node();
             return ValueBoundary::Open;
         }
@@ -752,7 +749,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-        self.eat_trivia();
+            self.eat_trivia();
             if self.is_at_end() {
                 break;
             }
@@ -769,9 +766,7 @@ impl<'a> Parser<'a> {
             if self.at(SyntaxKind::Comma) {
                 self.bump();
                 self.eat_trivia();
-            } else if self.at(SyntaxKind::RBrace)
-                || (!self.is_at_end() && !had_separator_newline)
-            {
+            } else if self.at(SyntaxKind::RBrace) || (!self.is_at_end() && !had_separator_newline) {
                 break;
             }
         }
@@ -783,9 +778,9 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::lexer::Lexer;
-    use crate::ast::Document;
     use crate::ast::AstNode;
+    use crate::ast::Document;
+    use crate::syntax::lexer::Lexer;
 
     fn parse_text(src: &str) -> ParseResult {
         let tokens = Lexer::new(src).lex();
@@ -796,7 +791,7 @@ mod tests {
     fn test_parser_recover_from_missing_colon_reports_error_but_produces_ast() {
         let parsed = parse_text("{\n  \"key\" \"value\"\n}");
         assert!(!parsed.errors.is_empty());
-        
+
         let doc = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
         let root = doc.object().unwrap();
         assert_eq!(root.members().len(), 1);
@@ -806,7 +801,7 @@ mod tests {
     fn test_parser_recover_unclosed_object_reports_error_but_produces_ast() {
         let parsed = parse_text("{ \"a\": 1");
         assert!(!parsed.errors.is_empty());
-        
+
         let doc = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
         let root = doc.object().unwrap();
         assert_eq!(root.members().len(), 1);
@@ -816,7 +811,7 @@ mod tests {
     fn test_parser_recover_unclosed_array_reports_error_but_produces_ast() {
         let parsed = parse_text("[ 1, 2");
         assert!(!parsed.errors.is_empty());
-        
+
         let doc = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
         let root = doc.array().unwrap();
         assert_eq!(root.items().len(), 2);

@@ -4,13 +4,10 @@ use anyhow::{Context, Result};
 use hjson_edit::{
     ast::{CommentKind, QuoteStyle},
     high_level::{
-        ops::{
-            comment::HjsonDocumentCommentEdit,
-            object::HjsonDocumentObjectEdit,
-        },
+        ops::{comment::HjsonDocumentCommentEdit, object::HjsonDocumentObjectEdit},
         path::{HjsonCommentPath, HjsonObjectPath},
         value::HjsonValue,
-        Prefer, HjsonDocument,
+        HjsonDocument, Prefer,
     },
 };
 
@@ -430,28 +427,52 @@ mod tests {
 
     #[test]
     fn test_cli_value_parser_keywords_and_numbers() {
-        assert!(matches!(CliValueParser::parse_value("true"), HjsonValue::Bool(true)));
-        assert!(matches!(CliValueParser::parse_value("false"), HjsonValue::Bool(false)));
-        assert!(matches!(CliValueParser::parse_value("null"), HjsonValue::Null));
+        assert!(matches!(
+            CliValueParser::parse_value("true"),
+            HjsonValue::Bool(true)
+        ));
+        assert!(matches!(
+            CliValueParser::parse_value("false"),
+            HjsonValue::Bool(false)
+        ));
+        assert!(matches!(
+            CliValueParser::parse_value("null"),
+            HjsonValue::Null
+        ));
 
-        assert!(matches!(CliValueParser::parse_value("123"), HjsonValue::Integer(123)));
+        assert!(matches!(
+            CliValueParser::parse_value("123"),
+            HjsonValue::Integer(123)
+        ));
         let expected: f64 = "3.14".parse().unwrap();
-        assert!(matches!(CliValueParser::parse_value("3.14"), HjsonValue::Float(n) if n == expected));
+        assert!(
+            matches!(CliValueParser::parse_value("3.14"), HjsonValue::Float(n) if n == expected)
+        );
     }
 
     #[test]
     fn test_cli_value_parser_string_edge_cases() {
         assert!(matches!(CliValueParser::parse_value(""), HjsonValue::String(s) if s.is_empty()));
         assert!(matches!(CliValueParser::parse_value("\""), HjsonValue::String(s) if s == "\""));
-        assert!(matches!(CliValueParser::parse_value("\"\""), HjsonValue::String(s) if s.is_empty()));
-        assert!(matches!(CliValueParser::parse_value("\"foo"), HjsonValue::String(s) if s == "\"foo"));
+        assert!(
+            matches!(CliValueParser::parse_value("\"\""), HjsonValue::String(s) if s.is_empty())
+        );
+        assert!(
+            matches!(CliValueParser::parse_value("\"foo"), HjsonValue::String(s) if s == "\"foo")
+        );
         assert!(matches!(CliValueParser::parse_value("'''"), HjsonValue::String(s) if s == "'''"));
-        assert!(matches!(CliValueParser::parse_value("''''''"), HjsonValue::String(s) if s.is_empty()));
+        assert!(
+            matches!(CliValueParser::parse_value("''''''"), HjsonValue::String(s) if s.is_empty())
+        );
     }
 
     #[test]
     fn test_cli_value_parser_multibyte() {
-        assert!(matches!(CliValueParser::parse_value("\"あ\""), HjsonValue::String(s) if s == "あ"));
-        assert!(matches!(CliValueParser::parse_value("'''あ'''"), HjsonValue::String(s) if s == "あ"));
+        assert!(
+            matches!(CliValueParser::parse_value("\"あ\""), HjsonValue::String(s) if s == "あ")
+        );
+        assert!(
+            matches!(CliValueParser::parse_value("'''あ'''"), HjsonValue::String(s) if s == "あ")
+        );
     }
 }

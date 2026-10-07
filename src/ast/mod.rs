@@ -149,7 +149,9 @@ impl QuoteStyle {
         match self {
             QuoteStyle::Unquoted => {
                 !text.is_empty()
-                    && text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                    && text
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
                     && !matches!(text, "true" | "false" | "null")
                     && !crate::number::HjsonNumber::is_valid(text)
             }
@@ -204,12 +206,8 @@ impl Trivia {
 
     pub fn to_green_element(&self) -> GreenElement {
         match self {
-            Trivia::Whitespace(text) => {
-                SyntaxKind::Whitespace.create_token(text.as_str()).into()
-            }
-            Trivia::Newline { text, .. } => {
-                SyntaxKind::Newline.create_token(text.as_str()).into()
-            }
+            Trivia::Whitespace(text) => SyntaxKind::Whitespace.create_token(text.as_str()).into(),
+            Trivia::Newline { text, .. } => SyntaxKind::Newline.create_token(text.as_str()).into(),
             Trivia::Comment(comment) => {
                 let kind = match comment.kind {
                     CommentKind::Line => SyntaxKind::LineComment,
@@ -217,15 +215,10 @@ impl Trivia {
                     CommentKind::Block => SyntaxKind::BlockComment,
                 };
                 let token: rowan::GreenToken = kind.create_token(comment.text.as_str());
-                let node = rowan::GreenNode::new(
-                    SyntaxKind::Comment.into(),
-                    vec![token.into()],
-                );
+                let node = rowan::GreenNode::new(SyntaxKind::Comment.into(), vec![token.into()]);
                 NodeOrToken::Node(node)
             }
-            Trivia::Comma(text) => {
-                SyntaxKind::Comma.create_token(text.as_str()).into()
-            }
+            Trivia::Comma(text) => SyntaxKind::Comma.create_token(text.as_str()).into(),
         }
     }
 }
@@ -788,7 +781,6 @@ impl Member {
     pub fn insert_before_index(&self) -> usize {
         self.span_range().start
     }
-
 }
 
 impl AstNode for Comment {
@@ -1073,7 +1065,6 @@ impl ArrayItem {
     pub fn insert_before_index(&self) -> usize {
         self.span_range().start
     }
-
 }
 
 fn collect_comment_trivia(node: &RedNode) -> Option<CommentTrivia> {
@@ -1126,10 +1117,7 @@ fn collect_container_leading_trivia(
     collect_trivia_slice(&children[start..leading_end])
 }
 
-fn trailing_trivia_end(
-    children: &[NodeOrToken<RedNode, RedToken>],
-    start: usize,
-) -> usize {
+fn trailing_trivia_end(children: &[NodeOrToken<RedNode, RedToken>], start: usize) -> usize {
     let mut cursor = start;
     while cursor < children.len() {
         let Some(item) = trivia_from_element(&children[cursor]) else {
@@ -1168,8 +1156,8 @@ fn collect_container_trailing_trivia(
         .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == item_kind))
         .map(|relative| start + relative);
 
-    let trailing_start = last_item_index
-        .map_or(start, |idx| trailing_trivia_end(&children, idx + 1));
+    let trailing_start =
+        last_item_index.map_or(start, |idx| trailing_trivia_end(&children, idx + 1));
     collect_trivia_slice(&children[trailing_start..end])
 }
 
@@ -1435,16 +1423,14 @@ pub fn detected_string_style_of_node(node: &RedNode) -> Option<QuoteStyle> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::{lexer::Lexer, RedNode, SyntaxKind};
     use crate::syntax::parser::Parser;
+    use crate::syntax::{lexer::Lexer, RedNode, SyntaxKind};
 
     fn parse_and_find_node(src: &str, kind: SyntaxKind) -> RedNode {
         let tokens = Lexer::new(src).lex();
         let parsed = Parser::new(src, tokens.tokens).parse();
         let root = RedNode::new_root(parsed.green);
-        root.descendants()
-            .find(|node| node.kind() == kind)
-            .unwrap()
+        root.descendants().find(|node| node.kind() == kind).unwrap()
     }
 
     #[test]
@@ -1497,10 +1483,7 @@ mod tests {
     #[test]
     fn test_key_body_text_float_is_treated_as_string() {
         let key = parse_and_find_node("{ 1.5: \"a\" }", SyntaxKind::Key);
-        assert_eq!(
-            Key::cast(key).unwrap().body_text(),
-            Some("1.5".to_string())
-        );
+        assert_eq!(Key::cast(key).unwrap().body_text(), Some("1.5".to_string()));
     }
 
     #[test]
@@ -1520,7 +1503,10 @@ mod tests {
     #[test]
     fn test_key_body_text_null_is_treated_as_string() {
         let key = parse_and_find_node("{ null: \"a\" }", SyntaxKind::Key);
-        assert_eq!(Key::cast(key).unwrap().body_text(), Some("null".to_string()));
+        assert_eq!(
+            Key::cast(key).unwrap().body_text(),
+            Some("null".to_string())
+        );
     }
 
     #[test]

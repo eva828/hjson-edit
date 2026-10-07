@@ -1,10 +1,5 @@
-use hjson_edit::{
-    high_level::{
-        ops::object::HjsonDocumentObjectEdit,
-        path::HjsonObjectPath,
-        value::HjsonValue,
-        HjsonDocument,
-    },
+use hjson_edit::high_level::{
+    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 
 // ------------------------------------------------------------------
@@ -30,7 +25,9 @@ fn hash_in_quoteless_key_is_part_of_key() {
     // try: key is "key#value", value is 1
     // current: lex error (unexpected character: #)
     let doc = HjsonDocument::parse("key#value: 1").unwrap();
-    let value = doc.get(HjsonObjectPath::parse("key#value").unwrap()).unwrap();
+    let value = doc
+        .get(HjsonObjectPath::parse("key#value").unwrap())
+        .unwrap();
     match value {
         HjsonValue::Integer(1) => {}
         ref other => panic!("expected Integer(1), got {:?}", other),

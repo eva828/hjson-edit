@@ -1,10 +1,5 @@
-use hjson_edit::{
-    high_level::{
-        ops::object::HjsonDocumentObjectEdit,
-        path::HjsonObjectPath,
-        value::HjsonValue,
-        HjsonDocument,
-    },
+use hjson_edit::high_level::{
+    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 
 // ------------------------------------------------------------------
@@ -90,7 +85,7 @@ fn root_number_under_i64_min_returns_error() {
 
 #[test]
 fn root_number_large_exponent_does_not_panic() {
-    let src = "1e99999999999999999999999999999999999999"; 
+    let src = "1e99999999999999999999999999999999999999";
     let doc = HjsonDocument::parse(src).unwrap();
     let _ = doc.get(HjsonObjectPath::parse("").unwrap());
 }

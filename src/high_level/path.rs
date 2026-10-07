@@ -178,5 +178,3 @@ impl HjsonObjectPath {
         self.segments.len()
     }
 }
-
-

@@ -6,13 +6,11 @@ fn parse_leading_dot_fails() {
     assert!(result.is_err());
 }
 
-
 #[test]
 fn parse_trailing_dot_fails() {
     let result = HjsonObjectPath::parse("a.");
     assert!(result.is_err());
 }
-
 
 #[test]
 fn parse_multiple_consecutive_dots_fails() {
