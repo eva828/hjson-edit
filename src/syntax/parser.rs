@@ -659,21 +659,41 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::Null
                 | SyntaxKind::UnquotedString => {
                     let start_offset = token.offset;
-                    let (text, byte_len) = self.read_raw_value(start_offset);
-                    let end_offset = start_offset + byte_len;
+                    let (_, byte_len) = self.read_raw_value(start_offset);
+                    let raw_end = start_offset + byte_len;
 
+                    // span の外にはみ出すトークンは取り込まない。取り込むと
+                    // そのトークンが覆う span 外のテキストが欠落する。
                     let mut consumed = 0;
-                    let mut i = self.position;
-                    while i < self.tokens.len() && self.tokens[i].offset < end_offset {
+                    while self.position + consumed < self.tokens.len() {
+                        let candidate = &self.tokens[self.position + consumed];
+                        if candidate.offset + candidate.text.len() > raw_end {
+                            break;
+                        }
                         consumed += 1;
-                        i += 1;
                     }
 
-                    if consumed == 1 {
+                    // 末尾の空白・改行は値に含めず、後続のトリビアとして残す。
+                    // コメントは quoteless 値の一部として扱う（参照実装と同じ）。
+                    while consumed > 0 {
+                        let last = &self.tokens[self.position + consumed - 1];
+                        if matches!(last.kind, SyntaxKind::Whitespace | SyntaxKind::Newline) {
+                            consumed -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if consumed <= 1 {
                         self.bump();
                         ValueBoundary::Closed
                     } else {
-                        self.builder.token(SyntaxKind::UnquotedString.into(), &text);
+                        // 値の文字列は実際に消費したトークンの範囲から取り出す。
+                        let last = &self.tokens[self.position + consumed - 1];
+                        let covered_end = last.offset + last.text.len();
+                        let text = &self.source[start_offset..covered_end];
+
+                        self.builder.token(SyntaxKind::UnquotedString.into(), text);
                         self.position += consumed;
                         ValueBoundary::Open
                     }
@@ -785,6 +805,29 @@ mod tests {
     fn parse_text(src: &str) -> ParseResult {
         let tokens = Lexer::new(src).lex();
         Parser::new(src, tokens.tokens).parse()
+    }
+
+    #[test]
+    fn test_multiline_block_string_in_quoteless_value_keeps_all_text() {
+        // 値の span を越えて伸びるブロック文字列トークンを取り込むと、
+        // そのトークンが覆うテキストが欠落する。
+        let src = "a: x{0} '''y\nz''' \nb: 2\n";
+        let parsed = parse_text(src);
+        assert!(!parsed.errors.is_empty());
+        let text_len: usize = crate::syntax::RedNode::new_root(parsed.green)
+            .text()
+            .len()
+            .into();
+        assert_eq!(text_len, src.len());
+    }
+
+    #[test]
+    fn test_multiline_block_string_in_quoteless_value_is_not_accepted_silently() {
+        let parsed = parse_text("a: x{0} '''y\nz''' \nb: 2\n");
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.message.contains("Unexpected token")));
     }
 
     #[test]
