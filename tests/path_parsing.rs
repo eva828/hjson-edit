@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use hjson_edit::high_level::path::{HjsonCommentPath, HjsonObjectPath};
+use hjson_edit::high_level::path::{HjsonCommentPath, HjsonObjectPath, PathSegment};
 
 #[test]
 fn parse_valid_simple_key_succeeds() {
@@ -108,14 +108,24 @@ fn parse_comment_path_unknown_suffix_fails() {
 fn path_split_first_returns_first_and_rest() {
     let path = HjsonObjectPath::parse("a.b.c").unwrap();
     let (first, rest) = path.split_first().unwrap();
+    assert_eq!(first, PathSegment::Key("a".to_string()));
     assert_eq!(rest.depth(), 2);
+    assert_eq!(
+        rest.segments(),
+        HjsonObjectPath::parse("b.c").unwrap().segments()
+    );
 }
 
 #[test]
 fn path_split_last_returns_rest_and_last() {
     let path = HjsonObjectPath::parse("a.b.c").unwrap();
     let (rest, last) = path.split_last().unwrap();
+    assert_eq!(last, PathSegment::Key("c".to_string()));
     assert_eq!(rest.depth(), 2);
+    assert_eq!(
+        rest.segments(),
+        HjsonObjectPath::parse("a.b").unwrap().segments()
+    );
 }
 
 #[test]
