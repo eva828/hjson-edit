@@ -14,9 +14,10 @@ pub(crate) mod number;
 pub(crate) mod syntax;
 
 // 公開APIを再エクスポート
-pub use format::{FormatConfig, Formatter};
+pub use format::{Format, FormatConfig, IndentStyle};
 pub use high_level::{
     error::HjsonEditError,
+    ops::merge::HjsonDocumentMerge,
     ops::object::{AppendMode, HjsonDocumentObjectEdit},
     path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
     value::HjsonValue,

@@ -382,6 +382,28 @@ Unicode と ASCII の混在パス
 #### 備考
 配列→オブジェクトと遷移するパス
 
+### get_value_with_brackets
+
+#### 入力
+`"{ spawn: x[i:CalamityEntropy/ProphecyToken]y }"` をパースし、パス `"spawn"` で get
+
+#### 期待動作
+`HjsonValue::String("x[i:CalamityEntropy/ProphecyToken]y")` が返る
+
+#### 備考
+`]` がアンクォート値の一部として正しく収集されることを確認（値開始時点では UnquotedString であり ScalarScanner 経由で収集される）
+
+### get_value_with_braces
+
+#### 入力
+`"{ value: a{1}b }"` をパースし、パス `"value"` で get
+
+#### 期待動作
+`HjsonValue::String("a{1}b")` が返る
+
+#### 備考
+`}` がアンクォート値の一部として正しく収集されることを確認
+
 ---
 
 ## 3. 設定・削除 (tests/set_and_remove.rs)
@@ -1180,6 +1202,28 @@ append_comment は `\n` で連結し、既存の Line スタイルを継承し�
 #### 備考
 クォートされた文字列でも空白のみの区切りは不可
 
+### unquoted_value_with_bracket_is_valid
+
+#### 入力
+`"{ v: x[y]z }"` をパース
+
+#### 期待動作
+パース成功 (`Ok`)
+
+#### 備考
+アンクォート値内の `]` はエラーにならない（`parser_stray_rbracket_produces_error` の回帰テスト）
+
+### unquoted_value_with_brace_is_valid
+
+#### 入力
+`"{ v: x{y}z }"` をパース
+
+#### 期待動作
+パース成功 (`Ok`)
+
+#### 備考
+アンクォート値内の `}` はエラーにならない（`parser_stray_rbrace_produces_error` の回帰テスト）
+
 ---
 
 ## 7. ラウンドトリップ (tests/round_trip.rs)
@@ -1235,6 +1279,50 @@ append_comment は `\n` で連結し、既存の Line スタイルを継承し�
 入力と出力が同一
 
 #### 備考
+
+### roundtrip_unquoted_with_bracket_in_value
+
+#### 入力
+`"{ spawn: x[i:CalamityEntropy/ProphecyToken]y }"` をパースし `to_string()` で出力
+
+#### 期待動作
+入力と出力が同一
+
+#### 備考
+アンクォート値に `[` と `]` を含むケースのラウンドトリップ（値先頭が非 punctuator なので ScalarScanner 経由で収集される）
+
+### roundtrip_unquoted_with_brace_in_value
+
+#### 入力
+`"{ value: a{1}b }"` をパースし `to_string()` で出力
+
+#### 期待動作
+入力と出力が同一
+
+#### 備考
+アンクォート値に `{` と `}` を含むケースのラウンドトリップ
+
+### roundtrip_unquoted_with_bracket_braceless
+
+#### 入力
+`"key: abc[xyz]def\n"` をパースし `to_string()` で出力
+
+#### 期待動作
+入力と出力が同一
+
+#### 備考
+ブレースレスルートで `]` を含むケース
+
+### roundtrip_unquoted_with_mixed_brackets
+
+#### 入力
+`"{ data: pre[abc]{def}post }"` をパースし `to_string()` で出力
+
+#### 期待動作
+入力と出力が同一
+
+#### 備考
+`]` と `}` の両方を含むケース
 
 ---
 

@@ -17,75 +17,13 @@ pub enum HjsonValue {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct RenderConfig<'a> {
+pub struct RenderConfig {
     pub string_style: Option<QuoteStyle>,
-    pub pretty: bool,
-    pub depth: usize,
-    pub newline: &'a str,
 }
 
-impl<'a> RenderConfig<'a> {
-    pub fn with_depth(self, depth: usize) -> Self {
-        Self { depth, ..self }
-    }
-
-    pub fn wrap_container_elements(
-        &self,
-        rendered: GreenElement,
-        container_is_empty: bool,
-    ) -> Vec<GreenElement> {
-        let mut result = Vec::new();
-        if container_is_empty {
-            if self.depth > 0 {
-                result.push(SyntaxKind::Newline.create_token(self.newline).into());
-                result.push(
-                    SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth).as_str())
-                        .into(),
-                );
-            }
-            result.push(rendered);
-            result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            if self.depth > 1 {
-                result.push(
-                    SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth - 1).as_str())
-                        .into(),
-                );
-            }
-        } else if self.pretty {
-            result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            if self.depth > 0 {
-                result.push(
-                    SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth).as_str())
-                        .into(),
-                );
-            }
-            result.push(rendered);
-            result.push(SyntaxKind::Newline.create_token(self.newline).into());
-            if self.depth > 1 {
-                result.push(
-                    SyntaxKind::Whitespace
-                        .create_token("  ".repeat(self.depth - 1).as_str())
-                        .into(),
-                );
-            }
-        } else {
-            result.push(rendered);
-        }
-        result
-    }
-}
-
-impl Default for RenderConfig<'_> {
+impl Default for RenderConfig {
     fn default() -> Self {
-        Self {
-            string_style: None,
-            pretty: false,
-            depth: 0,
-            newline: "\n",
-        }
+        Self { string_style: None }
     }
 }
 
@@ -144,7 +82,7 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
-    pub(crate) fn render_value_node(&self, config: &RenderConfig<'_>) -> GreenNode {
+    pub(crate) fn render_value_node(&self, config: &RenderConfig) -> GreenNode {
         GreenNode::new(SyntaxKind::Value.into(), self.render_body(config))
     }
 
@@ -152,7 +90,7 @@ impl HjsonValue {
         &self,
         key: &str,
         key_style: Option<QuoteStyle>,
-        config: &RenderConfig<'_>,
+        config: &RenderConfig,
         before_colon_trivia: &[Trivia],
         after_colon_trivia: &[Trivia],
     ) -> GreenNode {
@@ -164,47 +102,14 @@ impl HjsonValue {
             children.push(trivia.to_green_element());
         }
         children.push(SyntaxKind::Colon.create_token(":").into());
-        if after_colon_trivia.is_empty() {
-            children.push(SyntaxKind::Whitespace.create_token(" ").into());
-        } else {
-            for trivia in after_colon_trivia {
-                children.push(trivia.to_green_element());
-            }
+        for trivia in after_colon_trivia {
+            children.push(trivia.to_green_element());
         }
-        children.push(
-            self.render_value_node(&config.with_depth(config.depth + 1))
-                .into(),
-        );
+        children.push(self.render_value_node(config).into());
         GreenNode::new(SyntaxKind::Member.into(), children)
     }
 
-    /// Array の子要素1つを描画（前後の改行・インデント含む）
-    pub(crate) fn render_array_item_elements(
-        &self,
-        config: &RenderConfig<'_>,
-        container_is_empty: bool,
-    ) -> Vec<GreenElement> {
-        let rendered = self.render_value_node(config).into();
-        config.wrap_container_elements(rendered, container_is_empty)
-    }
-
-    /// Object の子 member1つを描画（前後の改行・インデント含む）
-    pub(crate) fn render_object_member_elements(
-        &self,
-        key: &str,
-        key_style: Option<QuoteStyle>,
-        config: &RenderConfig<'_>,
-        before_colon_trivia: &[Trivia],
-        after_colon_trivia: &[Trivia],
-        container_is_empty: bool,
-    ) -> Vec<GreenElement> {
-        let rendered = self
-            .render_member_node(key, key_style, config, before_colon_trivia, after_colon_trivia)
-            .into();
-        config.wrap_container_elements(rendered, container_is_empty)
-    }
-
-    fn render_body(&self, config: &RenderConfig<'_>) -> Vec<GreenElement> {
+    fn render_body(&self, config: &RenderConfig) -> Vec<GreenElement> {
         match self {
             HjsonValue::String(s) => {
                 let style = config.string_style.unwrap_or_else(|| {
@@ -236,84 +141,28 @@ impl HjsonValue {
             }
             HjsonValue::Array(items) => {
                 let mut children = vec![SyntaxKind::LBracket.create_token("[").into()];
-                if config.pretty && !items.is_empty() {
-                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
-                    for (idx, item) in items.iter().enumerate() {
-                        children.push(
-                            SyntaxKind::Whitespace
-                                .create_token(indent(config.depth).as_str())
-                                .into(),
-                        );
-                        children.push(
-                            item.render_value_node(&config.with_depth(config.depth + 1))
-                                .into(),
-                        );
-                        if idx + 1 != items.len() {
-                            children.push(SyntaxKind::Newline.create_token(config.newline).into());
-                        }
+                for (idx, item) in items.iter().enumerate() {
+                    children.push(item.render_value_node(config).into());
+                    if idx + 1 != items.len() {
+                        children.push(SyntaxKind::Comma.create_token(",").into());
                     }
-                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
-                    children.push(
-                        SyntaxKind::Whitespace
-                            .create_token(indent(config.depth.saturating_sub(1)).as_str())
-                            .into(),
-                    );
-                    children.push(SyntaxKind::RBracket.create_token("]").into());
-                } else {
-                    for (idx, item) in items.iter().enumerate() {
-                        children.push(item.render_value_node(config).into());
-                        if idx + 1 != items.len() {
-                            children.push(SyntaxKind::Comma.create_token(",").into());
-                        }
-                    }
-                    children.push(SyntaxKind::RBracket.create_token("]").into());
                 }
+                children.push(SyntaxKind::RBracket.create_token("]").into());
                 vec![GreenNode::new(SyntaxKind::Array.into(), children).into()]
             }
             HjsonValue::Object(entries) => {
                 let mut children = vec![SyntaxKind::LBrace.create_token("{").into()];
-                if config.pretty && !entries.is_empty() {
-                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
-                    for (idx, (key, value)) in entries.iter().enumerate() {
-                        children.push(
-                            SyntaxKind::Whitespace
-                                .create_token(indent(config.depth).as_str())
-                                .into(),
-                        );
-                        children.push(
-                            value
-                                .render_member_node(
-                                    key, None,
-                                    &config.with_depth(config.depth + 1),
-                                    &[],
-                                    &[Trivia::Whitespace(" ".to_string())],
-                                )
-                                .into(),
-                        );
-                        if idx + 1 != entries.len() {
-                            children.push(SyntaxKind::Newline.create_token(config.newline).into());
-                        }
-                    }
-                    children.push(SyntaxKind::Newline.create_token(config.newline).into());
+                for (idx, (key, value)) in entries.iter().enumerate() {
                     children.push(
-                        SyntaxKind::Whitespace
-                            .create_token(indent(config.depth.saturating_sub(1)).as_str())
+                        value
+                            .render_member_node(key, None, config, &[], &[])
                             .into(),
                     );
-                    children.push(SyntaxKind::RBrace.create_token("}").into());
-                } else {
-                    for (idx, (key, value)) in entries.iter().enumerate() {
-                        children.push(
-                            value
-                                .render_member_node(key, None, config, &[], &[Trivia::Whitespace(" ".to_string())])
-                                .into(),
-                        );
-                        if idx + 1 != entries.len() {
-                            children.push(SyntaxKind::Comma.create_token(",").into());
-                        }
+                    if idx + 1 != entries.len() {
+                        children.push(SyntaxKind::Comma.create_token(",").into());
                     }
-                    children.push(SyntaxKind::RBrace.create_token("}").into());
                 }
+                children.push(SyntaxKind::RBrace.create_token("}").into());
                 vec![GreenNode::new(SyntaxKind::Object.into(), children).into()]
             }
         }
@@ -456,10 +305,6 @@ fn render_string(text: &str, style: QuoteStyle) -> (SyntaxKind, String) {
     (style.syntax_kind(), style.render(text))
 }
 
-fn indent(depth: usize) -> String {
-    "  ".repeat(depth)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,65 +334,6 @@ mod tests {
     fn test_is_simple_unquoted_text_rejects_numeric_tokens() {
         assert!(!QuoteStyle::Unquoted.is_valid_for_text("123"));
         assert!(!QuoteStyle::Unquoted.is_valid_for_text("1.23"));
-    }
-
-    #[test]
-    fn test_wrap_container_elements_empty_container() {
-        let config = RenderConfig {
-            string_style: None,
-            pretty: true,
-            depth: 2,
-            newline: "\n",
-        };
-        let elements: Vec<GreenElement> = vec![
-            SyntaxKind::Value.create_token("a").into(),
-        ];
-
-        let wrap = config.wrap_container_elements(elements[0].clone(), true);
-        assert_eq!(wrap.len(), 5);
-        assert_eq!(wrap[0].kind(), SyntaxKind::Newline.into());
-        assert_eq!(wrap[1].kind(), SyntaxKind::Whitespace.into());
-        assert_eq!(wrap[2].kind(), SyntaxKind::Value.into());
-        assert_eq!(wrap[3].kind(), SyntaxKind::Newline.into());
-        assert_eq!(wrap[4].kind(), SyntaxKind::Whitespace.into());
-    }
-
-    #[test]
-    fn test_wrap_container_elements_pretty_not_empty() {
-        let config = RenderConfig {
-            string_style: None,
-            pretty: true,
-            depth: 2,
-            newline: "\n",
-        };
-        let elements: Vec<GreenElement> = vec![
-            SyntaxKind::Value.create_token("a").into(),
-        ];
-
-        let wrap = config.wrap_container_elements(elements[0].clone(), false);
-        assert_eq!(wrap.len(), 5);
-        assert_eq!(wrap[0].kind(), SyntaxKind::Newline.into());
-        assert_eq!(wrap[1].kind(), SyntaxKind::Whitespace.into());
-        assert_eq!(wrap[2].kind(), SyntaxKind::Value.into());
-        assert_eq!(wrap[3].kind(), SyntaxKind::Newline.into());
-        assert_eq!(wrap[4].kind(), SyntaxKind::Whitespace.into());
-    }
-
-    #[test]
-    fn test_wrap_container_elements_not_pretty_not_empty() {
-        let config = RenderConfig {
-            string_style: None,
-            pretty: false,
-            depth: 1,
-            newline: "\n",
-        };
-        let elements: Vec<GreenElement> = vec![
-            SyntaxKind::Value.create_token("a").into(),
-        ];
-
-        let wrap = config.wrap_container_elements(elements[0].clone(), false);
-        assert_eq!(wrap.len(), 1);
-        assert_eq!(wrap[0].kind(), SyntaxKind::Value.into());
     }
 
     #[test]

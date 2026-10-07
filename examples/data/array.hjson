@@ -1,0 +1,11 @@
+[
+	// aaa
+	a
+b // bbb
+	/* c */
+    c
+      d
+		e
+		{ ef: ghi }
+		j	k  l
+	]

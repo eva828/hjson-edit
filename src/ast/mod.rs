@@ -883,6 +883,13 @@ impl Key {
                         SyntaxKind::String => QuoteStyle::DoubleQuoted,
                         SyntaxKind::BlockString => QuoteStyle::Block,
                         SyntaxKind::UnquotedString => QuoteStyle::Unquoted,
+                        // HJSONではキーは常に文字列扱いのため、パーサがキーとして
+                        // 許容する数値・真偽値・nullトークンもそのまま文字列として返す
+                        SyntaxKind::Integer
+                        | SyntaxKind::Float
+                        | SyntaxKind::True
+                        | SyntaxKind::False
+                        | SyntaxKind::Null => return Some(text),
                         _ => return None,
                     };
                     Some(style.decode_body(&text))
@@ -1119,6 +1126,23 @@ fn collect_container_leading_trivia(
     collect_trivia_slice(&children[start..leading_end])
 }
 
+fn trailing_trivia_end(
+    children: &[NodeOrToken<RedNode, RedToken>],
+    start: usize,
+) -> usize {
+    let mut cursor = start;
+    while cursor < children.len() {
+        let Some(item) = trivia_from_element(&children[cursor]) else {
+            break;
+        };
+        cursor += 1;
+        if matches!(item, Trivia::Newline { .. }) {
+            break;
+        }
+    }
+    cursor
+}
+
 fn collect_container_trailing_trivia(
     node: &RedNode,
     item_kind: SyntaxKind,
@@ -1144,7 +1168,8 @@ fn collect_container_trailing_trivia(
         .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == item_kind))
         .map(|relative| start + relative);
 
-    let trailing_start = last_item_index.map_or(start, |idx| idx + 1);
+    let trailing_start = last_item_index
+        .map_or(start, |idx| trailing_trivia_end(&children, idx + 1));
     collect_trivia_slice(&children[trailing_start..end])
 }
 
@@ -1288,27 +1313,12 @@ fn collect_trailing_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
         node.children_with_tokens().collect::<Vec<_>>()
     };
 
-    let index = node.index();
-    let mut trivia = Vec::new();
-    for elem in children.iter().skip(index + 1) {
-        let Some(item) = trivia_from_element(elem) else {
-            break;
-        };
-
-        match item {
-            Trivia::Whitespace(text) => trivia.push(Trivia::Whitespace(text)),
-            Trivia::Comma(text) => trivia.push(Trivia::Comma(text)),
-            Trivia::Comment(comment) => {
-                trivia.push(Trivia::Comment(comment));
-            }
-            Trivia::Newline { kind, text } => {
-                trivia.push(Trivia::Newline { kind, text });
-                break;
-            }
-        }
-    }
-
-    trivia
+    let start = node.index() + 1;
+    let end = trailing_trivia_end(&children, start);
+    children[start..end]
+        .iter()
+        .filter_map(trivia_from_element)
+        .collect()
 }
 
 fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
@@ -1430,7 +1440,7 @@ mod tests {
 
     fn parse_and_find_node(src: &str, kind: SyntaxKind) -> RedNode {
         let tokens = Lexer::new(src).lex();
-        let parsed = Parser::new(tokens.tokens).parse();
+        let parsed = Parser::new(src, tokens.tokens).parse();
         let root = RedNode::new_root(parsed.green);
         root.descendants()
             .find(|node| node.kind() == kind)
@@ -1461,5 +1471,69 @@ mod tests {
         let comment_node = parse_and_find_node("// c", SyntaxKind::Comment);
 
         assert!(Value::cast(comment_node.clone()).is_err());
+    }
+
+    #[test]
+    fn test_key_body_text_unquoted_string() {
+        let key = parse_and_find_node("{ foo: \"a\" }", SyntaxKind::Key);
+        assert_eq!(Key::cast(key).unwrap().body_text(), Some("foo".to_string()));
+    }
+
+    #[test]
+    fn test_key_body_text_quoted_string() {
+        let key = parse_and_find_node("{ \"quoted key\": \"a\" }", SyntaxKind::Key);
+        assert_eq!(
+            Key::cast(key).unwrap().body_text(),
+            Some("quoted key".to_string())
+        );
+    }
+
+    #[test]
+    fn test_key_body_text_integer_is_treated_as_string() {
+        let key = parse_and_find_node("{ 0: \"a\" }", SyntaxKind::Key);
+        assert_eq!(Key::cast(key).unwrap().body_text(), Some("0".to_string()));
+    }
+
+    #[test]
+    fn test_key_body_text_float_is_treated_as_string() {
+        let key = parse_and_find_node("{ 1.5: \"a\" }", SyntaxKind::Key);
+        assert_eq!(
+            Key::cast(key).unwrap().body_text(),
+            Some("1.5".to_string())
+        );
+    }
+
+    #[test]
+    fn test_key_body_text_boolean_is_treated_as_string() {
+        let true_key = parse_and_find_node("{ true: \"a\" }", SyntaxKind::Key);
+        assert_eq!(
+            Key::cast(true_key).unwrap().body_text(),
+            Some("true".to_string())
+        );
+        let false_key = parse_and_find_node("{ false: \"a\" }", SyntaxKind::Key);
+        assert_eq!(
+            Key::cast(false_key).unwrap().body_text(),
+            Some("false".to_string())
+        );
+    }
+
+    #[test]
+    fn test_key_body_text_null_is_treated_as_string() {
+        let key = parse_and_find_node("{ null: \"a\" }", SyntaxKind::Key);
+        assert_eq!(Key::cast(key).unwrap().body_text(), Some("null".to_string()));
+    }
+
+    #[test]
+    fn test_object_with_numeric_keys_is_addressable() {
+        let root = parse_and_find_node("{ 0: \"a\", 1: \"b\" }", SyntaxKind::Object);
+        let object = Object::cast(root).unwrap();
+        assert_eq!(
+            object.member_by_key("0").unwrap().member_key(),
+            Some("0".to_string())
+        );
+        assert_eq!(
+            object.member_by_key("1").unwrap().member_key(),
+            Some("1".to_string())
+        );
     }
 }

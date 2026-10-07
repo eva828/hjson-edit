@@ -1,6 +1,6 @@
 use line_index::LineIndex;
 
-use crate::{high_level::path::HjsonObjectPath, syntax::lexer::LexError, ParseError, SyntaxKind};
+use crate::{ParseError, SyntaxKind, high_level::path::HjsonObjectPath, syntax::lexer::LexError};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum HjsonEditError {
@@ -27,6 +27,8 @@ pub enum HjsonEditError {
     },
     #[error("Array index out of bounds: index {index}, length {len}")]
     ArrayIndexOutOfBounds { index: usize, len: usize },
+    #[error("Cannot merge: {0}")]
+    MergeConflict(String),
 }
 
 fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex) -> String {

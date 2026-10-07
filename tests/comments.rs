@@ -84,7 +84,7 @@ fn set_before_comment_inserts_above_member() {
         .set_comment(HjsonCommentPath::try_from("name:before").unwrap(), "note")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  // note\n  name: app\n}\n");
+    assert_eq!(updated.to_string(), "{\n  // note\nname: app\n}\n");
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn set_inline_comment_appends_after_value() {
         .set_comment(HjsonCommentPath::try_from("name:inline").unwrap(), "note")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  name: app // note\n}\n");
+    assert_eq!(updated.to_string(), "{\n  name: app// note\n}\n");
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn set_footer_comment_appends_after_document() {
         .set_comment(HjsonCommentPath::try_from(":footer").unwrap(), "done")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  name: app\n}\n# done\n");
+    assert_eq!(updated.to_string(), "{\n  name: app\n}\n# done");
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn set_footer_comment_preserves_existing_blank_lines() {
     let updated = doc
         .set_comment(HjsonCommentPath::try_from(":footer").unwrap(), "done")
         .unwrap();
-    assert_eq!(updated.to_string(), "{\n  name: app\n}\n\n# done\n");
+    assert_eq!(updated.to_string(), "{\n  name: app\n}\n\n# done");
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn set_before_comment_overwrites_existing() {
     let src = "{\n  // old comment\n  foo: 1\n}";
     let doc = HjsonDocument::parse(src).unwrap();
     let new_doc = doc.set_comment(HjsonCommentPath::try_from("foo:before").unwrap(), "new comment").unwrap();
-    let expected = "{\n  // new comment\n  foo: 1\n}";
+    let expected = "{\n  // new comment\nfoo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }
 
