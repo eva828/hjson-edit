@@ -2,6 +2,12 @@
 name = "hjson-edit"
 version = "0.1.0"
 edition = "2021"
+description = "HJSON parser and editor that preserves positions and comments"
+license = "MIT"
+repository = "https://github.com/eva828/hjson-edit"
+readme = "README.md"
+keywords = ["hjson", "parser", "formatter", "editor", "cli"]
+categories = ["parser-implementations", "command-line-utilities"]
 
 [features]
 default = ["cli"]
