@@ -42,3 +42,9 @@ let document = HjsonDocument::parse(input)?;
 let edited = document.set(HjsonObjectPath::parse("name")?, "api")?;
 assert!(edited.to_string().contains("name: api"));
 ```
+
+## 制限
+
+- コンテナ（オブジェクト・配列）のネストは `MAX_NESTING_DEPTH`（128）まで。
+  超過した入力はスタックオーバーフローを避けるため `HjsonEditError` を返す。
+- 不正な入力は暗黙に補正せず、行・列付きのエラーとして返す。

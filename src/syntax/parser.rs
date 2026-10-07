@@ -45,6 +45,13 @@ pub struct ParseResult {
     pub errors: Vec<ParseError>,
 }
 
+/// コンテナ（オブジェクト・配列）のネスト上限。
+///
+/// 再帰下降の深さを制限し、スタックオーバーフローと深さに由来する
+/// 二次関数的な処理時間を防ぐ。一般的な設定ファイルの深さ（実運用の
+/// 設定ファイル群 542 件での最大は 7）に対して十分な余裕がある。
+pub const MAX_NESTING_DEPTH: usize = 128;
+
 /// 構文解析器
 pub struct Parser<'a> {
     source: &'a str,
@@ -52,6 +59,7 @@ pub struct Parser<'a> {
     position: usize,
     builder: rowan::GreenNodeBuilder<'static>,
     errors: Vec<ParseError>,
+    depth: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,11 +76,57 @@ impl<'a> Parser<'a> {
             position: 0,
             builder: rowan::GreenNodeBuilder::new(),
             errors: Vec::new(),
+            depth: 0,
         }
     }
 
     fn error(&mut self, offset: usize, message: impl Into<String>) {
         self.errors.push(ParseError::new(offset, message));
+    }
+
+    /// ネスト上限の範囲内なら深さを進めて true を返す。
+    fn enter_container(&mut self) -> bool {
+        if self.depth >= MAX_NESTING_DEPTH {
+            let offset = self.current().map_or(0, |token| token.offset);
+            let limit = MAX_NESTING_DEPTH;
+            self.error(offset, format!("Nesting too deep: limit is {limit}"));
+            return false;
+        }
+
+        self.depth += 1;
+        true
+    }
+
+    /// 上限を超えたコンテナの中身を再帰せずに読み飛ばす。
+    ///
+    /// 開き括弧は呼び出し元が消費済みであることを前提に、対応する閉じ括弧まで
+    /// 入れ子を数えながら消費する。
+    fn skip_container(&mut self, open: SyntaxKind, close: SyntaxKind) {
+        self.start_error_node();
+        self.bump();
+
+        let mut level = 0usize;
+        while !self.is_at_end() {
+            match self.current().map(|token| token.kind) {
+                Some(kind) if kind == open => level += 1,
+                Some(kind) if kind == close => {
+                    if level == 0 {
+                        self.bump();
+                        break;
+                    }
+                    level -= 1;
+                }
+                _ => {}
+            }
+
+            if self.current().is_some_and(|token| token.kind.is_trivia()) {
+                self.bump_trivia();
+            } else {
+                self.bump();
+            }
+        }
+
+        self.finish_error_node();
     }
 
     /// 値・キーの先頭に現れた未終端の文字列を検出する。
@@ -168,7 +222,9 @@ impl<'a> Parser<'a> {
         if !self.is_at_end() {
             if self.is_braceless_object_start() {
                 self.eat_root_header_trivia_for_braceless_object();
+                self.depth += 1;
                 self.parse_braceless_object();
+                self.depth -= 1;
                 has_body = true;
             } else {
                 self.eat_trivia();
@@ -373,12 +429,22 @@ impl<'a> Parser<'a> {
         if let Some(token_kind) = self.current_kind() {
             match token_kind {
                 SyntaxKind::LBrace => {
-                    self.parse_object();
+                    if self.enter_container() {
+                        self.parse_object();
+                        self.depth -= 1;
+                    } else {
+                        self.skip_container(SyntaxKind::LBrace, SyntaxKind::RBrace);
+                    }
                     self.builder.finish_node();
                     return ValueBoundary::Closed;
                 }
                 SyntaxKind::LBracket => {
-                    self.parse_array();
+                    if self.enter_container() {
+                        self.parse_array();
+                        self.depth -= 1;
+                    } else {
+                        self.skip_container(SyntaxKind::LBracket, SyntaxKind::RBracket);
+                    }
                     self.builder.finish_node();
                     return ValueBoundary::Closed;
                 }
@@ -835,6 +901,57 @@ mod tests {
     fn parse_text(src: &str) -> ParseResult {
         let tokens = Lexer::new(src).lex();
         Parser::new(src, tokens.tokens).parse()
+    }
+
+    fn nested_arrays(depth: usize) -> String {
+        format!("{}{}{}", "[".repeat(depth), "1", "]".repeat(depth))
+    }
+
+    #[test]
+    fn test_nesting_at_limit_is_accepted() {
+        let src = nested_arrays(MAX_NESTING_DEPTH);
+        let parsed = parse_text(&src);
+        assert!(parsed.errors.is_empty(), "errors: {:?}", parsed.errors);
+    }
+
+    #[test]
+    fn test_nesting_beyond_limit_is_rejected() {
+        let parsed = parse_text(&nested_arrays(MAX_NESTING_DEPTH + 1));
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.message.contains("Nesting too deep")));
+    }
+
+    #[test]
+    fn test_object_nesting_beyond_limit_is_rejected() {
+        let src = format!(
+            "{}1{}",
+            "{a:".repeat(MAX_NESTING_DEPTH + 1),
+            "}".repeat(MAX_NESTING_DEPTH + 1)
+        );
+        let parsed = parse_text(&src);
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.message.contains("Nesting too deep")));
+    }
+
+    #[test]
+    fn test_deep_nesting_does_not_panic_and_keeps_all_text() {
+        let src = nested_arrays(50_000);
+        let parsed = parse_text(&src);
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.message.contains("Nesting too deep")));
+
+        // 読み飛ばした分も含めて入力をすべて保持する
+        let text_len: usize = crate::syntax::RedNode::new_root(parsed.green)
+            .text()
+            .len()
+            .into();
+        assert_eq!(text_len, src.len());
     }
 
     #[test]

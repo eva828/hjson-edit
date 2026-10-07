@@ -24,7 +24,7 @@ pub use high_level::{
     HjsonDocument, Prefer,
 };
 pub use line_index::LineIndex;
-pub use syntax::parser::ParseError;
+pub use syntax::parser::{ParseError, MAX_NESTING_DEPTH};
 pub use syntax::GreenElement;
 pub use syntax::SyntaxKind;
 pub use syntax::{RedNode, RedToken};

@@ -79,3 +79,19 @@ fn cli_missing_file_argument_fails_with_usage_message() {
         .failure()
         .stderr(predicate::str::contains("error"));
 }
+
+#[test]
+fn cli_deeply_nested_input_fails_without_aborting() {
+    // 深い入れ子はスタックオーバーフローで abort せず、通常のエラー終了になること
+    let mut temp_file = NamedTempFile::new().unwrap();
+    write!(temp_file, "{}1{}", "[".repeat(20_000), "]".repeat(20_000)).unwrap();
+    temp_file.flush().unwrap();
+
+    for subcommand in ["parse", "format"] {
+        let mut cmd = Command::cargo_bin("hjson-edit").unwrap();
+        cmd.arg(subcommand).arg(temp_file.path());
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains("Nesting too deep"));
+    }
+}
