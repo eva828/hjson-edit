@@ -194,12 +194,17 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            if self.cursor.match_str("'''") {
+            // 閉じが実在するときだけ文字列トークンとして読む。実在しない場合の
+            // `"` / `'''` は quoteless 値の一部である。文字列として開始してよい位置
+            // かどうかの判定は構文解析器が値・キーの先頭で行う。
+            if self.cursor.remaining_str().starts_with("'''") && self.has_closing_block_string() {
+                self.cursor.match_str("'''");
                 self.read_block_string(start_offset);
                 continue;
             }
 
-            if self.cursor.match_char('"') {
+            if self.cursor.peek() == Some('"') && self.has_closing_quote_on_line() {
+                self.cursor.advance();
                 self.read_double_quoted_string(start_offset);
                 continue;
             }
@@ -218,6 +223,33 @@ impl<'a> Lexer<'a> {
             tokens: self.tokens,
             errors: self.errors,
         }
+    }
+
+    /// 同一行内に閉じクォートがあるかを調べる。
+    ///
+    /// 無い場合、この `"` は quoteless 値の一部として扱う。
+    fn has_closing_quote_on_line(&self) -> bool {
+        let mut chars = self.cursor.remaining_str().chars();
+        chars.next();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => return true,
+                '\n' | '\r' => return false,
+                '\\' => {
+                    chars.next();
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// 後方に閉じ `'''` があるかを調べる。
+    fn has_closing_block_string(&self) -> bool {
+        self.cursor
+            .remaining_str()
+            .get(3..)
+            .is_some_and(|tail| tail.contains("'''"))
     }
 
     fn skip_whitespace_no_newline(&mut self) {
@@ -540,11 +572,21 @@ mod tests {
     }
 
     #[test]
-    fn test_lexer_eof_after_backslash_produces_error() {
+    fn test_lexer_eof_after_backslash_is_not_a_string_token() {
+        // 閉じクォートが存在しないため文字列トークンにはならず、
+        // quoteless 値として扱われる（未終端の検出は構文解析器の責務）。
         let result = Lexer::new(r#""\"#).lex();
-        assert!(!result.errors.is_empty());
-        assert!(result.errors[0]
-            .message
-            .contains("Unterminated string literal"));
+        assert!(result.errors.is_empty());
+        assert!(result
+            .tokens
+            .iter()
+            .any(|t| t.kind == SyntaxKind::UnquotedString));
+    }
+
+    #[test]
+    fn test_lexer_quote_in_quoteless_value_is_not_a_string_token() {
+        let result = Lexer::new(r#"a: x{0}"y"#).lex();
+        assert!(result.errors.is_empty());
+        assert!(!result.tokens.iter().any(|t| t.kind == SyntaxKind::String));
     }
 }

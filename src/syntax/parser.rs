@@ -75,6 +75,34 @@ impl<'a> Parser<'a> {
         self.errors.push(ParseError::new(offset, message));
     }
 
+    /// 値・キーの先頭に現れた未終端の文字列を検出する。
+    ///
+    /// 字句解析器は quoteless 値の途中に現れる `"` / `'''` を文字列開始とみなさない。
+    /// したがって、それらが値・キーの先頭に現れた場合は未終端の文字列である。
+    fn reject_unterminated_string(&mut self) {
+        let Some(token) = self
+            .tokens
+            .get(self.position..)
+            .and_then(|rest| rest.iter().find(|t| !t.kind.is_trivia()))
+        else {
+            return;
+        };
+
+        if matches!(token.kind, SyntaxKind::String | SyntaxKind::BlockString) {
+            return;
+        }
+
+        let message = if token.text.starts_with('"') {
+            "Unterminated string literal"
+        } else if token.text.starts_with("'''") {
+            "Unterminated block string"
+        } else {
+            return;
+        };
+
+        self.error(token.offset, message);
+    }
+
     fn is_hjson_delimiter(&self, cursor: &Cursor) -> bool {
         let c = cursor.peek().unwrap();
         c == ','
@@ -333,6 +361,7 @@ impl<'a> Parser<'a> {
 
     fn parse_value(&mut self) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Value.into());
+        self.reject_unterminated_string();
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
         if self.is_at_end() {
@@ -573,6 +602,7 @@ impl<'a> Parser<'a> {
 
     fn parse_member(&mut self) -> ValueBoundary {
         self.builder.start_node(SyntaxKind::Member.into());
+        self.reject_unterminated_string();
         // Memberノード自身は先頭のtriviaを含めない。呼び出し側で先に消費される。
 
         self.builder.start_node(SyntaxKind::Key.into());
