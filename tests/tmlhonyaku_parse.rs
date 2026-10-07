@@ -1,9 +1,19 @@
+#![cfg(feature = "net-corpus")]
+
+//! 外部コーパスを取得してまとめてパースする統合テスト。
+//!
+//! ネットワークと GitHub API へのアクセスが必須のため、既定では実行しない。
+//! `cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored`
+
 use hjson_edit::HjsonDocument;
 
-/// ネットワークと GitHub API へのアクセスが必須のため、既定では実行しない。
-/// `cargo test --all-features --test tmlhonyaku_parse -- --ignored`
+/// 取得先のリポジトリ。
+const CORPUS_REPO: &str = "ExternalLocalizer/TMLHonyaku";
+/// 取得先を固定するコミット。コーパスを更新する場合はこの定数を書き換える。
+const CORPUS_COMMIT: &str = "26f3d22fc0df2815a81b9537d259c79f5d512bb9";
+
 #[test]
-#[ignore = "ネットワーク必須（ExternalLocalizer/TMLHonyaku を参照）"]
+#[ignore = "ネットワーク必須"]
 fn parse_all_tmlhonyaku_hjson_files() {
     let client = reqwest::blocking::Client::builder()
         .user_agent("hjson-edit-test")
@@ -11,7 +21,7 @@ fn parse_all_tmlhonyaku_hjson_files() {
         .expect("Failed to build HTTP client");
 
     let tree_url =
-        "https://api.github.com/repos/ExternalLocalizer/TMLHonyaku/git/trees/main?recursive=1";
+        format!("https://api.github.com/repos/{CORPUS_REPO}/git/trees/{CORPUS_COMMIT}?recursive=1");
     let resp = client
         .get(tree_url)
         .send()
@@ -36,14 +46,17 @@ fn parse_all_tmlhonyaku_hjson_files() {
         .collect();
 
     let total = hjson_files.len();
-    assert!(total > 0, "No .hjson files found in TMLHonyaku repository");
+    assert!(
+        total > 0,
+        "No .hjson files found in {CORPUS_REPO} at {CORPUS_COMMIT}"
+    );
     eprintln!("Found {} .hjson files. Starting parse...", total);
 
     let mut failures: Vec<(String, String)> = Vec::new();
 
     for (i, path) in hjson_files.iter().enumerate() {
         let raw_url = format!(
-            "https://raw.githubusercontent.com/ExternalLocalizer/TMLHonyaku/main/{}",
+            "https://raw.githubusercontent.com/{CORPUS_REPO}/{CORPUS_COMMIT}/{}",
             path
         );
         let content = match client.get(&raw_url).send() {
