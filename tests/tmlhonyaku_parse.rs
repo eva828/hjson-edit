@@ -1,7 +1,9 @@
 use hjson_edit::HjsonDocument;
 
+/// ネットワークと GitHub API へのアクセスが必須のため、既定では実行しない。
+/// `cargo test --all-features --test tmlhonyaku_parse -- --ignored`
 #[test]
-#[ignore]
+#[ignore = "ネットワーク必須（ExternalLocalizer/TMLHonyaku を参照）"]
 fn parse_all_tmlhonyaku_hjson_files() {
     let client = reqwest::blocking::Client::builder()
         .user_agent("hjson-edit-test")
@@ -27,11 +29,10 @@ fn parse_all_tmlhonyaku_hjson_files() {
 
     let hjson_files: Vec<&str> = entries
         .iter()
-        .filter(|e| {
-            e["type"].as_str() == Some("blob")
-                && e["path"].as_str().map_or(false, |p| p.ends_with(".hjson"))
+        .filter_map(|entry| {
+            let path = entry["path"].as_str()?;
+            (entry["type"].as_str() == Some("blob") && path.ends_with(".hjson")).then_some(path)
         })
-        .map(|e| e["path"].as_str().unwrap())
         .collect();
 
     let total = hjson_files.len();
@@ -46,7 +47,13 @@ fn parse_all_tmlhonyaku_hjson_files() {
             path
         );
         let content = match client.get(&raw_url).send() {
-            Ok(r) if r.status().is_success() => r.text().unwrap_or_default(),
+            Ok(r) if r.status().is_success() => match r.text() {
+                Ok(text) => text,
+                Err(e) => {
+                    failures.push((path.to_string(), format!("body read error: {}", e)));
+                    continue;
+                }
+            },
             Ok(r) => {
                 failures.push((path.to_string(), format!("HTTP {}", r.status())));
                 continue;
