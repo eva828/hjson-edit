@@ -11,7 +11,7 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
 
     let doc = match HjsonDocument::parse(&content) {
         Ok(document) => document,
-        Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
+        Err(error) => anyhow::bail!("{error}"),
     };
 
     let indent = match matches

@@ -43,7 +43,7 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
             }
             Ok(())
         }
-        Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
+        Err(error) => anyhow::bail!("{error}"),
     }
 }
 

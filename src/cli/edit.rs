@@ -341,7 +341,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
 
     let mut doc = match HjsonDocument::parse(&content) {
         Ok(document) => document,
-        Err(error) => anyhow::bail!("Parse errors:\n  {}", error),
+        Err(error) => anyhow::bail!("{error}"),
     };
 
     let ops = collect_ops(matches)?;

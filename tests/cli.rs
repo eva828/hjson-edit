@@ -81,6 +81,25 @@ fn cli_missing_file_argument_fails_with_usage_message() {
 }
 
 #[test]
+fn cli_parse_error_is_reported_once_without_duplicated_prefix() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    write!(temp_file, "{{\n  \"a\": 1\n").unwrap();
+    temp_file.flush().unwrap();
+
+    for subcommand in ["parse", "format"] {
+        let mut cmd = Command::cargo_bin("hjson-edit").unwrap();
+        cmd.arg(subcommand).arg(temp_file.path());
+        let assert = cmd.assert().failure();
+        let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+        assert_eq!(
+            stderr.matches("Parse errors:").count(),
+            1,
+            "stderr: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn cli_deeply_nested_input_fails_without_aborting() {
     // 深い入れ子はスタックオーバーフローで abort せず、通常のエラー終了になること
     let mut temp_file = NamedTempFile::new().unwrap();
