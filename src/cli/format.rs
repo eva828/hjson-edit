@@ -6,8 +6,7 @@ use std::path::PathBuf;
 
 pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let content = super::read_input(path)?;
 
     let doc = match HjsonDocument::parse(&content) {
         Ok(document) => document,

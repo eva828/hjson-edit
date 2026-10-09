@@ -22,8 +22,7 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
         .map(|s| s.as_str())
         .unwrap_or("auto");
     let simple = *matches.get_one::<bool>("simple").unwrap_or(&false);
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let content = super::read_input(path)?;
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {

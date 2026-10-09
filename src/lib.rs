@@ -27,4 +27,5 @@ pub use line_index::LineIndex;
 pub use syntax::parser::{ParseError, MAX_NESTING_DEPTH};
 pub use syntax::GreenElement;
 pub use syntax::SyntaxKind;
+pub use syntax::MAX_INPUT_BYTES;
 pub use syntax::{RedNode, RedToken};

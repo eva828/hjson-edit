@@ -16,6 +16,7 @@ use crate::high_level::ops::object::AppendMode;
 use crate::high_level::style::detect_newline_from_ast;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
+use crate::syntax::MAX_INPUT_BYTES;
 use crate::RedNode;
 use line_index::LineIndex;
 use rowan::GreenNode;
@@ -38,9 +39,25 @@ pub struct HjsonDocument {
     newline: String,
 }
 
+/// 入力長が上限（`MAX_INPUT_BYTES`）以内かを検査する。
+///
+/// 位置情報が u32 のため、それを超える入力は正しい位置を報告できない。
+pub(crate) fn check_input_len(len: usize) -> Result<(), HjsonEditError> {
+    if len > MAX_INPUT_BYTES {
+        return Err(HjsonEditError::InputTooLong {
+            len,
+            limit: MAX_INPUT_BYTES,
+        });
+    }
+
+    Ok(())
+}
+
 impl HjsonDocument {
     /// HJSON文字列をパースしてドキュメントを作成
     pub fn parse(input: &str) -> Result<Self, HjsonEditError> {
+        check_input_len(input.len())?;
+
         let lex_result = Lexer::new(input).lex();
 
         if !lex_result.errors.is_empty() {
@@ -122,5 +139,25 @@ impl HjsonDocument {
 impl std::fmt::Display for HjsonDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.root)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_length_at_limit_is_accepted() {
+        assert!(check_input_len(MAX_INPUT_BYTES).is_ok());
+    }
+
+    #[test]
+    fn input_length_over_limit_is_rejected() {
+        let result = check_input_len(MAX_INPUT_BYTES + 1);
+        assert!(matches!(
+            result,
+            Err(HjsonEditError::InputTooLong { len, limit })
+                if len == MAX_INPUT_BYTES + 1 && limit == MAX_INPUT_BYTES
+        ));
     }
 }

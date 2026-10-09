@@ -29,6 +29,8 @@ pub enum HjsonEditError {
     ArrayIndexOutOfBounds { index: usize, len: usize },
     #[error("Cannot merge: {0}")]
     MergeConflict(String),
+    #[error("Input too long: {len} bytes, limit is {limit} bytes")]
+    InputTooLong { len: usize, limit: usize },
 }
 
 fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex) -> String {

@@ -336,8 +336,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     use std::path::PathBuf;
 
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let content = super::read_input(path)?;
 
     let mut doc = match HjsonDocument::parse(&content) {
         Ok(document) => document,

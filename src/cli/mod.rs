@@ -1,8 +1,27 @@
 use clap::{Arg, ArgAction, Command};
 
+use anyhow::{Context, Result};
+use hjson_edit::MAX_INPUT_BYTES;
+use std::path::Path;
+
 mod edit;
 mod format;
 mod parse;
+
+/// ファイルを読み込む前にサイズを検査する。
+///
+/// 上限を超える入力は位置情報を正しく扱えないため、読み込まずにエラーを返す。
+pub(crate) fn read_input(path: &Path) -> Result<String> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let len = metadata.len();
+    if len > MAX_INPUT_BYTES as u64 {
+        anyhow::bail!("Input too long: {len} bytes, limit is {MAX_INPUT_BYTES} bytes");
+    }
+
+    std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file: {}", path.display()))
+}
 
 pub use edit::edit_command;
 pub use format::run_format;
