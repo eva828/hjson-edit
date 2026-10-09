@@ -3,8 +3,9 @@ use rowan::GreenNode;
 use crate::ast::{AstNode, Member, Object as AstObject, QuoteStyle, ValueContent};
 use crate::high_level::{
     error::HjsonEditError,
+    ops::{ensure_depth_within_limit, receiving_container_depth, relative_container_depth},
     path::{HjsonObjectPath, PathSegment},
-    resolve::resolve_body,
+    resolve::{resolve_body, ExistingPrefix, PathResolver},
     HjsonDocument,
 };
 use crate::syntax::{RedNode, SyntaxKind};
@@ -36,6 +37,15 @@ impl HjsonDocumentMerge for HjsonDocument {
     ) -> Result<Self, HjsonEditError> {
         let source_object = resolve_source_object(source)?;
         let root = self.syntax_root().clone();
+
+        // マージ後の深さが上限を超えないか。
+        // パスで新規に作られる分と、source が持ち込む分を足して見積もる。
+        let resolver = PathResolver::new(root.clone());
+        let ExistingPrefix { ancestor, consumed } = resolver.resolve_existing_prefix(path);
+        let created = path.depth() - consumed;
+        let carried = relative_container_depth(&source_object).saturating_sub(1);
+        ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
+
         let updated = merge_from_root(root, path, &source_object)?;
         Ok(self.clone().root(updated))
     }

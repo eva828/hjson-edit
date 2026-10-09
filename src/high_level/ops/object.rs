@@ -7,6 +7,7 @@ use crate::{
     },
     high_level::{
         error::HjsonEditError,
+        ops::{container_depth_of_value, ensure_depth_within_limit, receiving_container_depth},
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         resolve::{resolve_body, ExistingPrefix, ParentResolution, PathResolver},
         value::{HjsonValue, RenderConfig},
@@ -73,6 +74,8 @@ pub(crate) fn replace_root_value(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
 ) -> Result<GreenNode, HjsonEditError> {
+    ensure_depth_within_limit(container_depth_of_value(value))?;
+
     let child = resolve_body(root)?;
     let config = RenderConfig { string_style: None };
     let updated_child = render_value_like_node(&child, value, string_style, &config);
@@ -92,6 +95,10 @@ pub(crate) fn rebuild_tree_with_set(
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
         Ok(ParentResolution { parent, last }) => {
+            ensure_depth_within_limit(
+                receiving_container_depth(&parent) + container_depth_of_value(value),
+            )?;
+
             let new_parent = apply_set_to_node(&parent, &last, value, string_style, append_mode)?;
 
             if parent.kind() == SyntaxKind::Root {
@@ -107,6 +114,15 @@ pub(crate) fn rebuild_tree_with_set(
             }
 
             let missing = &path.segments()[consumed];
+
+            // 深さの検査は値の構築前に行う。深い値を作ってから捨てると、
+            // HjsonValue の再帰的な Drop でスタックを使い切るため。
+            // `missing` は受け取り先のコンテナ内のキーなので、新しく増える
+            // コンテナは残りのセグメント分だけ。
+            let created = path.depth() - consumed - 1;
+            let carried = container_depth_of_value(value);
+            ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
+
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
             let new_parent =
                 apply_set_to_node(&ancestor, missing, &nested_value, string_style, append_mode)?;
