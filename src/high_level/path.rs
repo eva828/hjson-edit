@@ -2,25 +2,25 @@ use std::fmt::Debug;
 
 use crate::high_level::error::HjsonEditError;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArrayPathSegment {
     Index(usize),    // [n]
     InsertAt(usize), // [+n]
     Push,            // [-]
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathSegment {
     Key(String),
     Array(ArrayPathSegment),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HjsonObjectPath {
     segments: Vec<PathSegment>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HjsonCommentPath {
     Header,
     Footer,

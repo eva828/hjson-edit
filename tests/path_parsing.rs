@@ -1,6 +1,8 @@
 use std::convert::TryFrom;
 
-use hjson_edit::high_level::path::{HjsonCommentPath, HjsonObjectPath, PathSegment};
+use hjson_edit::high_level::path::{
+    ArrayPathSegment, HjsonCommentPath, HjsonObjectPath, PathSegment,
+};
 
 #[test]
 fn parse_valid_simple_key_succeeds() {
@@ -110,10 +112,7 @@ fn path_split_first_returns_first_and_rest() {
     let (first, rest) = path.split_first().unwrap();
     assert_eq!(first, PathSegment::Key("a".to_string()));
     assert_eq!(rest.depth(), 2);
-    assert_eq!(
-        rest.segments(),
-        HjsonObjectPath::parse("b.c").unwrap().segments()
-    );
+    assert_eq!(rest, HjsonObjectPath::parse("b.c").unwrap());
 }
 
 #[test]
@@ -122,10 +121,7 @@ fn path_split_last_returns_rest_and_last() {
     let (rest, last) = path.split_last().unwrap();
     assert_eq!(last, PathSegment::Key("c".to_string()));
     assert_eq!(rest.depth(), 2);
-    assert_eq!(
-        rest.segments(),
-        HjsonObjectPath::parse("a.b").unwrap().segments()
-    );
+    assert_eq!(rest, HjsonObjectPath::parse("a.b").unwrap());
 }
 
 #[test]
@@ -134,4 +130,32 @@ fn path_split_at_returns_two_halves() {
     let (left, right) = path.split_at(1).unwrap();
     assert_eq!(left.depth(), 1);
     assert_eq!(right.depth(), 2);
+}
+
+#[test]
+fn path_equality_compares_segments() {
+    let path = HjsonObjectPath::parse("a.b[0]").unwrap();
+    assert_eq!(path, HjsonObjectPath::parse("a.b[0]").unwrap());
+    assert_ne!(path, HjsonObjectPath::parse("a.b[1]").unwrap());
+    assert_ne!(path, HjsonObjectPath::parse("a.b").unwrap());
+}
+
+#[test]
+fn array_path_segment_operators_compare_equal() {
+    assert_eq!(ArrayPathSegment::Push, ArrayPathSegment::Push);
+    assert_ne!(ArrayPathSegment::Index(0), ArrayPathSegment::InsertAt(0));
+    assert_ne!(ArrayPathSegment::Index(0), ArrayPathSegment::Index(1));
+}
+
+#[test]
+fn comment_path_equality_compares_kind_and_target() {
+    assert_eq!(
+        HjsonCommentPath::try_from("a:inline").unwrap(),
+        HjsonCommentPath::try_from("a:inline").unwrap()
+    );
+    assert_ne!(
+        HjsonCommentPath::try_from("a:inline").unwrap(),
+        HjsonCommentPath::try_from("a:before").unwrap()
+    );
+    assert_ne!(HjsonCommentPath::Header, HjsonCommentPath::Footer);
 }
