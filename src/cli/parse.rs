@@ -548,6 +548,7 @@ impl AstTreeViewBuilder {
             ScalarValue::String(string) => {
                 let label = match string.quote_style() {
                     QuoteStyle::DoubleQuoted => format!("String {:?}", string.body_text()),
+                    QuoteStyle::SingleQuoted => format!("String {:?}", string.body_text()),
                     QuoteStyle::Block => format!("BlockString {:?}", string.body_text()),
                     QuoteStyle::Unquoted => format!("UnquotedString {:?}", string.body_text()),
                 };

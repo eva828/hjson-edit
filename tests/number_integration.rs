@@ -18,12 +18,12 @@ fn root_number_with_leading_zero_returns_string() {
 }
 
 #[test]
-fn root_number_with_trailing_dot_returns_float() {
+fn root_number_with_trailing_dot_is_a_string() {
     let doc = HjsonDocument::parse("1.").unwrap();
     let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
     match value {
-        HjsonValue::Float(v) => assert_eq!(v, 1.0),
-        ref other => panic!("expected Float(1.0), got {:?}", other),
+        HjsonValue::String(text) => assert_eq!(text, "1."),
+        ref other => panic!("expected String(\"1.\"), got {:?}", other),
     }
 }
 

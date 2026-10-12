@@ -38,11 +38,16 @@ impl HjsonNumber {
         }
 
         if idx < bytes.len() && bytes[idx] == b'.' {
-            idx += 1;
-            has_fraction_or_exp = true;
+            let fraction_start = idx + 1;
+            idx = fraction_start;
             while idx < bytes.len() && bytes[idx].is_ascii_digit() {
                 idx += 1;
             }
+            // 基準実装（hjson-cs）は `5.` のような小数部の無い形を数値として扱わない
+            if fraction_start == idx {
+                return None;
+            }
+            has_fraction_or_exp = true;
         }
 
         if idx < bytes.len() && matches!(bytes[idx], b'e' | b'E') {
@@ -64,7 +69,12 @@ impl HjsonNumber {
             return None;
         }
 
-        Some(if has_fraction_or_exp {
+        // `-0` は基準実装と同じく double として扱う（符号を保持するため）
+        let negative_zero = !has_fraction_or_exp
+            && text.starts_with('-')
+            && text[1..].bytes().all(|byte| byte == b'0');
+
+        Some(if has_fraction_or_exp || negative_zero {
             NumberKind::Float
         } else {
             NumberKind::Integer
@@ -85,7 +95,8 @@ mod tests {
         assert_eq!(HjsonNumber::classify("0"), Some(NumberKind::Integer));
         assert_eq!(HjsonNumber::classify("123"), Some(NumberKind::Integer));
         assert_eq!(HjsonNumber::classify("-456"), Some(NumberKind::Integer));
-        assert_eq!(HjsonNumber::classify("-0"), Some(NumberKind::Integer));
+        // `-0` は符号を保つため double として扱う（基準実装と同じ）
+        assert_eq!(HjsonNumber::classify("-0"), Some(NumberKind::Float));
     }
 
     #[test]
@@ -105,10 +116,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_trailing_decimal_returns_float() {
-        // "1." has a decimal point, should be treated as Float.
-        assert_eq!(HjsonNumber::classify("1."), Some(NumberKind::Float));
-        assert_eq!(HjsonNumber::classify("123."), Some(NumberKind::Float));
+    fn classify_trailing_decimal_is_not_a_number() {
+        // 基準実装（hjson-cs）は `1.` を文字列として扱う
+        assert_eq!(HjsonNumber::classify("1."), None);
+        assert_eq!(HjsonNumber::classify("123."), None);
     }
 
     #[test]
@@ -156,8 +167,9 @@ mod tests {
         assert!(HjsonNumber::is_valid("42"));
         assert!(HjsonNumber::is_valid("-1.5"));
         assert!(HjsonNumber::is_valid("1e10"));
-        assert!(HjsonNumber::is_valid("1."));
-        assert!(HjsonNumber::is_valid("123."));
+        // 小数部の無い末尾ドットは数値として扱わない（基準実装と同じ）
+        assert!(!HjsonNumber::is_valid("1."));
+        assert!(!HjsonNumber::is_valid("123."));
     }
 
     #[test]

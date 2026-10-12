@@ -95,9 +95,7 @@ pub fn scan_key(source: &str, start: usize) -> Result<Key, ScanError> {
                 end: position,
             });
         }
-        if c == '\n' || c == '\r' {
-            break;
-        }
+        // キーと `:` の間の空白・改行は許される（内容が続く場合のみ誤り）
         if is_punctuator(c) {
             return Err(ScanError::new(
                 position,

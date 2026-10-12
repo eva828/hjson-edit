@@ -3,7 +3,3 @@
 # 更新: CONFORMANCE_BLESS=1 cargo test --features net-conformance --test conformance_assets -- --ignored
 #
 # ファイル名<TAB>判断<TAB>理由
-kan_test.hjson	修正予定	数値の解釈（-0 など。Phase 5）
-pass1_test.json	修正予定	\uXXXX のデコード（Phase 3）
-strings2_test.hjson	修正予定	単一引用符文字列と \' エスケープ（Phase 3）
-strings_test.hjson	修正予定	複数行文字列のインデントと末尾改行（Phase 3）

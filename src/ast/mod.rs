@@ -7,6 +7,7 @@ use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuoteStyle {
     DoubleQuoted,
+    SingleQuoted,
     Block,
     Unquoted,
 }
@@ -41,80 +42,159 @@ impl CommentKind {
     }
 }
 
-impl QuoteStyle {
-    pub fn decode_body(&self, raw: &str) -> String {
-        match self {
-            QuoteStyle::DoubleQuoted => {
-                let inner = raw
-                    .strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
-                    .unwrap_or(raw);
-                let mut out = String::new();
-                let mut chars = inner.chars().peekable();
+/// 引用符付き文字列の本体をデコードする。
+///
+/// 基準実装（hjson-cs の ReadStringLiteral）と同じく `\uXXXX` をデコードし、
+/// サロゲート対を 1 文字にまとめる。未知のエスケープはそのまま残す。
+fn decode_escapes(inner: &str) -> String {
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
 
-                while let Some(c) = chars.next() {
-                    if c != '\\' {
-                        out.push(c);
-                        continue;
-                    }
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
 
-                    match chars.next() {
-                        Some('"') => out.push('"'),
-                        Some('\\') => out.push('\\'),
-                        Some('/') => out.push('/'),
-                        Some('b') => out.push('\u{0008}'),
-                        Some('f') => out.push('\u{000C}'),
-                        Some('n') => out.push('\n'),
-                        Some('r') => out.push('\r'),
-                        Some('t') => out.push('\t'),
-                        Some(other) => {
-                            out.push('\\');
-                            out.push(other);
+        match chars.next() {
+            Some('"') => out.push('"'),
+            Some('\'') => out.push('\''),
+            Some('\\') => out.push('\\'),
+            Some('/') => out.push('/'),
+            Some('b') => out.push('\u{0008}'),
+            Some('f') => out.push('\u{000C}'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('u') => {
+                let mut code = 0u32;
+                let mut ok = true;
+                for _ in 0..4 {
+                    match chars.next().and_then(|hex| hex.to_digit(16)) {
+                        Some(digit) => code = code * 16 + digit,
+                        None => {
+                            ok = false;
+                            break;
                         }
-                        None => break,
                     }
                 }
+                if !ok {
+                    out.push_str("\\u");
+                    continue;
+                }
 
-                out
+                // サロゲート対を 1 文字にまとめる
+                if (0xD800..0xDC00).contains(&code) {
+                    let saved = chars.clone();
+                    let mut low = None;
+                    if chars.next() == Some('\\') && chars.next() == Some('u') {
+                        let mut value = 0u32;
+                        let mut valid = true;
+                        for _ in 0..4 {
+                            match chars.next().and_then(|hex| hex.to_digit(16)) {
+                                Some(digit) => value = value * 16 + digit,
+                                None => {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if valid && (0xDC00..0xE000).contains(&value) {
+                            low = Some(value);
+                        }
+                    }
+                    if let Some(low) = low {
+                        let combined = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                        out.push(char::from_u32(combined).unwrap_or('\u{FFFD}'));
+                        continue;
+                    }
+                    chars = saved;
+                }
+
+                out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
+            }
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+
+    out
+}
+
+/// トークンの行内カラム（複数行文字列のインデント基準）を求める。
+pub fn token_column(token: &RedToken) -> usize {
+    let mut node = match token.parent() {
+        Some(parent) => parent,
+        None => return 0,
+    };
+    while let Some(parent) = node.parent() {
+        node = parent;
+    }
+
+    let start: usize = token.text_range().start().into();
+    let text = node.text().to_string();
+    if start > text.len() {
+        return 0;
+    }
+    let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
+    text[line_start..start].chars().count()
+}
+
+impl QuoteStyle {
+    pub fn decode_body(&self, raw: &str, indent: usize) -> String {
+        match self {
+            QuoteStyle::DoubleQuoted | QuoteStyle::SingleQuoted => {
+                let quote = if matches!(self, QuoteStyle::DoubleQuoted) {
+                    '"'
+                } else {
+                    '\''
+                };
+                let inner = raw
+                    .strip_prefix(quote)
+                    .and_then(|text| text.strip_suffix(quote))
+                    .unwrap_or(raw);
+
+                decode_escapes(inner)
             }
             QuoteStyle::Block => {
                 let inner = raw
                     .strip_prefix("'''")
-                    .and_then(|s| s.strip_suffix("'''"))
+                    .and_then(|text| text.strip_suffix("'''"))
                     .unwrap_or(raw)
                     .replace("\r\n", "\n")
                     .replace('\r', "\n");
 
-                let mut lines = inner.split('\n').collect::<Vec<_>>();
-                while lines.first().is_some_and(|line| line.trim().is_empty()) {
-                    lines.remove(0);
+                // 先頭の空行は読み飛ばし、末尾の改行は 1 つだけ落とす（基準実装と同じ）
+                let mut body = inner.strip_prefix('\n').unwrap_or(inner.as_str());
+                if let Some(stripped) = body.strip_suffix('\n') {
+                    body = stripped;
                 }
-                while lines.last().is_some_and(|line| line.trim().is_empty()) {
+
+                // `'''` のカラム分のインデントを各行から取り除く
+                let mut lines: Vec<String> = body
+                    .split('\n')
+                    .map(|line| {
+                        let mut skip = indent;
+                        let mut chars = line.char_indices();
+                        while skip > 0 {
+                            match chars.next() {
+                                Some((_, c)) if c == ' ' || c == '\t' => skip -= 1,
+                                _ => break,
+                            }
+                        }
+                        let taken = indent - skip;
+                        line.chars().skip(taken).collect::<String>()
+                    })
+                    .collect();
+
+                // 閉じ `'''` の行のインデントを落とした結果できる末尾の空行 1 つを除く
+                if lines.last().is_some_and(|line| line.is_empty()) {
                     lines.pop();
                 }
-
-                if lines.is_empty() {
-                    return String::new();
-                }
-
-                let indent = lines
-                    .iter()
-                    .filter(|line| !line.trim().is_empty())
-                    .map(|line| line.chars().take_while(|c| matches!(c, ' ' | '\t')).count())
-                    .min()
-                    .unwrap_or(0);
-
-                lines
-                    .into_iter()
-                    .map(|line| {
-                        if line.trim().is_empty() {
-                            String::new()
-                        } else {
-                            line.chars().skip(indent).collect::<String>()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                lines.join("\n")
             }
             QuoteStyle::Unquoted => raw.to_string(),
         }
@@ -122,6 +202,25 @@ impl QuoteStyle {
 
     pub fn encode_body(&self, body: &str) -> String {
         match self {
+            QuoteStyle::SingleQuoted => {
+                let mut out = String::with_capacity(body.len() + 2);
+                for c in body.chars() {
+                    match c {
+                        '\\' => out.push_str("\\\\"),
+                        '\'' => out.push_str("\\'"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        '\u{0008}' => out.push_str("\\b"),
+                        '\u{000C}' => out.push_str("\\f"),
+                        c if c.is_control() => {
+                            out.push_str(&format!("\\u{:04x}", c as u32));
+                        }
+                        c => out.push(c),
+                    }
+                }
+                out
+            }
             QuoteStyle::DoubleQuoted => {
                 let mut out = String::with_capacity(body.len() + 2);
                 for c in body.chars() {
@@ -155,7 +254,7 @@ impl QuoteStyle {
                     && !matches!(text, "true" | "false" | "null")
                     && !crate::number::HjsonNumber::is_valid(text)
             }
-            QuoteStyle::DoubleQuoted | QuoteStyle::Block => true,
+            QuoteStyle::DoubleQuoted | QuoteStyle::SingleQuoted | QuoteStyle::Block => true,
         }
     }
 
@@ -163,6 +262,7 @@ impl QuoteStyle {
         let encoded = self.encode_body(body);
         match self {
             QuoteStyle::DoubleQuoted => format!("\"{}\"", encoded),
+            QuoteStyle::SingleQuoted => format!("'{}'", encoded),
             QuoteStyle::Block => format!("'''{}'''", encoded),
             QuoteStyle::Unquoted => encoded,
         }
@@ -170,7 +270,7 @@ impl QuoteStyle {
 
     pub fn syntax_kind(&self) -> SyntaxKind {
         match self {
-            QuoteStyle::DoubleQuoted => SyntaxKind::String,
+            QuoteStyle::DoubleQuoted | QuoteStyle::SingleQuoted => SyntaxKind::String,
             QuoteStyle::Block => SyntaxKind::BlockString,
             QuoteStyle::Unquoted => SyntaxKind::UnquotedString,
         }
@@ -872,7 +972,13 @@ impl Key {
                 NodeOrToken::Token(token) => {
                     let text = token.text().to_string();
                     let style = match token.kind() {
-                        SyntaxKind::String => QuoteStyle::DoubleQuoted,
+                        SyntaxKind::String => {
+                            if text.starts_with('\'') {
+                                QuoteStyle::SingleQuoted
+                            } else {
+                                QuoteStyle::DoubleQuoted
+                            }
+                        }
                         SyntaxKind::BlockString => QuoteStyle::Block,
                         SyntaxKind::UnquotedString => QuoteStyle::Unquoted,
                         // HJSONではキーは常に文字列扱いのため、パーサがキーとして
@@ -884,7 +990,7 @@ impl Key {
                         | SyntaxKind::Null => return Some(text),
                         _ => return None,
                     };
-                    Some(style.decode_body(&text))
+                    Some(style.decode_body(&text, token_column(&token)))
                 }
                 _ => None,
             })
@@ -947,10 +1053,14 @@ impl Value {
                 let raw = token.text().to_string();
                 match token.kind() {
                     SyntaxKind::String => {
-                        let style = QuoteStyle::DoubleQuoted;
+                        let style = if raw.starts_with('\'') {
+                            QuoteStyle::SingleQuoted
+                        } else {
+                            QuoteStyle::DoubleQuoted
+                        };
                         ValueContent::Scalar(ScalarValue::String(StringValue {
                             raw: raw.clone(),
-                            body: style.decode_body(&raw),
+                            body: style.decode_body(&raw, token_column(&token)),
                             quote_style: style,
                         }))
                     }
@@ -958,7 +1068,7 @@ impl Value {
                         let style = QuoteStyle::Block;
                         ValueContent::Scalar(ScalarValue::String(StringValue {
                             raw: raw.clone(),
-                            body: style.decode_body(&raw),
+                            body: style.decode_body(&raw, token_column(&token)),
                             quote_style: style,
                         }))
                     }
@@ -966,7 +1076,7 @@ impl Value {
                         let style = QuoteStyle::Unquoted;
                         ValueContent::Scalar(ScalarValue::String(StringValue {
                             raw: raw.clone(),
-                            body: style.decode_body(&raw),
+                            body: style.decode_body(&raw, 0),
                             quote_style: style,
                         }))
                     }

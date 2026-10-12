@@ -185,9 +185,13 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            if self.cursor.peek() == Some('"') && self.has_closing_quote_on_line() {
+            // 単一引用符も文字列（Hjson 3）。`'''` は複数行文字列として先に扱われる。
+            if matches!(self.cursor.peek(), Some('"') | Some('\''))
+                && self.has_closing_quote_on_line(self.cursor.peek().unwrap())
+            {
+                let quote = self.cursor.peek().unwrap();
                 self.cursor.advance();
-                self.read_double_quoted_string(start_offset);
+                self.read_quoted_string(start_offset, quote);
                 continue;
             }
 
@@ -210,12 +214,14 @@ impl<'a> Lexer<'a> {
     /// 同一行内に閉じクォートがあるかを調べる。
     ///
     /// 無い場合、この `"` は quoteless 値の一部として扱う。
-    fn has_closing_quote_on_line(&self) -> bool {
+    fn has_closing_quote_on_line(&self, quote: char) -> bool {
         let mut chars = self.cursor.remaining_str().chars();
         chars.next();
         while let Some(c) = chars.next() {
+            if c == quote {
+                return true;
+            }
             match c {
-                '"' => return true,
                 '\n' | '\r' => return false,
                 '\\' => {
                     chars.next();
@@ -336,12 +342,12 @@ impl<'a> Lexer<'a> {
         self.emit(SyntaxKind::BlockString, text, start_offset);
     }
 
-    fn read_double_quoted_string(&mut self, start_offset: usize) {
+    fn read_quoted_string(&mut self, start_offset: usize, quote: char) {
         let mut terminated = false;
-        // 開きの " は lex() の match_char('"') で既に消費済み
+        // 開きの引用符は lex() で既に消費済み
 
         while let Some(c) = self.cursor.peek() {
-            if c == '"' {
+            if c == quote {
                 self.cursor.advance();
                 terminated = true;
                 break;
@@ -379,7 +385,7 @@ impl<'a> Lexer<'a> {
             Some('u') => {
                 self.validate_unicode_escape(start_offset);
             }
-            Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
+            Some('"' | '\'' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') => {}
             Some(escaped) => {
                 self.errors.push(LexError::new(
                     start_offset,

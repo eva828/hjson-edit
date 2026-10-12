@@ -162,13 +162,20 @@ impl HjsonValue {
     fn from_token(token: &RedToken) -> Result<Self, HjsonEditError> {
         let text = token.text();
         match token.kind() {
-            SyntaxKind::String => Ok(HjsonValue::String(
-                QuoteStyle::DoubleQuoted.decode_body(text),
-            )),
-            SyntaxKind::BlockString => Ok(HjsonValue::String(QuoteStyle::Block.decode_body(text))),
-            SyntaxKind::UnquotedString => {
-                Ok(HjsonValue::String(QuoteStyle::Unquoted.decode_body(text)))
+            SyntaxKind::String => {
+                let style = if text.starts_with('\'') {
+                    QuoteStyle::SingleQuoted
+                } else {
+                    QuoteStyle::DoubleQuoted
+                };
+                Ok(HjsonValue::String(style.decode_body(text, 0)))
             }
+            SyntaxKind::BlockString => Ok(HjsonValue::String(
+                QuoteStyle::Block.decode_body(text, crate::ast::token_column(token)),
+            )),
+            SyntaxKind::UnquotedString => Ok(HjsonValue::String(
+                QuoteStyle::Unquoted.decode_body(text, 0),
+            )),
             // 整数として解釈されたテキストでも i64 に収まらない場合がある。
             // 基準実装（hjson-cs の TryParseNumericLiteral）は long で読めなければ
             // double として扱うため、同じ挙動にする。
@@ -223,7 +230,8 @@ impl HjsonValue {
                     NodeOrToken::Token(token) => Self::from_token(&token),
                 }),
             SyntaxKind::Object => {
-                let mut entries = Vec::new();
+                // 重複キーは後勝ち（基準実装の JsonObject と同じ）。位置は最初の出現を保つ。
+                let mut entries: Vec<(String, HjsonValue)> = Vec::new();
                 for member in node
                     .children()
                     .filter(|child| child.kind() == SyntaxKind::Member)
@@ -238,7 +246,11 @@ impl HjsonValue {
                         .children()
                         .find(|child| child.kind() == SyntaxKind::Value)
                         .ok_or(HjsonEditError::ParentNotFound)?;
-                    entries.push((key, Self::from_node(&value)?));
+                    let parsed = Self::from_node(&value)?;
+                    match entries.iter_mut().find(|(existing, _)| *existing == key) {
+                        Some(entry) => entry.1 = parsed,
+                        None => entries.push((key, parsed)),
+                    }
                 }
                 Ok(HjsonValue::Object(entries))
             }
