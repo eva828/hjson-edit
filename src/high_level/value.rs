@@ -169,12 +169,18 @@ impl HjsonValue {
             SyntaxKind::UnquotedString => {
                 Ok(HjsonValue::String(QuoteStyle::Unquoted.decode_body(text)))
             }
-            SyntaxKind::Integer => text.parse::<i64>().map(HjsonValue::Integer).map_err(|_| {
-                HjsonEditError::UnexpectedStructure {
-                    expected: SyntaxKind::Integer,
-                    found: token.kind(),
-                }
-            }),
+            // 整数として解釈されたテキストでも i64 に収まらない場合がある。
+            // 基準実装（hjson-cs の TryParseNumericLiteral）は long で読めなければ
+            // double として扱うため、同じ挙動にする。
+            SyntaxKind::Integer => match text.parse::<i64>() {
+                Ok(value) => Ok(HjsonValue::Integer(value)),
+                Err(_) => text.parse::<f64>().map(HjsonValue::Float).map_err(|_| {
+                    HjsonEditError::UnexpectedStructure {
+                        expected: SyntaxKind::Float,
+                        found: token.kind(),
+                    }
+                }),
+            },
             SyntaxKind::Float => text.parse::<f64>().map(HjsonValue::Float).map_err(|_| {
                 HjsonEditError::UnexpectedStructure {
                     expected: SyntaxKind::Float,

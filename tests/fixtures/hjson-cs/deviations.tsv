@@ -20,7 +20,6 @@ key_slash_slash	修正予定	コメント開始列の文脈依存（Phase 2: syn
 key_unicode_esc	修正予定	\uXXXX をデコードする（Phase 3）
 ml_trailing_blank	修正予定	複数行文字列の末尾改行規則（Phase 3）
 num_5dot	修正予定	数値の解釈を cs に合わせる（Phase 5）
-num_bigint	修正予定	i64 範囲外の整数で内部エラーになる欠陥（Phase 1）
 num_hash_nospace	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
 num_neg_zero	修正予定	数値の解釈を cs に合わせる（Phase 5）
 obj_close_hash	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）

@@ -13,7 +13,9 @@ use crate::{
         value::{HjsonValue, RenderConfig},
         HjsonDocument, Prefer,
     },
+    syntax::HjsonLanguage,
     syntax::{RedNode, SyntaxKind},
+    GreenElement,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -580,6 +582,9 @@ fn render_value_like_node(
     })
 }
 
+/// 赤ノードの要素（トリビアを値の前後へ移すために使う）。
+type RedElement = rowan::SyntaxElement<HjsonLanguage>;
+
 fn replace_member_value(
     member: &RedNode,
     value: &HjsonValue,
@@ -591,11 +596,59 @@ fn replace_member_value(
         .find(|child| child.kind() == SyntaxKind::Value)
         .ok_or(HjsonEditError::ParentNotFound)?;
     let updated_value = render_value_like_node(&value_child, value, string_style, config);
+    let value_index = value_child.index();
 
-    Ok(member.green().splice_children(
-        value_child.index()..value_child.index() + 1,
-        vec![updated_value.into()],
-    ))
+    let is_empty_value = value_child.children_with_tokens().all(|child| match child {
+        NodeOrToken::Node(node) => node.kind().is_trivia(),
+        NodeOrToken::Token(token) => token.kind().is_trivia(),
+    });
+
+    if is_empty_value {
+        // 値が空のとき（`key:` や `key: //c`）は、値の位置が行コメントの直後になる。
+        // そのまま差し込むとコメントの内側に入って値が設定されないため、
+        // コロンの直後に置き、トリビアは値の後ろへ回す。
+        let elements: Vec<RedElement> = member.children_with_tokens().collect();
+        let colon_index = elements
+            .iter()
+            .position(|element| {
+                matches!(element, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Colon)
+            })
+            .ok_or(HjsonEditError::ParentNotFound)?;
+        let between = &elements[colon_index + 1..value_index];
+        let has_comment = between.iter().any(|element| {
+            matches!(element, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment)
+                || matches!(element, NodeOrToken::Token(token) if token.kind().is_comment())
+        });
+
+        if has_comment {
+            let to_green = |element: &RedElement| -> GreenElement {
+                match element {
+                    NodeOrToken::Node(node) => node.green().clone().into(),
+                    NodeOrToken::Token(token) => token.kind().create_token(token.text()).into(),
+                }
+            };
+
+            let mut children: Vec<GreenElement> =
+                elements[..=colon_index].iter().map(to_green).collect();
+            let mut rest = between.iter().peekable();
+            // コロン直後の空白は値の前の区切りとして残す
+            if let Some(NodeOrToken::Token(token)) = rest.peek() {
+                if token.kind() == SyntaxKind::Whitespace {
+                    children.push(to_green(rest.next().unwrap()));
+                }
+            }
+            children.push(updated_value.into());
+            // 行コメントが値に吸収されないよう区切りを入れる
+            children.push(SyntaxKind::Whitespace.create_token(" ").into());
+            children.extend(rest.map(to_green));
+            children.extend(elements[value_index + 1..].iter().map(to_green));
+            return Ok(GreenNode::new(SyntaxKind::Member.into(), children));
+        }
+    }
+
+    Ok(member
+        .green()
+        .splice_children(value_index..value_index + 1, vec![updated_value.into()]))
 }
 
 fn resolve_quote_style(preference: Prefer<QuoteStyle>, detected: Option<QuoteStyle>) -> QuoteStyle {

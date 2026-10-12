@@ -1,5 +1,5 @@
 use hjson_edit::high_level::{
-    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, HjsonDocument,
+    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 use pretty_assertions::assert_eq;
 
@@ -237,4 +237,31 @@ fn remove_last_object_member_preserves_trailing_comma() {
         .remove(HjsonObjectPath::parse("remove").unwrap())
         .unwrap();
     assert_eq!(updated.to_string(), expected);
+}
+
+// ------------------------------------------------------------------
+// 空値のメンバーへの設定（基準実装に合わせた欠陥修正の回帰テスト）
+// ------------------------------------------------------------------
+
+#[test]
+fn set_on_empty_value_with_line_comment_inserts_value_before_comment() {
+    // `key: //c` は値が空で、値の位置がコメントの直後になる。そこへ挿入すると
+    // コメントの内側に入って値が設定されないため、コロン直後に置く。
+    let doc = HjsonDocument::parse("key: //c").unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("key").unwrap(), 1).unwrap();
+
+    assert_eq!(updated.to_string(), "key: 1 //c");
+
+    let reparsed = HjsonDocument::parse(&updated.to_string()).unwrap();
+    let value = reparsed
+        .get(HjsonObjectPath::parse("key").unwrap())
+        .unwrap();
+    assert_eq!(value, HjsonValue::Integer(1));
+}
+
+#[test]
+fn set_on_empty_value_without_comment_keeps_layout() {
+    let doc = HjsonDocument::parse("key:").unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("key").unwrap(), 1).unwrap();
+    assert_eq!(updated.to_string(), "key:1");
 }

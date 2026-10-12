@@ -68,19 +68,18 @@ fn root_number_bare_decimal_returns_string() {
 }
 
 #[test]
-fn root_number_over_i64_max_returns_error() {
-    let src = "9223372036854775808";
-    let doc = HjsonDocument::parse(src).unwrap();
-    let result = doc.get(HjsonObjectPath::parse("").unwrap());
-    assert!(result.is_err());
+fn root_number_over_i64_max_returns_double() {
+    // 基準実装（hjson-cs）は long で読めない整数を double として扱う。
+    let doc = HjsonDocument::parse("9223372036854775808").unwrap();
+    let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+    assert_eq!(value, HjsonValue::Float(9223372036854775808.0));
 }
 
 #[test]
-fn root_number_under_i64_min_returns_error() {
-    let src = "-9223372036854775809";
-    let doc = HjsonDocument::parse(src).unwrap();
-    let result = doc.get(HjsonObjectPath::parse("").unwrap());
-    assert!(result.is_err());
+fn root_number_under_i64_min_returns_double() {
+    let doc = HjsonDocument::parse("-9223372036854775809").unwrap();
+    let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+    assert_eq!(value, HjsonValue::Float(-9223372036854775809.0));
 }
 
 #[test]
@@ -88,4 +87,15 @@ fn root_number_large_exponent_does_not_panic() {
     let src = "1e99999999999999999999999999999999999999";
     let doc = HjsonDocument::parse(src).unwrap();
     let _ = doc.get(HjsonObjectPath::parse("").unwrap());
+}
+
+#[test]
+fn integer_that_does_not_fit_i64_is_read_as_double() {
+    // 基準実装（hjson-cs）は long で読めない整数を double として扱う。
+    let doc = HjsonDocument::parse("x: 12345678901234567890123\n").unwrap();
+    let value = doc.get(HjsonObjectPath::parse("x").unwrap()).unwrap();
+    match value {
+        HjsonValue::Float(f) => assert_eq!(f, 1.2345678901234568e22),
+        other => panic!("expected Float, got {other:?}"),
+    }
 }
