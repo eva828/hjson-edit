@@ -13,4 +13,5 @@ tools/cs-oracle/run.sh cases /tmp/fuzz-inputs.tsv > /tmp/fuzz-cs.tsv
 echo "== 実装の実行"
 cargo run --release --quiet --example canon -- cases /tmp/fuzz-inputs.tsv > /tmp/fuzz-ours.tsv
 echo "== 比較"
-python3 tools/compare_canon.py /tmp/fuzz-cs.tsv /tmp/fuzz-ours.tsv || true
+python3 tools/compare_canon.py /tmp/fuzz-cs.tsv /tmp/fuzz-ours.tsv \
+  tests/fixtures/hjson-cs/fuzz_deviations.tsv || true

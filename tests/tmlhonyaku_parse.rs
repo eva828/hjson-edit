@@ -94,11 +94,40 @@ fn parse_all_tmlhonyaku_hjson_files() {
         failures.len()
     );
 
+    // 宣言済みの逸脱（tests/fixtures/hjson-cs/corpus_deviations.tsv）だけを許す。
+    // 新しい失敗も、修正済みなのに残っている項目も検出する。
+    let declared = declared_corpus_deviations();
+    let failed: std::collections::BTreeSet<String> =
+        failures.iter().map(|(path, _)| path.clone()).collect();
+
     if !failures.is_empty() {
         eprintln!("\nFailed files:");
         for (path, err) in &failures {
             eprintln!("  {}: {}", path, err);
         }
-        panic!("{} of {} files failed to parse", failures.len(), total);
     }
+
+    let undeclared: Vec<&String> = failed.difference(&declared).collect();
+    let stale: Vec<&String> = declared.difference(&failed).collect();
+    assert!(
+        undeclared.is_empty(),
+        "宣言されていない失敗があります: {undeclared:?}",
+    );
+    assert!(
+        stale.is_empty(),
+        "逸脱リストの項目が解消されています（削除してください）: {stale:?}",
+    );
+}
+
+/// コーパスの逸脱リスト（パスのみ）を読む。
+fn declared_corpus_deviations() -> std::collections::BTreeSet<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/hjson-cs/corpus_deviations.tsv");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return std::collections::BTreeSet::new();
+    };
+    text.lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split('\t').next().map(str::to_string))
+        .collect()
 }
