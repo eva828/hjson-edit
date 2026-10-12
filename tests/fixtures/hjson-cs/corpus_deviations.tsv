@@ -3,6 +3,6 @@
 # 更新: tools/corpus_diff.sh（結果を確認して理由を記入する）
 #
 # パス<TAB>判断<TAB>理由
-ArtificerPMBadges/ja-JP_Mods.ArtificerPMBadges.hjson	修正予定	パースに失敗する（CRLF と複数行文字列の組み合わせ。要調査: 値の途中でキー走査が走る）
-Macrocosm/ja-JP_Mods.Macrocosm.hjson	修正予定	パースに失敗する（CRLF と複数行文字列の組み合わせ。要調査: 値の途中でキー走査が走る）
-TestChadsFurni/ja-JP_Mods.TestChadsFurni.hjson	修正予定	パースに失敗する（CRLF と複数行文字列の組み合わせ。要調査: 値の途中でキー走査が走る）
+ArtificerPMBadges/ja-JP_Mods.ArtificerPMBadges.hjson	修正予定	解析結果が基準と一致しない（要調査）
+Macrocosm/ja-JP_Mods.Macrocosm.hjson	修正予定	解析結果が基準と一致しない（要調査）
+TestChadsFurni/ja-JP_Mods.TestChadsFurni.hjson	修正予定	解析結果が基準と一致しない（要調査）
