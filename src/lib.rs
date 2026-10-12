@@ -8,6 +8,8 @@
 //! - Green/Red Tree方式による効率的な編集
 
 pub mod ast;
+#[doc(hidden)]
+pub mod conformance;
 pub(crate) mod format;
 pub mod high_level;
 pub(crate) mod number;

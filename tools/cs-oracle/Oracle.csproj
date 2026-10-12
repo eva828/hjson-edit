@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Oracle</AssemblyName>
+    <RootNamespace>Oracle</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- hjson-cs を環境変数 HJSON_CS_DIR で指定する -->
+    <ProjectReference Include="$(HjsonCsDir)/Hjson/Hjson.csproj" Condition="'$(HjsonCsDir)' != ''" />
+  </ItemGroup>
+</Project>

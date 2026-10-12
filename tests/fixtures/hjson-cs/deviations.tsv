@@ -1,0 +1,44 @@
+# hjson-cs 準拠テストの逸脱リスト（実装の実差分集合と完全一致させる）
+#
+# 判断: 修正予定 / 許容
+# 更新: CONFORMANCE_BLESS=1 cargo test --test conformance_cs
+#
+# id<TAB>判断<TAB>理由
+arr_hash_close	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+bom_object	修正予定	BOM はパーサーでは通常文字として扱い、CLI で除去する（Phase 4）
+bom_only	修正予定	BOM はパーサーでは通常文字として扱い、CLI で除去する（Phase 4）
+comment_only	許容	空文書の受理は許容（cs は Incomplete input。空ファイルを扱える利点を残す）
+doc_then_unterm_comment	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+dup_keys_comma	修正予定	重複キーは後勝ちにする（Phase 5）
+dup_keys_lines	修正予定	重複キーは後勝ちにする（Phase 5）
+empty_braceless_eof	修正予定	ルートの空値は行全体を文字列にする（Phase 4）
+empty_key	修正予定	ルートの空値は行全体を文字列にする（Phase 4）
+empty_key_comment	修正予定	ルートの空値は行全体を文字列にする（Phase 4）
+empty_key_nl	修正予定	ルートの空値は行全体を文字列にする（Phase 4）
+key_block	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+key_slash_slash	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+key_unicode_esc	修正予定	\uXXXX をデコードする（Phase 3）
+ml_trailing_blank	修正予定	複数行文字列の末尾改行規則（Phase 3）
+num_5dot	修正予定	数値の解釈を cs に合わせる（Phase 5）
+num_bigint	修正予定	i64 範囲外の整数で内部エラーになる欠陥（Phase 1）
+num_hash_nospace	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+num_neg_zero	修正予定	数値の解釈を cs に合わせる（Phase 5）
+obj_close_hash	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+obj_hash_close	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+obj_hash_first	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+obj_hash_nl	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+obj_hash_nl_close	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+obj_hash_value	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+obj_true_hash	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+q_single_escaped	修正予定	単一引用符文字列に対応する（Phase 3）
+root_url	修正予定	ルートの空値は行全体を文字列にする（Phase 4）
+single_quoted_key	修正予定	単一引用符文字列に対応する（Phase 3）
+single_quoted_value	修正予定	単一引用符文字列に対応する（Phase 3）
+trivia_unterm_comment	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+unicode_escape	修正予定	\uXXXX をデコードする（Phase 3）
+unicode_surrogate	修正予定	\uXXXX をデコードする（Phase 3）
+val_block_unterm	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+val_glob	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+val_num_comment	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+val_win_path	修正予定	コメント開始列の文脈依存（Phase 2: syntax::scan で解決）
+ws_only	許容	空文書の受理は許容（cs は Incomplete input。空ファイルを扱える利点を残す）

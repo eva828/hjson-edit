@@ -1,0 +1,95 @@
+# id<TAB>入力(エスケープ)<TAB>note
+# 期待値は tools/gen_fixtures.sh が hjson-cs を実行して生成する
+num_plain	3	数値の解釈（TryParseNumericLiteral）
+bool_plain	true	
+num_hash_space	7 # minutes	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+num_hash_nospace	5#comment	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+str_5times	5 times	
+str_5times_comma	5 times, 6 times	
+str_X_hash	X # not a comment	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+str_regex_hash	\s#([0-9a-fA-F]{3})	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_hash_close	{a: 1#c}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_hash_space	{a: 1 #c}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_close_hash	{a: 1}#c	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_hash_nl_close	{a: 1#c\n}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_hash_nl	{a: 1#\n}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_true_hash	{a: true#c}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+arr_hash_close	[1#c]	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+key_slash_slash	{a//b: 1}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+key_block	{a/*b*/c: 1}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+key_hash	{key#value: 1}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+braceless_key_hash	key#value: 1	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+val_slash_str	{a: 1//c\n}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+val_slash_text	{a: x//y\n}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+val_block_closed	{a: 1/*c*/}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+val_block_unterm	{a: x/*y\n}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_hash_first	{#c\n a: 1}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+obj_hash_value	{a:#c\n b: 2}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+empty_key	key:	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+empty_key_nl	key:\n	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+empty_key_comment	key: //c	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+empty_then_member	key:\nother: 1	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+empty_in_obj	{a:\n}	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+root_url	http://x	
+val_win_path	x: C:/*path	
+val_glob	x: **/*	
+val_glob2	x: src/**/*.rs	
+val_num_comment	x: 5/*c	数値の解釈（TryParseNumericLiteral）
+val_num_block	x: 5/*c*/	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+trivia_unterm_comment	x: 1 /*unterminated	
+doc_then_unterm_comment	{a: 1}\n/*x	
+q_single_escaped	{a: 'x\\'y'}	Hjson 3 の単一引用符（BaseReader.ReadStringLiteral）
+q_double_escaped	{a: "x\\"y"}	
+unicode_escape	{a: "\\u0041"}	\uXXXX はデコードされる（ReadStringLiteral）
+bad_escape	{a: "\\z"}	
+bad_unicode	{a: "\\u00ZZ"}	\uXXXX はデコードされる（ReadStringLiteral）
+ml_trailing_blank	x:\n  '''\n  a\n\n  '''\n	複数行文字列は ''' のカラム固定インデント・末尾改行は最後の 1 つを残す（readMlString）
+punct_only	{	
+punct_key	{#a}	
+arr_in_unquoted	{ v: x[y]z }	
+brace_in_unquoted	{ value: a{1}b }	
+empty_string	{a: ""}	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+braceless_empty_string	a: ""	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+quoted_hash	{a: "1#c"}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+quoted_slash	{a: "a//b"}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+comment_only	# c\n	空文書は Incomplete input（cs は受理しない）
+bom_object	\uFEFF{a: 1}	BOM は通常文字として扱われる
+nested_same_line	{a: {b: 1}, c: 2}	
+tab_separated_arr	[1\t2\t3]	
+crlf_member	{a: 1\r\nb: 2}	
+key_trailing_space	{abc : 1}	
+empty_braceless_eof	key: 	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+comment_after_comma	{a: 1, # c\n b: 2}	
+depth_3	{a: {b: {c: 1}}}	
+num_exp_float	x: 17.01e2	数値の解釈（TryParseNumericLiteral）
+num_trailing_zero	x: 0.0	数値の解釈（TryParseNumericLiteral）
+dup_keys_comma	{a: 1, a: 2}	重複キーは後勝ち（JsonObject.Add）
+dup_keys_lines	a: 1\na: 2	重複キーは後勝ち（JsonObject.Add）
+num_1e2	x: 1e2	数値の解釈（TryParseNumericLiteral）
+num_dot5	x: .5	数値の解釈（TryParseNumericLiteral）
+num_5dot	x: 5.	数値の解釈（TryParseNumericLiteral）
+num_hex	x: 0x10	数値の解釈（TryParseNumericLiteral）
+num_plus	x: +5	数値の解釈（TryParseNumericLiteral）
+num_leading_zero	x: 007	数値の解釈（TryParseNumericLiteral）
+num_bigint	x: 12345678901234567890123	数値の解釈（TryParseNumericLiteral）
+num_inf	x: 1e999	数値の解釈（TryParseNumericLiteral）
+num_neg_zero	x: -0	数値の解釈（TryParseNumericLiteral）
+ws_only	   \n	空文書は Incomplete input（cs は受理しない）
+root_scalar_trailing	1 2	
+empty_array	{a: []}	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+empty_object	{a: {}}	空値: ルートは行全体を文字列、オブジェクト内は Incomplete input
+key_escaped	{"a\\nb": 1}	
+key_unicode_esc	{"\\u0041": 1}	\uXXXX はデコードされる（ReadStringLiteral）
+block_comment_multiline	{a: /* one\ntwo */ 1}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+trailing_comma	{a: 1,}	
+crlf_object	{\r\n a: 1\r\n}	
+semicolon_sep	{a: 1; b: 2}	
+single_quoted_key	{'a': 1}	Hjson 3 の単一引用符（BaseReader.ReadStringLiteral）
+single_quoted_value	{a: 'x'}	Hjson 3 の単一引用符（BaseReader.ReadStringLiteral）
+block_string_indent	{a: '''\n  x\n  '''}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+tab_indent	{\n\ta: 1\n}	
+bom_only	\uFEFF	BOM は通常文字として扱われる
+nested_arrays	[[[1]]]	
+unicode_surrogate	{a: "\\uD83D\\uDE00"}	\uXXXX はデコードされる（ReadStringLiteral）
+escaped_slash	{a: "\\/"}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
+key_only_colon_spaces	{ a : 1 }	

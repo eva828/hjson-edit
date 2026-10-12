@@ -16,3 +16,6 @@ result-*
 
 # Environment
 .env
+# hjson-cs オラクルのビルド成果物
+tools/cs-oracle/bin/
+tools/cs-oracle/obj/

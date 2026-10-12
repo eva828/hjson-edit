@@ -14,6 +14,8 @@ default = ["cli"]
 cli = ["dep:clap", "dep:anyhow"]
 # ネットワーク越しのコーパステスト専用。既定では reqwest 系をビルドしない
 net-corpus = ["dep:reqwest", "dep:serde_json"]
+# hjson-cs 公式テスト資産との適合テスト専用。既定では reqwest をビルドしない
+net-conformance = ["dep:reqwest"]
 
 [dependencies]
 rowan = "0.15"
