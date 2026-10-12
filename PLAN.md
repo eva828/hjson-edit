@@ -1,0 +1,156 @@
+# hjson-cs 準拠計画
+
+## 1. 目的
+
+基準実装を **hjson/hjson-cs**（`777ec1a`, v4.0.0-rc.1, net10.0）と定め、その挙動に準拠させる。
+準拠は「基準を実行して採取した期待値」に対して検証し、意図的な逸脱は**明示リスト**で管理する。
+
+## 2. 基準と検証の枠組み
+
+### 2.1 基準の取得
+
+- hjson-cs を clone し、`nix shell nixpkgs#dotnet-sdk_10 -c …` でビルド・実行（dotnet の常設は不要）
+- 基準の自己テスト: `dotnet test test/test.csproj` → 133/133 合格（確認済み）
+
+### 2.2 期待値の由来（3 分類）と管理方法
+
+| 由来 | 定義場所 | 管理 |
+|---|---|---|
+| 由来1 公式テスト資産（111 ファイル、hjson-js と共有） | `test/assets` | 固定コミットから取得（`net-conformance` feature）。受理/拒否は `fail*` 命名と照合し、値は cs の実出力と照合する（`*_result.json` は js 生成のため参考情報） |
+| 由来2 cs 実装の挙動（公式テストに無い） | 実装のみが定義 | `tools/cs-oracle`（NuGet 不要の C# ランナー）で採取し、fixtures としてコミット。ヘッダに commit / SDK 版 / 生成コマンドを記録 |
+| 由来3 cs のソース上の規則 | 例: `readTfnns` のチェックポイント `, } ] # // /*`、`readKeyName` の「`:` まで」、`skipWhite2` の無条件コメント | fixtures の note に関数名と出典を記録 |
+
+### 2.3 レイヤ
+
+| レイヤ | 内容 | 実行条件 |
+|---|---|---|
+| A | 公式資産 78 ケース: 受理/拒否 + 型付き値 | `net-conformance`（固定コミットから取得） |
+| B | cs 固有 fixtures: 受理/拒否 + 型付き値 | オフライン（コミット済み fixtures） |
+| B' | 逸脱リスト: 実装の実差分集合と完全一致することを検証 | オフライン |
+| C | コーパス微分: TMLHonyaku 542 件を cs と突き合わせ | ネットワーク（`tools/corpus_diff.sh`） |
+| D | 微分ファズ: 種固定の生成 + 変異 | ローカル（`tools/diff_fuzz.sh`） |
+
+### 2.4 判定の粒度
+
+- 比較する: 受理/拒否、型付き値（整数と浮動小数を区別、キー順も比較）
+- 比較しない: エラー文言・位置（拒否であることのみ）
+
+### 2.5 逸脱リストの不変条件
+
+`deviations.tsv` は「id / 現挙動 / 判断（修正予定 or 許容） / 理由 / 対応予定」を持ち、
+**実装の実際の差分集合 == リスト** でなければテスト失敗（新規逸脱も修正漏れも検出する）。
+判断は項目ごとに行い、一括許容しない。
+
+## 3. 確定した決定事項
+
+| 項目 | 決定 |
+|---|---|
+| ルートの空値（`key:` / `key: //c` / `http://x`） | cs 準拠: ブレースレスとして成立しなければ行全体を 1 個の quoteless 文字列 |
+| 未終端 `/*` / `'''` / `"` | パーサーは cs 準拠（無視）。CLI が警告を出す（層分離） |
+| 重複キー | 後勝ちで値層へ正規化（lossless な木と `to_string()` は元テキスト保持。この 1 点のみ逸脱として明記） |
+| 数値 `5.` / `-0` | cs 準拠: `5.` は文字列、`-0` は double `-0.0`（符号保持） |
+| 空・空白のみ文書 | 受理を許容（cs はエラー）→ 逸脱として明記 |
+| BOM | パーサーは通常文字（cs と同じ）。`cli::read_input` が先頭 BOM を除去 |
+| 単一引用符 `'...'` / `\'` | 対応する（Hjson 3 の機能。公式資産が依存） |
+| `\uXXXX`（サロゲート対含む） | デコードする |
+| 複数行文字列 | `'''` のカラム固定でインデント除去、末尾改行は最後の 1 つを残す |
+
+## 4. 新設計: 字句・構文解析層の作り直し
+
+方針: 個別パッチを重ねず、**文法規則の置き場所を 1 つに定めた実装**へ作り直す。既存資産
+（`SyntaxKind` / Green・Red 定義 / 深さ上限 / trivia 処理 / `high_level` の探索・編集・描画）は再利用する。
+
+### 4.1 設計原則
+
+1. **字句層はテキストの関数**（文脈自由）: 空白・改行・コメント・記号・単語・引用開始候補のみを返し、
+   位置に依存した推測（現行 `is_hash_comment_start` 等）を持たない。`#` `//` `/*` は常にコメント開始。
+2. **単位は生テキストの走査で確定**: 新設 `syntax::scan` が文法位置に応じて文字を走査する
+   （cs の `readKeyName` / `readTfnns` / `ReadStringLiteral` に対応）。確定した範囲は Green ツリーへ
+   1 トークンとして出力する（`TreeSink::token(kind, n_tokens)` 相当）。
+3. **trivia は明示的に維持**: Hjson は改行が文法（メンバー区切り）であり、コメント API は構造的配置に
+   依存するため、現行の明示 trivia 方式を維持する。単位内に吸収されたコメントは `Comment` ノードにしない。
+4. **診断は「取り込まれたら破棄」**: 走査・字句解析中の診断は、有効な単位に消費されたら報告しない。
+   生き残った診断のみ `HjsonEditError` として返す。未終端は CLI 警告用の情報として別枠で保持する。
+5. **ルート解釈は決定論的**: 先頭が `{` / `[` なら通常解析。それ以外はブレースレス解釈を試し、
+   成立しなければ単一値として解釈する（cs と同じ結果。既定値へ黙って落とすフォールバックはしない）。
+
+### 4.2 モジュール構成
+
+```
+src/syntax/
+  mod.rs     # SyntaxKind / HjsonLanguage / MAX_NESTING_DEPTH / MAX_INPUT_BYTES（維持）
+  lexer.rs   # 文脈自由トークナイザ（現行を簡素化: 位置推測と BOM スキップを削除）
+  scan.rs    # 新規: 生テキスト走査（キー範囲 / quoteless 値範囲 / 引用文字列 / 複数行 / エスケープ検証）
+  parser.rs  # 単位確定・木構築・ルート解釈・エラー回復（現行の骨格と trivia 処理を再利用）
+```
+
+### 4.3 走査規則（cs 準拠）
+
+| 単位 | 規則 |
+|---|---|
+| キー | 引用キー（`"` / `'`、複数行不可）または `:` までを 1 トークン。`#` `//` `/*` も文字として含める。空白入りキーはエラー |
+| quoteless 値 | 行末または `,` `}` `]` `#` `//` `/*` で終端。ただし手前が数値・キーワード（`true`/`false`/`null`）なら終端。行末で末尾空白を除去 |
+| 引用文字列 | `"` / `'`（単行。`\n` `\r` はエラー）。エスケープ `\" \' \\ \/ \b \f \n \r \t \uXXXX` |
+| 複数行文字列 | `'''`。`'''` のカラム固定インデント、改行は `\n` に正規化、末尾改行は最後の 1 つを残す |
+| コメント | `#` 行コメント、`//` 行コメント、`/* */` ブロック。未終端ブロックは読み飛ばし（診断として保持） |
+
+### 4.4 既存テストの扱い
+
+字句の期待を固定しているテストは、cs の実行結果を根拠に新仕様へ更新する:
+`tests/lexer_errors.rs` / `tests/quoteless_string.rs` / `tests/hash_comment_behavior.rs` /
+`tests/parser_errors.rs` / `tests/bom.rs`（BOM は CLI 側のテストへ移設）/ `tests/string_decode.rs` /
+`tests/round_trip.rs`。
+
+## 5. フェーズ計画
+
+| Phase | 内容 | 主な対象 | 受け入れ基準 |
+|---|---|---|---|
+| 0 | 検証基盤: `tools/cs-oracle` / `tools/gen_fixtures.sh` / `tests/conformance_cs.rs` / fixtures / 逸脱リスト / `tools/corpus_diff.sh` / `tools/diff_fuzz.sh` | tests, tools | `cargo test` 緑。不変条件が機能 |
+| 1 | 欠陥修正: i64 範囲外整数の内部エラー、`set` のコメント内挿入 | `ast`, `high_level` | 該当ケースが明示エラー／正しい挿入 |
+| 2 | `syntax::scan` 導入と lexer 再構成（4.1〜4.3） | `syntax` | コメント位置の 13 件が一致。既存テスト更新 |
+| 3 | 単一引用符・`\u` デコード・複数行規則 | `syntax`, `ast`, `high_level::style` | 公式資産 `strings2`/`strings_test`/`pass1` が一致 |
+| 4 | ルート解釈（空値）・BOM 層分離・未終端の CLI 警告 | `syntax`, `cli` | `key:`/`http://x` が一致、BOM の層分離テスト |
+| 5 | 重複キー後勝ち・数値 cs 準拠（`5.`/`-0`） | `high_level`, `number` | 該当ケースが一致 |
+| 6 | レイヤ C（コーパス 542 件）と D（ファズ）を実行し、未知の差分を個別判断してリスト反映 | tools | 差分の全件がリストに載る |
+| 7 | 最終確認とコミット分割提案 | 全体 | 下記「最終基準」 |
+
+## 6. 最終基準（完了条件）
+
+- レイヤ A: 78/78 で受理判定が一致し、値も cs と一致する
+- レイヤ B: 逸脱リストを除き全一致（逸脱は「空文書の受理」「重複キーを含む文書の出力テキスト」を想定）
+- `cargo fmt --all -- --check` clean / `cargo clippy --all-targets --all-features -- -D warnings` 0 件
+- `cargo test --all-features` 全緑
+- コーパス 542/542、往復 lossy 0
+- 公開 API・README の更新（単一引用符、BOM の層分離、未終端の警告、逸脱の明記）
+
+## 7. リスクと留意点
+
+1. `syntax::scan` への移行は字句境界を変えるため、`high_level` の探索・編集・描画に波及する（テストで検知）
+2. ルート解釈は「試行→代替解釈」。方針「暗黙のフォールバック禁止」とは緊張するが、文法が定める
+   決定論的規則として明文化し、既定値へ落とす実装は行わない
+3. 重複キーは値層のみ後勝ちにし、木と `to_string()` は lossless を維持する（逸脱として明記）
+4. 深さ上限（128）と 4 GiB 上限、編集側の深さ検査は新設計でも維持する
+5. Phase 6 はネットワークと .NET SDK が必要 → CI ではなくスクリプトとして提供する
+
+## 8. 検証コマンド
+
+```bash
+# 自分の実装
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
+
+# 基準（hjson-cs）
+nix shell nixpkgs#dotnet-sdk_10 -c bash -c 'cd tools/cs-oracle && dotnet build -c Release \
+  && dotnet bin/Release/net10.0/Oracle.dll cases tests/fixtures/hjson-cs/inputs.tsv'
+tools/corpus_diff.sh      # レイヤ C
+tools/diff_fuzz.sh        # レイヤ D
+```
+
+## 9. 付録: 測定済み差分（93 ケース、cs / js / 我々）
+
+- 完全一致 45 / 数値型のみ 1 / 実質差 47（うちエラー文言のみ 10）
+- 実質差の内訳: cs と js が一致して我々のみ不一致 22（コメント位置 13、単一引用符 3、`\u` 3、複数行 1、重複キー 2）、
+  三者三様 13（空値 5、i64 範囲外・BOM・`5.` など）、我々が js と一致 2（空文書）
+- 公式資産: hjson-cs 78/78、我々 77/78（`strings2_test.hjson`）
