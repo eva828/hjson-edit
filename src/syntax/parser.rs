@@ -1,9 +1,9 @@
 /// HJSON構文解析器
 ///
 /// Lexerのトークン列をGreen Treeに変換
-use super::lexer::{Cursor, Token};
+use super::lexer::{Lexer, Token};
+use super::scan;
 use super::SyntaxKind;
-use crate::number::HjsonNumber;
 use line_index::{LineIndex, TextSize};
 
 /// 構文解析エラー（エラーメッセージと発生したバイトオフセットを保持）
@@ -52,6 +52,12 @@ pub struct ParseResult {
 /// 設定ファイル群 542 件での最大は 7）に対して十分な余裕がある。
 pub const MAX_NESTING_DEPTH: usize = 128;
 
+/// 構文解析の結果と、ルートをブレースレスとして解釈したかどうか。
+struct ParseOutcome {
+    result: ParseResult,
+    braceless: bool,
+}
+
 /// 構文解析器
 pub struct Parser<'a> {
     source: &'a str,
@@ -66,6 +72,15 @@ pub struct Parser<'a> {
 enum ValueBoundary {
     Closed,
     Open,
+}
+
+/// ルートの解釈方法。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootMode {
+    /// ブレースレスオブジェクトを試し、成立しなければ単一値として解釈する。
+    Auto,
+    /// 常に単一値として解釈する。
+    SingleValue,
 }
 
 impl<'a> Parser<'a> {
@@ -157,70 +172,36 @@ impl<'a> Parser<'a> {
         self.error(token.offset, message);
     }
 
-    fn is_hjson_delimiter(&self, cursor: &Cursor) -> bool {
-        let c = cursor.peek().unwrap();
-        c == ','
-            || c == '}'
-            || c == ']'
-            || c == '#'
-            || (c == '/' && cursor.peek_n(1).is_some_and(|n| n == '/' || n == '*'))
-    }
+    /// 構文解析実行。
+    ///
+    /// ルートの解釈は基準実装（hjson-cs）と同じ規則にする。まずブレースレス
+    /// オブジェクトとして解釈し、成立しなければ単一値として解釈し直す。
+    pub fn parse(self) -> ParseResult {
+        let source = self.source;
+        let tokens = self.tokens.clone();
 
-    fn is_keyword_or_number(text: &str) -> bool {
-        matches!(text.trim(), "true" | "false" | "null") || HjsonNumber::is_valid(text.trim())
-    }
-
-    /// 生のソーステキストから quoteless value を文字単位で読み取る。
-    fn read_raw_value(&self, start_offset: usize) -> (String, usize) {
-        let sub = &self.source[start_offset..];
-        let mut cursor = Cursor::new(sub);
-        let mut last_good_pos = 0usize;
-
-        loop {
-            if cursor.is_at_end() {
-                break;
-            }
-            let c = cursor.peek().unwrap();
-
-            if c == '\n' {
-                break;
-            }
-            if c == '\r' {
-                cursor.advance();
-                continue;
-            }
-
-            if self.is_hjson_delimiter(&cursor) {
-                if Self::is_keyword_or_number(&sub[..cursor.pos()]) {
-                    break;
-                }
-                cursor.advance();
-                last_good_pos = cursor.pos();
-                continue;
-            }
-
-            cursor.advance();
-            last_good_pos = cursor.pos();
+        let first = Parser::new(source, tokens.clone()).parse_inner(RootMode::Auto);
+        if !first.braceless || first.result.errors.is_empty() {
+            return first.result;
         }
 
-        let end = if last_good_pos > 0 {
-            last_good_pos
-        } else {
-            cursor.pos()
-        };
-        let raw = &sub[..end];
-        let trimmed = raw.trim_end();
-        (trimmed.to_string(), trimmed.len())
+        // ブレースレス解釈が失敗した場合のみ、単一値として解釈し直す
+        let retry = Parser::new(source, tokens).parse_inner(RootMode::SingleValue);
+        if retry.result.errors.is_empty() {
+            return retry.result;
+        }
+        first.result
     }
 
-    /// 構文解析実行
-    pub fn parse(mut self) -> ParseResult {
+    fn parse_inner(mut self, mode: RootMode) -> ParseOutcome {
         self.builder.start_node(SyntaxKind::Root.into());
 
         let mut has_body = false;
+        let mut braceless = false;
 
         if !self.is_at_end() {
-            if self.is_braceless_object_start() {
+            if matches!(mode, RootMode::Auto) && self.is_braceless_object_start() {
+                braceless = true;
                 self.eat_root_header_trivia_for_braceless_object();
                 self.depth += 1;
                 self.parse_braceless_object();
@@ -254,9 +235,44 @@ impl<'a> Parser<'a> {
 
         self.builder.finish_node();
 
-        ParseResult {
-            green: self.builder.finish(),
-            errors: self.errors,
+        ParseOutcome {
+            result: ParseResult {
+                green: self.builder.finish(),
+                errors: self.errors,
+            },
+            braceless,
+        }
+    }
+
+    /// 生テキストの範囲 `[.., end)` に含まれるトークンを消費する。
+    ///
+    /// 範囲の末端でトークンが切れる場合（例: `{a//b: 1}` のキー）は、残りを
+    /// 再字句解析してトークン列を置き換える。トークン境界と文法上の単位は
+    /// 一致しないため、消費はオフセットで行う。
+    fn consume_raw_until(&mut self, end: usize) {
+        while let Some(token) = self.tokens.get(self.position) {
+            if token.offset >= end {
+                break;
+            }
+            let token_end = token.offset + token.text.len();
+            if token_end <= end {
+                self.position += 1;
+                continue;
+            }
+
+            let tail = &self.source[end..token_end];
+            let lexed = Lexer::new(tail).lex();
+            let replacement: Vec<Token> = lexed
+                .tokens
+                .into_iter()
+                .map(|mut token| {
+                    token.offset += end;
+                    token
+                })
+                .collect();
+            self.tokens
+                .splice(self.position..self.position + 1, replacement);
+            break;
         }
     }
 
@@ -421,6 +437,8 @@ impl<'a> Parser<'a> {
 
         // 値ノード自体には先頭トリビアを含めない（呼び出し側が先に消費する）
         if self.is_at_end() {
+            let offset = self.source.len();
+            self.error(offset, "Incomplete input");
             self.builder.finish_node();
             return ValueBoundary::Open;
         }
@@ -684,7 +702,23 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::False
                 | SyntaxKind::Null,
             ) => {
-                self.bump();
+                let start = self.current().map_or(0, |token| token.offset);
+                match scan::scan_key(self.source, start) {
+                    Ok(key) => {
+                        let text = &self.source[key.name_start..key.name_end];
+                        let kind = if text.starts_with('"') || text.starts_with('\'') {
+                            SyntaxKind::String
+                        } else {
+                            SyntaxKind::UnquotedString
+                        };
+                        self.consume_raw_until(key.end);
+                        self.builder.token(kind.into(), text);
+                    }
+                    Err(error) => {
+                        self.error(error.offset, error.message);
+                        self.bump();
+                    }
+                }
             }
             _ => {
                 if let Some(t) = token {
@@ -755,43 +789,23 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::Null
                 | SyntaxKind::UnquotedString => {
                     let start_offset = token.offset;
-                    let (_, byte_len) = self.read_raw_value(start_offset);
-                    let raw_end = start_offset + byte_len;
+                    let start_position = self.position;
+                    let end = scan::scan_quoteless_value(self.source, start_offset);
 
-                    // span の外にはみ出すトークンは取り込まない。取り込むと
-                    // そのトークンが覆う span 外のテキストが欠落する。
-                    let mut consumed = 0;
-                    while self.position + consumed < self.tokens.len() {
-                        let candidate = &self.tokens[self.position + consumed];
-                        if candidate.offset + candidate.text.len() > raw_end {
-                            break;
-                        }
-                        consumed += 1;
-                    }
-
-                    // 末尾の空白・改行は値に含めず、後続のトリビアとして残す。
-                    // コメントは quoteless 値の一部として扱う（参照実装と同じ）。
-                    while consumed > 0 {
-                        let last = &self.tokens[self.position + consumed - 1];
-                        if matches!(last.kind, SyntaxKind::Whitespace | SyntaxKind::Newline) {
-                            consumed -= 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if consumed <= 1 {
+                    if end <= start_offset {
                         self.bump();
-                        ValueBoundary::Closed
-                    } else {
-                        // 値の文字列は実際に消費したトークンの範囲から取り出す。
-                        let last = &self.tokens[self.position + consumed - 1];
-                        let covered_end = last.offset + last.text.len();
-                        let text = &self.source[start_offset..covered_end];
+                        return ValueBoundary::Closed;
+                    }
 
-                        self.builder.token(SyntaxKind::UnquotedString.into(), text);
-                        self.position += consumed;
+                    self.consume_raw_until(end);
+                    let text = &self.source[start_offset..end];
+                    let kind = scan::classify_value(text);
+                    self.builder.token(kind.into(), text);
+
+                    if self.position - start_position > 1 {
                         ValueBoundary::Open
+                    } else {
+                        ValueBoundary::Closed
                     }
                 }
                 _ => {
@@ -806,35 +820,13 @@ impl<'a> Parser<'a> {
 
     fn has_colon_after_key(&self) -> bool {
         let mut pos = self.position;
-        let mut consumed_key = false;
-
         while let Some(token) = self.tokens.get(pos) {
             if token.kind.is_trivia() {
                 pos += 1;
                 continue;
             }
-
-            if !consumed_key {
-                if matches!(
-                    token.kind,
-                    SyntaxKind::UnquotedString
-                        | SyntaxKind::String
-                        | SyntaxKind::Integer
-                        | SyntaxKind::Float
-                        | SyntaxKind::True
-                        | SyntaxKind::False
-                        | SyntaxKind::Null,
-                ) {
-                    consumed_key = true;
-                    pos += 1;
-                    continue;
-                }
-                return false;
-            }
-
-            return token.kind == SyntaxKind::Colon;
+            return scan::scan_key(self.source, token.offset).is_ok();
         }
-
         false
     }
 

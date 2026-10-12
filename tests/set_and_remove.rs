@@ -244,24 +244,28 @@ fn remove_last_object_member_preserves_trailing_comma() {
 // ------------------------------------------------------------------
 
 #[test]
-fn set_on_empty_value_with_line_comment_inserts_value_before_comment() {
-    // `key: //c` は値が空で、値の位置がコメントの直後になる。そこへ挿入すると
-    // コメントの内側に入って値が設定されないため、コロン直後に置く。
-    let doc = HjsonDocument::parse("key: //c").unwrap();
-    let updated = doc.set(HjsonObjectPath::parse("key").unwrap(), 1).unwrap();
-
-    assert_eq!(updated.to_string(), "key: 1 //c");
-
-    let reparsed = HjsonDocument::parse(&updated.to_string()).unwrap();
-    let value = reparsed
-        .get(HjsonObjectPath::parse("key").unwrap())
-        .unwrap();
-    assert_eq!(value, HjsonValue::Integer(1));
+fn empty_value_document_is_a_single_string() {
+    // 値の無いブレースレスは基準実装（hjson-cs）と同じく行全体が 1 個の文字列になる。
+    for input in ["key:", "key:\n", "key: //c"] {
+        let doc = HjsonDocument::parse(input).unwrap();
+        let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+        assert_eq!(value, HjsonValue::String(input.trim_end().to_string()));
+    }
 }
 
 #[test]
-fn set_on_empty_value_without_comment_keeps_layout() {
+fn set_on_string_root_is_rejected() {
     let doc = HjsonDocument::parse("key:").unwrap();
-    let updated = doc.set(HjsonObjectPath::parse("key").unwrap(), 1).unwrap();
-    assert_eq!(updated.to_string(), "key:1");
+    let error = doc
+        .set(HjsonObjectPath::parse("key").unwrap(), 1)
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            hjson_edit::HjsonEditError::UnexpectedStructure { .. }
+                | hjson_edit::HjsonEditError::PathNotFound(_)
+                | hjson_edit::HjsonEditError::ParentNotFound
+        ),
+        "文字列ルートへの設定はエラーになる: {error:?}"
+    );
 }

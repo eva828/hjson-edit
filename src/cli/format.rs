@@ -9,7 +9,10 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
     let content = super::read_input(path)?;
 
     let doc = match HjsonDocument::parse(&content) {
-        Ok(document) => document,
+        Ok(document) => {
+            super::warn_skipped_input(&document);
+            document
+        }
         Err(error) => anyhow::bail!("{error}"),
     };
 

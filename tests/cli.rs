@@ -114,3 +114,28 @@ fn cli_deeply_nested_input_fails_without_aborting() {
             .stderr(predicate::str::contains("Nesting too deep"));
     }
 }
+
+#[test]
+fn cli_strips_bom_from_file() {
+    use std::io::Write;
+
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    writeln!(file, "\u{FEFF}{{a: 1}}").unwrap();
+
+    let output = assert_cmd::Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["parse", file.path().to_str().unwrap(), "--ast"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Object"),
+        "BOM を除去してオブジェクトとして読む: {stdout}"
+    );
+}

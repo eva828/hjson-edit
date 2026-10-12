@@ -64,15 +64,18 @@ fn bracketed_text_with_trailing_quote_is_preserved() {
 }
 
 #[test]
-fn unterminated_string_at_value_start_is_rejected() {
-    let err = HjsonDocument::parse("a: \"foo").unwrap_err().to_string();
-    assert!(err.contains("Unterminated string literal"), "got: {err}");
+fn unterminated_string_at_value_start_makes_the_line_a_single_value() {
+    // ブレースレスとして成立しないため、基準実装（hjson-cs）と同じく行全体が 1 個の値になる。
+    let doc = HjsonDocument::parse("a: \"foo").unwrap();
+    let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+    assert_eq!(value, HjsonValue::String("a: \"foo".to_string()));
 }
 
 #[test]
-fn unterminated_block_string_at_value_start_is_rejected() {
-    let err = HjsonDocument::parse("a: '''foo").unwrap_err().to_string();
-    assert!(err.contains("Unterminated block string"), "got: {err}");
+fn unterminated_block_string_at_value_start_makes_the_line_a_single_value() {
+    let doc = HjsonDocument::parse("a: '''foo").unwrap();
+    let value = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+    assert_eq!(value, HjsonValue::String("a: '''foo".to_string()));
 }
 
 #[test]

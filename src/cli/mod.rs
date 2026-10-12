@@ -19,8 +19,20 @@ pub(crate) fn read_input(path: &Path) -> Result<String> {
         anyhow::bail!("Input too long: {len} bytes, limit is {MAX_INPUT_BYTES} bytes");
     }
 
-    std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+
+    // BOM はファイル読み込みの層で除去する（パーサーは通常の文字として扱う）。
+    Ok(text
+        .strip_prefix('\u{feff}')
+        .map_or(text.clone(), str::to_string))
+}
+
+/// パース時に読み飛ばした入力を警告として stderr に出す。
+pub(crate) fn warn_skipped_input(document: &hjson_edit::HjsonDocument) {
+    for warning in document.warnings() {
+        eprintln!("Warning: skipped input: {warning}");
+    }
 }
 
 pub use edit::edit_command;

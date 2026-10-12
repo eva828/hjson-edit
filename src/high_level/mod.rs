@@ -37,6 +37,7 @@ pub struct HjsonDocument {
     comment_style: Prefer<CommentKind>,
     append_mode: AppendMode,
     newline: String,
+    warnings: Vec<String>,
 }
 
 /// 入力長が上限（`MAX_INPUT_BYTES`）以内かを検査する。
@@ -60,12 +61,24 @@ impl HjsonDocument {
 
         let lex_result = Lexer::new(input).lex();
 
-        if !lex_result.errors.is_empty() {
+        // 閉じないブロックコメントは基準実装（hjson-cs）と同じく読み飛ばし、
+        // 警告として保持する（切断の検出は CLI の役割）。
+        let (warnings, fatal): (Vec<_>, Vec<_>) = lex_result
+            .errors
+            .iter()
+            .partition(|error| error.message == "Unterminated block comment");
+
+        if !fatal.is_empty() {
             return Err(HjsonEditError::LexError {
-                errors: lex_result.errors,
+                errors: fatal.into_iter().cloned().collect(),
                 line_index: LineIndex::new(input),
             });
         }
+
+        let warnings: Vec<String> = warnings
+            .iter()
+            .map(|error| error.format_with_line_index(&LineIndex::new(input)))
+            .collect();
 
         let parser = Parser::new(input, lex_result.tokens);
         let result = parser.parse();
@@ -86,7 +99,13 @@ impl HjsonDocument {
             comment_style: Prefer::default(),
             append_mode: AppendMode::default(),
             newline,
+            warnings,
         })
+    }
+
+    /// 読み飛ばした入力を報告する（現状は閉じないブロックコメント）。
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     pub fn string_style(mut self, style: Prefer<QuoteStyle>) -> Self {

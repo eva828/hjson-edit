@@ -99,19 +99,6 @@ impl<'a> Cursor<'a> {
         self.remaining_str().chars().nth(n)
     }
 
-    pub fn peek_prev(&self) -> Option<char> {
-        if self.position == 0 {
-            None
-        } else {
-            let prev_str = &self.input[..self.position];
-            prev_str.chars().last()
-        }
-    }
-
-    pub fn prev(&self) -> Option<char> {
-        self.peek_prev()
-    }
-
     pub fn pos(&self) -> usize {
         self.position
     }
@@ -151,11 +138,6 @@ impl<'a> Lexer<'a> {
     /// 字句解析実行
     pub fn lex(mut self) -> LexResult {
         while !self.cursor.is_at_end() {
-            if self.cursor.pos() == 0 && self.cursor.peek() == Some('\u{FEFF}') {
-                self.cursor.advance();
-                continue;
-            }
-
             self.skip_whitespace_no_newline();
 
             if self.cursor.is_at_end() {
@@ -183,7 +165,7 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            if self.cursor.peek() == Some('#') && self.is_hash_comment_start() {
+            if self.cursor.peek() == Some('#') {
                 self.cursor.advance();
                 self.read_hash_comment(start_offset);
                 continue;
@@ -267,16 +249,6 @@ impl<'a> Lexer<'a> {
         if end_offset > start_offset {
             let text = self.cursor.slice(start_offset, end_offset);
             self.emit(SyntaxKind::Whitespace, text, start_offset);
-        }
-    }
-
-    fn is_hash_comment_start(&self) -> bool {
-        if self.cursor.pos() == 0 {
-            return true;
-        }
-        match self.cursor.prev() {
-            Some(ch) => matches!(ch, '\n' | '\r' | ' ' | '\t'),
-            None => true,
         }
     }
 
@@ -473,7 +445,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        if c == '#' && self.is_hash_comment_start() {
+        if c == '#' {
             return true;
         }
         if c == ' ' || c == '\t' || c == '\n' || c == '\r' || is_punctuator(c) {
@@ -505,29 +477,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cursor_basics() {
-        let mut cursor = Cursor::new("aあb"); // 'a' (1 byte), 'あ' (3 bytes), 'b' (1 byte)
-
-        assert_eq!(cursor.peek(), Some('a'));
-        assert_eq!(cursor.peek_n(1), Some('あ'));
-        assert_eq!(cursor.peek_prev(), None);
-
-        cursor.advance();
-        assert_eq!(cursor.peek(), Some('あ'));
-        assert_eq!(cursor.peek_prev(), Some('a'));
-
-        cursor.advance();
-        assert_eq!(cursor.peek(), Some('b'));
-        assert_eq!(cursor.peek_prev(), Some('あ'));
-
-        cursor.advance();
-        assert_eq!(cursor.peek(), None);
-        assert!(cursor.is_at_end());
-
-        assert_eq!(cursor.advance(), None);
-    }
-
-    #[test]
     fn test_cursor_match() {
         let mut cursor = Cursor::new("foo bar");
 
@@ -539,21 +488,6 @@ mod tests {
 
         assert!(cursor.match_char(' '));
         assert_eq!(cursor.pos(), 4);
-    }
-
-    #[test]
-    fn test_lexer_hash_comment_start() {
-        let lexer = Lexer::new("# foo\n");
-        assert!(lexer.is_hash_comment_start());
-
-        let mut lexer = Lexer::new("  # foo\n");
-        lexer.cursor.advance();
-        lexer.cursor.advance();
-        assert!(lexer.is_hash_comment_start());
-
-        let mut lexer = Lexer::new("a# foo\n");
-        lexer.cursor.advance();
-        assert!(!lexer.is_hash_comment_start());
     }
 
     #[test]
@@ -569,6 +503,16 @@ mod tests {
     fn test_lexer_valid_escape_sequence_produces_no_error() {
         let result = Lexer::new(r#""\"""#).lex();
         assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_lexer_leading_bom_is_an_ordinary_character() {
+        // BOM はパーサーでは通常の文字として扱う（除去は CLI の役割）。
+        let result = Lexer::new("\u{FEFF}{a: 1}").lex();
+        assert!(result
+            .tokens
+            .iter()
+            .any(|token| token.kind == SyntaxKind::UnquotedString));
     }
 
     #[test]

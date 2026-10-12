@@ -5,6 +5,7 @@ pub const MAX_INPUT_BYTES: usize = u32::MAX as usize;
 
 pub mod lexer;
 pub mod parser;
+pub mod scan;
 
 use rowan::Language;
 use rowan::{SyntaxNode, SyntaxToken};

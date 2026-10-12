@@ -6,9 +6,11 @@ use hjson_edit::HjsonDocument;
 // ------------------------------------------------------------------
 
 #[test]
-fn lexer_unterminated_block_comment_produces_error() {
-    let result = HjsonDocument::parse("/* hello");
-    assert!(result.is_err());
+fn unterminated_block_comment_is_skipped_with_a_warning() {
+    // 基準実装（hjson-cs）は閉じないブロックコメントを読み飛ばす。切断の検出は CLI の役割。
+    let document = HjsonDocument::parse("/* hello").unwrap();
+    assert_eq!(document.warnings().len(), 1);
+    assert!(document.warnings()[0].contains("Unterminated block comment"));
 }
 
 #[test]

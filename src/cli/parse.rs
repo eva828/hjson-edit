@@ -26,6 +26,7 @@ pub fn run_parse(matches: &clap::ArgMatches) -> Result<()> {
 
     match HjsonDocument::parse(&content) {
         Ok(document) => {
+            super::warn_skipped_input(&document);
             if show_ast {
                 let ast = document.ast()?;
                 let console_config = ConsoleConfig::new(simple, color_mode);
