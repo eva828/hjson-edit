@@ -6,6 +6,7 @@
 - 逸脱リスト: id<TAB>判断<TAB>理由（許可された差分）
 出力: 一致件数と、逸脱リストに無い差分の一覧。
 """
+import os
 import sys
 
 def load(path):
@@ -21,7 +22,7 @@ def load(path):
 def main():
     base, ours = load(sys.argv[1]), load(sys.argv[2])
     declared = set()
-    if len(sys.argv) > 3:
+    if len(sys.argv) > 3 and os.path.exists(sys.argv[3]):
         for line in open(sys.argv[3], encoding="utf-8"):
             line = line.rstrip("\n")
             if line and not line.startswith("#"):
@@ -42,7 +43,13 @@ def main():
     undeclared = [d for d in diffs if d[0] not in declared]
     print(f"対象 {len(set(base) | set(ours))} 件: 一致 {same} 件 / 宣言済みの逸脱 {len(diffs) - len(undeclared)} 件 / 未宣言の差分 {len(undeclared)} 件")
     for key, b, o in undeclared[:40]:
-        print(f"  {key}\n      基準  : {b}\n      実装  : {o}")
+        def short(side):
+            if side is None:
+                return "<なし>"
+            text = f"{side[0]} {side[1]}"
+            return text[:90] + ("…" if len(text) > 90 else "")
+
+        print(f"  {key}\n      基準  : {short(b)}\n      実装  : {short(o)}")
     if len(undeclared) > 40:
         print(f"  ... 他 {len(undeclared) - 40} 件")
     return 1 if undeclared else 0

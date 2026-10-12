@@ -167,8 +167,9 @@ impl QuoteStyle {
                     .replace("\r\n", "\n")
                     .replace('\r', "\n");
 
-                // 先頭の空行は読み飛ばし、末尾の改行は 1 つだけ落とす（基準実装と同じ）
-                let mut body = inner.strip_prefix('\n').unwrap_or(inner.as_str());
+                // 先頭は `'''` の後ろの空白と改行 1 つを読み飛ばす（基準実装と同じ）
+                let after_spaces = inner.trim_start_matches([' ', '\t']);
+                let mut body = after_spaces.strip_prefix('\n').unwrap_or(inner.as_str());
                 if let Some(stripped) = body.strip_suffix('\n') {
                     body = stripped;
                 }
