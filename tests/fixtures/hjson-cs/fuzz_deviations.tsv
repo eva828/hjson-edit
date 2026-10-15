@@ -3,4 +3,4 @@
 # 更新: tools/diff_fuzz.sh の出力を確認して理由を記入する
 #
 # id<TAB>判断<TAB>理由
-fuzz0132	許容	上記 ml_root_indent と同じ（文書先頭の複数行文字列で基準は先頭・末尾の空白を落とす）
+fuzz0132	許容	上記 ml_root_indent と同じ（カラム 0 の文書先頭の複数行文字列。仕様・hjson-js 準拠を維持）
