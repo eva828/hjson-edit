@@ -791,17 +791,25 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::UnquotedString => {
                     let start_offset = token.offset;
                     let start_position = self.position;
-                    let end = scan::scan_quoteless_value(self.source, start_offset);
+                    let scanned = scan::scan_quoteless_value(self.source, start_offset);
+                    let end = scanned.end;
+                    let consumed_end = scanned.consumed_end;
 
                     if end <= start_offset {
                         self.bump();
                         return ValueBoundary::Closed;
                     }
 
-                    self.consume_raw_until(end);
+                    self.consume_raw_until(consumed_end);
                     let text = &self.source[start_offset..end];
                     let kind = scan::classify_value(text);
                     self.builder.token(kind.into(), text);
+
+                    // 値の末尾で取り除いた空白はトリビアとして残す
+                    let trailing = &self.source[end..consumed_end];
+                    if !trailing.is_empty() {
+                        self.builder.token(SyntaxKind::Whitespace.into(), trailing);
+                    }
 
                     if self.position - start_position > 1 {
                         ValueBoundary::Open

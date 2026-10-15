@@ -134,13 +134,20 @@ pub fn token_column(token: &RedToken) -> usize {
         node = parent;
     }
 
-    let start: usize = token.text_range().start().into();
-    let text = node.text().to_string();
-    if start > text.len() {
-        return 0;
+    let _ = &node;
+    // 直前のトークンから改行までを数える（文書全体を文字列化しない）
+    let mut column = 0usize;
+    let mut current = token.prev_token();
+    while let Some(previous) = current {
+        let text = previous.text();
+        if let Some(last_line) = text.rsplit_once('\n').map(|(_, rest)| rest) {
+            column += last_line.chars().count();
+            break;
+        }
+        column += text.chars().count();
+        current = previous.prev_token();
     }
-    let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
-    text[line_start..start].chars().count()
+    column
 }
 
 impl QuoteStyle {

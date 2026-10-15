@@ -112,11 +112,21 @@ pub fn scan_key(source: &str, start: usize) -> Result<Key, ScanError> {
     Err(ScanError::new(start, "Name is not closed"))
 }
 
-/// quoteless 値の終端を返す（基準実装 hjson-cs の readTfnns と同じ規則）。
+/// quoteless 値の走査結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotelessValue {
+    /// 値の終端（末尾の空白を取り除いた位置）。
+    pub end: usize,
+    /// 値として消費する終端。行末まで読み進めた分を含む（トリムした空白は
+    /// トリビアとして出力するため、消費だけ進める）。
+    pub consumed_end: usize,
+}
+
+/// quoteless 値を走査する（基準実装 hjson-cs の readTfnns と同じ規則）。
 ///
 /// 行末または `,` `}` `]` `#` `//` `/*` で終端する。ただし手前が数値または
 /// キーワード（true/false/null）のときだけ、その位置で終端する。
-pub fn scan_quoteless_value(source: &str, start: usize) -> usize {
+pub fn scan_quoteless_value(source: &str, start: usize) -> QuotelessValue {
     let mut last_good = start;
     let mut chars = source[start..].char_indices().peekable();
 
@@ -131,16 +141,25 @@ pub fn scan_quoteless_value(source: &str, start: usize) -> usize {
             || (c == '/' && matches!(next, Some('/') | Some('*')));
 
         if is_delimiter && is_keyword_or_number(&source[start..position]) {
-            let text = source[start..position].trim_end();
-            return start + text.len();
+            let text = trim_ascii_end(&source[start..position]);
+            let end = start + text.len();
+            return QuotelessValue {
+                end,
+                consumed_end: end,
+            };
         }
 
         last_good = position + c.len_utf8();
     }
 
-    // 行末では末尾の空白を値に含めない
-    let text = source[start..last_good].trim_end();
-    start + text.len()
+    // 行末では末尾の空白（ASCII の空白のみ。基準実装の SbTrimEnd と同じ）を
+    // 値に含めない。ただし消費は行末まで進める（取り除いた空白はトリビアとして
+    // 出力し、ロスレス性を保つ）。
+    let text = trim_ascii_end(&source[start..last_good]);
+    QuotelessValue {
+        end: start + text.len(),
+        consumed_end: last_good,
+    }
 }
 
 /// quoteless 値のテキストからトークン種別を決める。
@@ -157,6 +176,15 @@ pub fn classify_value(text: &str) -> SyntaxKind {
     }
 }
 
+/// 末尾の ASCII 空白（空白・タブ・CR）を取り除く。
+///
+/// 基準実装 hjson-cs の `SbTrimEnd` は `<= ' '` のみを取り除くため、全角スペース
+/// （U+3000）などは値の一部として残る。
+fn trim_ascii_end(text: &str) -> &str {
+    text.trim_end_matches([' ', '\t', '\r'])
+}
+
 fn is_keyword_or_number(text: &str) -> bool {
-    matches!(text.trim(), "true" | "false" | "null") || HjsonNumber::is_valid(text.trim())
+    let trimmed = trim_ascii_end(text);
+    matches!(trimmed, "true" | "false" | "null") || HjsonNumber::is_valid(trimmed)
 }
