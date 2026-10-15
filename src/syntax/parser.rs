@@ -559,10 +559,13 @@ impl<'a> Parser<'a> {
             } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
                 if had_newline {
-                    // カンマなし・改行ありは有効な区切り → ループ継続
                     continue;
                 }
-                // 改行もなくカンマもない → エラー
+                // 基準実装（hjson-cs）は区切りを要求しない。次のメンバーが
+                // 始められるならそのまま読み進める。
+                if self.is_object_member_start() {
+                    continue;
+                }
                 self.recover_from_separator_error(
                     "Expected ',' or '}'",
                     &[
@@ -663,11 +666,12 @@ impl<'a> Parser<'a> {
                     // カンマなし・改行ありは有効な区切り → ループ継続
                     continue;
                 }
-                let whitespace_separator_allowed = is_brace_delimited && self.can_start_value();
-                if whitespace_separator_allowed {
+                // 基準実装（hjson-cs）は区切りを要求しない。次の値を開始できるなら継続する。
+                let can_continue = self.can_start_value();
+                let _ = is_brace_delimited;
+                if can_continue {
                     continue;
                 }
-                // 改行もなくカンマもない → エラー
                 self.recover_from_separator_error(
                     "Expected ',' or ']'",
                     &[SyntaxKind::Comma, SyntaxKind::RBracket],
