@@ -887,7 +887,13 @@ impl<'a> Parser<'a> {
             if self.at(SyntaxKind::Comma) {
                 self.bump();
                 self.eat_trivia();
-            } else if self.at(SyntaxKind::RBrace) || (!self.is_at_end() && !had_separator_newline) {
+            } else if self.at(SyntaxKind::RBrace) {
+                break;
+            } else if !self.is_at_end()
+                && !had_separator_newline
+                && !self.is_braceless_object_start()
+            {
+                // 改行が無くても、次のメンバーが始められるなら読み進める
                 break;
             }
         }

@@ -93,3 +93,6 @@ nested_arrays	[[[1]]]
 unicode_surrogate	{a: "\\uD83D\\uDE00"}	\uXXXX はデコードされる（ReadStringLiteral）
 escaped_slash	{a: "\\/"}	quoteless 値とキーでは #, //, /* が文字になる（HjsonReader.readTfnns / readKeyName）
 key_only_colon_spaces	{ a : 1 }	
+ml_root_indent	'''\n  {b: 1}\n  '''	文書先頭の複数行文字列。基準は根の解釈をやり直す際に先頭・末尾の空白を落とす（js・仕様と不一致）
+comment_boundary_key	1: x\na//b: 1 /* unterminated\na/*b*/c:\nnull	行をまたぐブロックコメントの直後のキー（readTfnns と white の境界）
+comment_after_value_member	ab: 1 /* x\nab/*b*/c: null	同上（キーに # // /* を含まない版）

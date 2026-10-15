@@ -96,3 +96,6 @@ nested_arrays	OK	[[[1]]]
 unicode_surrogate	OK	{"a":"😀"}
 escaped_slash	OK	{"a":"/"}
 key_only_colon_spaces	OK	{"a":1}
+ml_root_indent	OK	"{b: 1}"
+comment_boundary_key	OK	{"1":"x","a//b":1,"c":null}
+comment_after_value_member	OK	{"ab":1,"c":null}

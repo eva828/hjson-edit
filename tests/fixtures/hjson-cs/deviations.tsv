@@ -5,4 +5,5 @@
 #
 # id<TAB>判断<TAB>理由
 comment_only	許容	空文書の受理は許容（cs は Incomplete input。空ファイルを扱える利点を残す）
+ml_root_indent	許容	文書先頭の複数行文字列で基準は先頭・末尾の空白を落とす（根の解釈をやり直す際の Column 管理による独自挙動）。仕様と hjson-js は本実装と同じく削除しない	
 ws_only	許容	空文書の受理は許容（cs は Incomplete input。空ファイルを扱える利点を残す）
