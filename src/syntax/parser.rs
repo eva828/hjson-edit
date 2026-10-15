@@ -260,9 +260,11 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let tail = &self.source[end..token_end];
-            let lexed = Lexer::new(tail).lex();
-            let replacement: Vec<Token> = lexed
+            // 残り全体を再字句解析する。単位がトークンをまたぐ場合（例: キーの途中から
+            // 始まる複数行文字列）に、分割後のトークン列が不整合にならないようにする。
+            let tail = &self.source[end..];
+            let replacement: Vec<Token> = Lexer::new(tail)
+                .lex()
                 .tokens
                 .into_iter()
                 .map(|mut token| {
@@ -270,8 +272,7 @@ impl<'a> Parser<'a> {
                     token
                 })
                 .collect();
-            self.tokens
-                .splice(self.position..self.position + 1, replacement);
+            self.tokens.splice(self.position.., replacement);
             break;
         }
     }
