@@ -3,6 +3,7 @@
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
 pub mod error;
+mod format;
 pub mod ops;
 pub mod path;
 pub(crate) mod resolve;

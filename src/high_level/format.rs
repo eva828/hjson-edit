@@ -1,0 +1,187 @@
+//! 部分整形: 文書全体ではなく、指定したコンテナ（オブジェクト・配列）だけを整形する。
+//!
+//! 編集の核心（`set`/`remove` など）は最小限のテキスト変更に留め、インデントなどの
+//! 体裁はこの層で整える。これにより「構造編集と整形を分離する」という設計を保つ。
+
+use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Object as AstObject};
+use crate::format::{Format, FormatConfig};
+use crate::high_level::error::HjsonEditError;
+use crate::high_level::ops::receiving_container_depth;
+use crate::high_level::path::HjsonObjectPath;
+use crate::high_level::resolve::{resolve_body, PathResolver};
+use crate::high_level::style::{detect_indent_from_ast, detect_newline_from_ast};
+use crate::high_level::HjsonDocument;
+use crate::syntax::{RedNode, SyntaxKind};
+
+impl HjsonDocument {
+    /// 文書で使われている改行コードとインデントを推定した整形設定を返す。
+    ///
+    /// インデントを判定できない文書（1段もインデントされていない）では
+    /// `IndentStyle::default()`（2スペース）を返す。
+    pub fn detected_format_config(&self) -> FormatConfig {
+        let root: &RedNode = self.syntax_root();
+        FormatConfig::default()
+            .with_newline(detect_newline_from_ast(root).as_str())
+            .with_indent(detect_indent_from_ast(root))
+    }
+
+    /// 指定したパスのコンテナだけを整形した文書を返す。
+    ///
+    /// 空のパスは文書全体を整形する。整形の深さは文書内の位置から決まるため、
+    /// 呼び出し側で深さを指定する必要はない。
+    ///
+    /// # エラー
+    ///
+    /// - パスが存在しない場合は [`HjsonEditError::PathNotFound`]
+    /// - パスが指す先がコンテナでない場合は [`HjsonEditError::UnexpectedStructure`]
+    pub fn format_container(
+        &self,
+        path: &HjsonObjectPath,
+        config: &FormatConfig,
+    ) -> Result<Self, HjsonEditError> {
+        let resolved = PathResolver::new(self.syntax_root().clone()).resolve_node(path)?;
+        let container = match resolved.kind() {
+            SyntaxKind::Object | SyntaxKind::Array => resolved,
+            found => resolve_body(&resolved).map_err(|_| HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Object,
+                found,
+            })?,
+        };
+
+        let depth = format_depth(&container)?;
+        let formatted = match container.kind() {
+            SyntaxKind::Object => AstObject::cast(container.clone())?.format_at(config, depth),
+            SyntaxKind::Array => AstArray::cast(container.clone())?.format_at(config, depth),
+            found => {
+                return Err(HjsonEditError::UnexpectedStructure {
+                    expected: SyntaxKind::Object,
+                    found,
+                })
+            }
+        };
+
+        Ok(self.clone().root(container.replace_with(formatted)))
+    }
+}
+
+/// コンテナを整形する際の深さ。文書全体の整形（`Document::format_at`）と同じ値になる。
+///
+/// ブレースレスオブジェクトは文書直下にしか現れず、深さ 0 で整形される。
+fn format_depth(container: &RedNode) -> Result<usize, HjsonEditError> {
+    let is_document_body = container
+        .parent()
+        .is_some_and(|parent| parent.kind() == SyntaxKind::Root);
+
+    if is_document_body && container.kind() == SyntaxKind::Object {
+        let object = AstObject::cast(container.clone())?;
+        if object.delimiter_style == DelimiterStyle::Braceless {
+            return Ok(0);
+        }
+    }
+
+    Ok(receiving_container_depth(container))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(raw: &str) -> HjsonObjectPath {
+        HjsonObjectPath::parse(raw).unwrap()
+    }
+
+    fn document_format(doc: &HjsonDocument, config: &FormatConfig) -> String {
+        RedNode::new_root(doc.ast().unwrap().format(config))
+            .text()
+            .to_string()
+    }
+
+    #[test]
+    fn detected_format_config_keeps_existing_style() {
+        let input = "{\r\n    a: 1\r\n    b: {\r\n        c: 1\r\n    }\r\n}\r\n";
+        let doc = HjsonDocument::parse(input).unwrap();
+        let config = doc.detected_format_config();
+        assert_eq!(document_format(&doc, &config), input);
+    }
+
+    #[test]
+    fn detected_format_config_finds_tabs() {
+        let input = "{\n\ta: 1\n\tb: {\n\t\tc: 1\n\t}\n}\n";
+        let doc = HjsonDocument::parse(input).unwrap();
+        let config = doc.detected_format_config();
+        assert_eq!(document_format(&doc, &config), input);
+    }
+
+    #[test]
+    fn detected_format_config_without_indent_uses_default() {
+        let doc = HjsonDocument::parse("a: 1\n").unwrap();
+        let config = doc.detected_format_config();
+        assert_eq!(document_format(&doc, &config), "a: 1\n");
+    }
+
+    #[test]
+    fn format_root_container_matches_document_format() {
+        let doc = HjsonDocument::parse("{\n  a: 1\n  b: {c:2}\n}\n").unwrap();
+        let config = FormatConfig::default();
+        let formatted = doc.format_container(&path(""), &config).unwrap();
+        assert_eq!(
+            formatted.to_string(),
+            document_format(&doc, &config),
+            "ルートコンテナの整形は文書全体の整形と一致する"
+        );
+    }
+
+    #[test]
+    fn format_container_leaves_siblings_untouched() {
+        let doc = HjsonDocument::parse("{\n  o: {a:1}\n  keep:   [1,2]\n}\n").unwrap();
+        let config = doc.detected_format_config();
+        let formatted = doc.format_container(&path("o"), &config).unwrap();
+        assert_eq!(
+            formatted.to_string(),
+            "{\n  o: {\n    a: 1\n  }\n  keep:   [1,2]\n}\n"
+        );
+    }
+
+    #[test]
+    fn format_container_handles_braceless_root() {
+        let input = "a: 1\nb: {\n  c: 1\n}\n";
+        let doc = HjsonDocument::parse(input).unwrap();
+        let config = doc.detected_format_config();
+        let formatted = doc.format_container(&path(""), &config).unwrap();
+        assert_eq!(formatted.to_string(), input);
+        assert_eq!(formatted.to_string(), document_format(&doc, &config));
+    }
+
+    #[test]
+    fn format_container_handles_comment_only_document() {
+        let doc = HjsonDocument::parse("// just a comment\n").unwrap();
+        let config = doc.detected_format_config();
+        let formatted = doc.format_container(&path(""), &config).unwrap();
+        assert_eq!(formatted.to_string(), "// just a comment\n");
+    }
+
+    #[test]
+    fn format_container_handles_root_array() {
+        let doc = HjsonDocument::parse("[1,{a:2}]\n").unwrap();
+        let config = FormatConfig::default();
+        let formatted = doc.format_container(&path(""), &config).unwrap();
+        assert_eq!(formatted.to_string(), "[\n  1\n  {\n    a: 2\n  }\n]\n");
+    }
+
+    #[test]
+    fn format_container_rejects_missing_path() {
+        let doc = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+        let result = doc.format_container(&path("missing"), &FormatConfig::default());
+        assert!(matches!(result, Err(HjsonEditError::PathNotFound(_))));
+    }
+
+    #[test]
+    fn format_container_rejects_non_container() {
+        let doc = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+        let result = doc.format_container(&path("a"), &FormatConfig::default());
+        assert!(matches!(
+            result,
+            Err(HjsonEditError::UnexpectedStructure { .. })
+        ));
+    }
+}
