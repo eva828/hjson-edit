@@ -10,11 +10,10 @@
 
 use rowan::{NodeOrToken, TextRange};
 
-use crate::ast::CommentKind;
 use crate::high_level::error::HjsonEditError;
+use crate::high_level::ops::comment::{all_comment_bodies, comment_slots, CommentSlot};
 use crate::high_level::ops::insert::slot_at;
-use crate::high_level::path::PathSegment;
-use crate::high_level::path::{HjsonCommentPath, HjsonObjectPath};
+use crate::high_level::path::{ArrayPathSegment, HjsonCommentPath, HjsonObjectPath, PathSegment};
 use crate::high_level::resolve::{array_slot_index, member_index, resolve_body, PathResolver};
 use crate::high_level::value::HjsonValue;
 use crate::high_level::value_ops::values_equal;
@@ -103,18 +102,16 @@ fn slot_range(root: &RedNode, path: &HjsonObjectPath) -> Option<TextRange> {
 }
 
 /// 指定した範囲の外側でコメントが変化していないか。
+///
+/// 本文だけでなく並び順も比較する。同じ本文のコメントが別の位置へ移れば、
+/// 外側の並びが変わるため検出できる。
 fn comments_outside_unchanged(
     previous: &RedNode,
     updated: &RedNode,
     previous_allowed: Option<TextRange>,
     updated_allowed: Option<TextRange>,
 ) -> bool {
-    let mut previous_rest = comments_outside(previous, previous_allowed);
-    let mut updated_rest = comments_outside(updated, updated_allowed);
-    previous_rest.sort();
-    updated_rest.sort();
-
-    previous_rest == updated_rest
+    comments_outside(previous, previous_allowed) == comments_outside(updated, updated_allowed)
 }
 
 /// 許可された範囲の外側にあるコメント。
@@ -181,7 +178,6 @@ pub(crate) fn comment_edit(
         });
     }
 
-    let previous_target = previous.comment_bodies(path)?;
     let updated_target = updated.comment_bodies(path)?;
 
     let actual = if updated_target.is_empty() {
@@ -196,11 +192,11 @@ pub(crate) fn comment_edit(
         });
     }
 
-    // 対象以外のコメントが変化していないこと（多重集合として比較する）
-    let mut previous_rest = all_comment_bodies(previous.syntax_root());
-    let mut updated_rest = all_comment_bodies(updated.syntax_root());
-    remove_bodies(&mut previous_rest, &previous_target);
-    remove_bodies(&mut updated_rest, &updated_target);
+    // 対象以外のコメントが、本文も付いている位置も変わっていないこと。
+    // 位置（スロット）ごとに比べるため、同じ本文のコメントが別の要素へ移っても検出できる。
+    let target_key = target_slot_key(previous, path);
+    let previous_rest = rest_of_slots(previous, &target_key)?;
+    let updated_rest = rest_of_slots(updated, &target_key)?;
 
     if previous_rest != updated_rest {
         return Err(HjsonEditError::InvalidEdit {
@@ -212,6 +208,96 @@ pub(crate) fn comment_edit(
     }
 
     Ok(())
+}
+
+/// 対象のスロットを除いた、位置ごとのコメントと、どのスロットにも属さないコメント。
+///
+/// スロットは要素の前後とコンテナの末尾しか覆わないため、それ以外の場所
+/// （ブレースレス文書の末尾やキーと値の間など）のコメントは残余として比較する。
+fn rest_of_slots(
+    document: &HjsonDocument,
+    target_key: &str,
+) -> Result<Vec<(String, Vec<String>)>, HjsonEditError> {
+    let slots = slots_by_key(document.syntax_root())?;
+    let mut rest: Vec<(String, Vec<String>)> = slots
+        .iter()
+        .filter(|(slot, _)| slot != target_key)
+        .cloned()
+        .collect();
+
+    // 残ったスロットが説明できないコメント（ブレースレス文書の末尾など）
+    let mut unclaimed = all_comment_bodies(document.syntax_root());
+    for (_, bodies) in &slots {
+        for body in bodies {
+            if let Some(index) = unclaimed.iter().position(|other| other == body) {
+                unclaimed.remove(index);
+            }
+        }
+    }
+    rest.push(("<unclaimed>".to_string(), unclaimed));
+
+    Ok(rest)
+}
+
+/// 操作対象のスロットキー。
+///
+/// `comment_slots` は実位置（`Index`）で列挙するため、`[-]` や `[+n]` のような
+/// 解決が必要なセグメントは実位置に直してからキーにする。
+fn target_slot_key(document: &HjsonDocument, path: &HjsonCommentPath) -> String {
+    match path {
+        HjsonCommentPath::Header => CommentSlot::DocumentHeader.key(),
+        HjsonCommentPath::Footer => CommentSlot::DocumentFooter.key(),
+        HjsonCommentPath::Before(path) => {
+            CommentSlot::Before(resolve_indices(document, path)).key()
+        }
+        HjsonCommentPath::Inline(path) => {
+            CommentSlot::Inline(resolve_indices(document, path)).key()
+        }
+        HjsonCommentPath::ContainerFooter(path) => {
+            CommentSlot::ContainerFooter(resolve_indices(document, path)).key()
+        }
+    }
+}
+
+/// 解決が必要な配列セグメント（`[-]` / `[+n]`）を実位置に置き換える。
+///
+/// 途中のセグメントも含めて解決する（`items[-].x:before` のようなパスがあるため）。
+/// 対象が存在しない場合などは、そのままのパスを返す（編集自体が失敗する）。
+fn resolve_indices(document: &HjsonDocument, path: &HjsonObjectPath) -> HjsonObjectPath {
+    let resolver = PathResolver::new(document.syntax_root().clone());
+    let mut segments: Vec<PathSegment> = Vec::with_capacity(path.depth());
+
+    for segment in path.segments() {
+        let PathSegment::Array(alias @ (ArrayPathSegment::Push | ArrayPathSegment::InsertAt(_))) =
+            segment
+        else {
+            segments.push(segment.clone());
+            continue;
+        };
+
+        let prefix = HjsonObjectPath::from_segments(segments.clone());
+        let index = resolver
+            .resolve_node(&prefix)
+            .ok()
+            .and_then(|node| resolve_body(&node).ok())
+            .and_then(|container| array_slot_index(&container, alias));
+
+        match index {
+            Some(index) => segments.push(PathSegment::Array(ArrayPathSegment::Index(index))),
+            // 解決できない場合はそのまま（編集側がエラーを返す）
+            None => segments.push(segment.clone()),
+        }
+    }
+
+    HjsonObjectPath::from_segments(segments)
+}
+
+/// 位置ごとのコメント（並び順を保つ）。
+fn slots_by_key(root: &RedNode) -> Result<Vec<(String, Vec<String>)>, HjsonEditError> {
+    Ok(comment_slots(root)?
+        .into_iter()
+        .map(|(slot, bodies)| (slot.key(), bodies))
+        .collect())
 }
 
 /// 文書の値。取り出せない場合は編集結果として不正。
@@ -233,32 +319,140 @@ fn reparsed_value(root: &RedNode, path: &HjsonObjectPath) -> Result<HjsonValue, 
     value_of(document.syntax_root(), path)
 }
 
-/// 文書中のコメント本文をすべて集める。
-fn all_comment_bodies(root: &RedNode) -> Vec<String> {
-    let mut bodies: Vec<String> = Vec::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for element in root.descendants_with_tokens() {
-        let NodeOrToken::Token(token) = element else {
-            continue;
-        };
-        let kind = match token.kind() {
-            SyntaxKind::LineComment => CommentKind::Line,
-            SyntaxKind::HashComment => CommentKind::Hash,
-            SyntaxKind::BlockComment => CommentKind::Block,
-            _ => continue,
-        };
-        bodies.push(kind.decode_body(token.text()));
+    fn slots_of(text: &str) -> Vec<(String, Vec<String>)> {
+        let document = HjsonDocument::parse(text).unwrap();
+        slots_by_key(document.syntax_root()).unwrap()
     }
 
-    bodies.sort();
-    bodies
-}
+    #[test]
+    fn slots_separate_positions() {
+        let slots =
+            slots_of("// header\n{\n  // before\n  a: 1 // inline\n  // footer\n}\n// document\n");
 
-/// `bodies` から `removed` の要素を 1 つずつ取り除く。
-fn remove_bodies(bodies: &mut Vec<String>, removed: &[String]) {
-    for body in removed {
-        if let Some(position) = bodies.iter().position(|existing| existing == body) {
-            bodies.remove(position);
-        }
+        assert!(slots.contains(&(":header".to_string(), vec!["header".to_string()])));
+        assert!(slots.contains(&(":footer".to_string(), vec!["document".to_string()])));
+        assert!(slots.contains(&("a:before".to_string(), vec!["before".to_string()])));
+        assert!(slots.contains(&("a:inline".to_string(), vec!["inline".to_string()])));
+        // 文書直下のコンテナの footer は `<root>:footer` で表される
+        assert!(slots.contains(&(".:footer".to_string(), vec!["footer".to_string()])));
+    }
+
+    #[test]
+    fn moving_the_same_comment_changes_the_slots() {
+        let before = slots_of("{\n  // note\n  a: 1\n  b: 2\n}\n");
+        let after = slots_of("{\n  a: 1\n  // note\n  b: 2\n}\n");
+
+        // 本文の集合は同じでも、位置が違えば列は一致しない
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn moving_a_comment_between_document_and_element_is_detected() {
+        let header = slots_of("// note\n{\n  a: 1\n}\n");
+        let element = slots_of("{\n  // note\n  a: 1\n}\n");
+
+        assert_ne!(header, element);
+    }
+
+    fn object_path(raw: &str) -> HjsonObjectPath {
+        HjsonObjectPath::parse(raw.to_string()).unwrap()
+    }
+
+    #[test]
+    fn comment_edit_accepts_an_unchanged_document() {
+        let document = HjsonDocument::parse("{\n  // n\n  a: 1\n}\n").unwrap();
+        let path = HjsonCommentPath::Before(object_path("a"));
+
+        comment_edit(&document, &document, &path, Some("n")).unwrap();
+    }
+
+    #[test]
+    fn reordering_comments_between_slots_is_rejected() {
+        // a と c のコメントが入れ替わっている。本文の多重集合は同じだが位置が違う。
+        let previous =
+            HjsonDocument::parse("{\n  // n\n  a: 1\n  // n\n  b: 2\n  // m\n  c: 3\n}\n").unwrap();
+        let updated =
+            HjsonDocument::parse("{\n  // m\n  a: 1\n  // n\n  b: 2\n  // n\n  c: 3\n}\n").unwrap();
+
+        // 対象（b の直前）のコメントは変わっていない
+        let path = HjsonCommentPath::Before(object_path("b"));
+        let error = comment_edit(&previous, &updated, &path, Some("n")).unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::InvalidEdit { .. }),
+            "reordering was not detected: {error:?}"
+        );
+    }
+
+    #[test]
+    fn unclaimed_comments_are_still_compared() {
+        // ブレースレス文書の末尾コメントはどのスロットにも属さない
+        let previous = HjsonDocument::parse("a: 1\n// tail\n").unwrap();
+        let updated = HjsonDocument::parse("a: 1\n// changed\n").unwrap();
+        let path = HjsonCommentPath::Before(object_path("a"));
+
+        let error = comment_edit(&previous, &updated, &path, None).unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::InvalidEdit { .. }),
+            "a changed unclaimed comment was not detected: {error:?}"
+        );
+    }
+
+    #[test]
+    fn comments_of_a_scalar_document_are_compared() {
+        // スカラー文書でも文書全体のコメントは比較できる
+        let previous = HjsonDocument::parse("// header\n123\n").unwrap();
+        let updated = HjsonDocument::parse("// header\n123\n// tail\n").unwrap();
+
+        let error = comment_edit(
+            &previous,
+            &updated,
+            &HjsonCommentPath::Header,
+            Some("header"),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::InvalidEdit { .. }),
+            "a changed footer was not detected: {error:?}"
+        );
+    }
+
+    #[test]
+    fn root_container_footer_and_document_footer_are_distinct() {
+        // 文書直下のコンテナの footer（閉じ区切りの手前）と、
+        // 文書全体の footer（閉じ区切りの後ろ）は別のスロット
+        let slots = slots_of("{\n  a: 1\n  // inside\n}\n// outside\n");
+
+        assert!(slots.contains(&(".:footer".to_string(), vec!["inside".to_string()])));
+        assert!(slots.contains(&(":footer".to_string(), vec!["outside".to_string()])));
+    }
+
+    #[test]
+    fn moving_a_comment_to_the_container_footer_is_rejected() {
+        let previous = HjsonDocument::parse("{\n  // n\n  a: 1\n  b: 2\n}\n").unwrap();
+        let updated = HjsonDocument::parse("{\n  a: 1\n  b: 2\n  // n\n}\n").unwrap();
+        let path = HjsonCommentPath::Before(object_path("b"));
+
+        let error = comment_edit(&previous, &updated, &path, None).unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::InvalidEdit { .. }),
+            "move was not detected: {error:?}"
+        );
+    }
+
+    #[test]
+    fn array_elements_have_their_own_slots() {
+        let slots = slots_of("{\n  a: [\n    // first\n    1 // tail\n    // items\n  ]\n}\n");
+
+        assert!(slots.contains(&("a[0]:before".to_string(), vec!["first".to_string()])));
+        assert!(slots.contains(&("a[0]:inline".to_string(), vec!["tail".to_string()])));
+        assert!(slots.contains(&("a:footer".to_string(), vec!["items".to_string()])));
     }
 }

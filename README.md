@@ -47,6 +47,9 @@ hjson-edit edit in.hjson --set b hello
 # 配列要素にコメントを付ける（`:before` は要素の前の行、`:inline` は値の後ろ）
 hjson-edit edit in.hjson --comment-set 'items[0]:inline' '先頭の要素'
 
+# コンテナの閉じ区切りの直前（文書全体の footer は `:footer`）
+hjson-edit edit in.hjson --comment-set 'server:footer' 'TODO: タイムアウトを見直す'
+
 # 値は HJSON の値として解釈される
 hjson-edit edit in.hjson --set name '"true"'   # 文字列 "true"
 hjson-edit edit in.hjson --set flag true       # 真偽値
@@ -70,7 +73,9 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 それ以外は `--string-style` が使われる。
 
 コメントの `PATH` は `key:before` / `key:inline`（要素の前の行／値の後ろ）に加えて
-配列要素（`items[0]:inline`）も指定できる。`:header` / `:footer` は文書全体のコメント。
+配列要素（`items[0]:inline`）も指定できる。`:header` / `:footer` は文書全体のコメント、
+`obj:footer` はそのコンテナの閉じ区切りの直前のコメント（要素の後の行）になる。
+文書直下のコンテナは `.` で指す（`.:footer` は `}` の直前、`:footer` は `}` の後ろ）。
 引用符なし文字列は行末までを飲み込むため、その直後への `:inline` はエラーになる。
 
 `--comment-style` と `--string-style` はその実行全体に適用する。
@@ -129,6 +134,8 @@ let document = HjsonDocument::parse(input)?
 | `merge_from` のコメント | 新規メンバーは先頭コメント行と行末コメントごとコピーする。文書全体のヘッダー/フッターは対象外 |
 | `merge_from` の置き換え | 後勝ちで値だけを差し替え、キーとコメントはホスト側を保つ |
 | 配列の追加 | `[-]` と `[+]` はどちらも末尾を指す（読み取りは末尾要素、書き込みは末尾への追加） |
+| コンテナの footer | `<path>:footer` は閉じ区切りの直前のコメント。1 行で書かれたコンテナに付ける場合は行を分ける。文書直下は `.` で指定する（`.:footer`） |
+| パスで区別できないキー | `a.b` のような引用符付きキーや重複キーはパスでもコメント位置の検証でも同じ位置として扱う（編集自体は成功する） |
 
 ## hjson-cs 準拠
 

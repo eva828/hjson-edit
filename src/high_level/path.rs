@@ -20,12 +20,21 @@ pub struct HjsonObjectPath {
     segments: Vec<PathSegment>,
 }
 
+/// コメントを付ける位置。
+///
+/// `<path>` に `.` を書くと文書直下のコンテナを指す（`.:footer`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HjsonCommentPath {
+    /// 文書全体の先頭（`:header`）。
     Header,
+    /// 文書全体の末尾（`:footer`）。
     Footer,
+    /// 要素の前の行（`<path>:before`。接尾辞を省略した場合も同じ）。
     Before(HjsonObjectPath),
+    /// 要素の値の後ろ、同じ行の末尾（`<path>:inline`）。
     Inline(HjsonObjectPath),
+    /// コンテナの閉じ区切りの直前（`<path>:footer`）。要素の後の行に置く。
+    ContainerFooter(HjsonObjectPath),
 }
 
 impl TryFrom<&str> for HjsonCommentPath {
@@ -37,16 +46,36 @@ impl TryFrom<&str> for HjsonCommentPath {
         } else if raw == ":footer" {
             Ok(Self::Footer)
         } else if let Some(stripped) = raw.strip_suffix(":inline") {
-            Ok(Self::Inline(HjsonObjectPath::parse(stripped.to_string())?))
+            Ok(Self::Inline(parse_element_path(stripped)?))
         } else if let Some(stripped) = raw.strip_suffix(":before") {
-            Ok(Self::Before(HjsonObjectPath::parse(stripped.to_string())?))
+            Ok(Self::Before(parse_element_path(stripped)?))
+        } else if let Some(stripped) = raw.strip_suffix(":footer") {
+            Ok(Self::ContainerFooter(parse_element_path(stripped)?))
         } else if raw.contains(':') {
             Err(HjsonEditError::InvalidPath(format!(
                 "unknown comment suffix in path: {raw:?}"
             )))
         } else {
-            Ok(Self::Before(HjsonObjectPath::parse(raw.to_string())?))
+            Ok(Self::Before(parse_element_path(raw)?))
         }
+    }
+}
+
+/// コメントの対象になるパス。`.` は文書直下を指す。
+fn parse_element_path(raw: &str) -> Result<HjsonObjectPath, HjsonEditError> {
+    if raw == "." {
+        return Ok(HjsonObjectPath::from_segments(Vec::new()));
+    }
+
+    HjsonObjectPath::parse(raw.to_string())
+}
+
+/// パスを書く。文書直下（空のパス）は `.` と書く。
+fn write_element_path(f: &mut std::fmt::Formatter<'_>, path: &HjsonObjectPath) -> std::fmt::Result {
+    if path.depth() == 0 {
+        write!(f, ".")
+    } else {
+        write!(f, "{path}")
     }
 }
 
@@ -97,8 +126,18 @@ impl std::fmt::Display for HjsonCommentPath {
         match self {
             HjsonCommentPath::Header => write!(f, ":header"),
             HjsonCommentPath::Footer => write!(f, ":footer"),
-            HjsonCommentPath::Before(path) => write!(f, "{path}:before"),
-            HjsonCommentPath::Inline(path) => write!(f, "{path}:inline"),
+            HjsonCommentPath::Before(path) => {
+                write_element_path(f, path)?;
+                write!(f, ":before")
+            }
+            HjsonCommentPath::Inline(path) => {
+                write_element_path(f, path)?;
+                write!(f, ":inline")
+            }
+            HjsonCommentPath::ContainerFooter(path) => {
+                write_element_path(f, path)?;
+                write!(f, ":footer")
+            }
         }
     }
 }

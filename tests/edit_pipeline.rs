@@ -188,7 +188,9 @@ fn comment_path(raw: &str) -> HjsonCommentPath {
 /// コメントの対象要素のパス。
 fn comment_element_path(path: &HjsonCommentPath) -> Option<HjsonObjectPath> {
     match path {
-        HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => Some(path.clone()),
+        HjsonCommentPath::Before(path)
+        | HjsonCommentPath::Inline(path)
+        | HjsonCommentPath::ContainerFooter(path) => Some(path.clone()),
         HjsonCommentPath::Header | HjsonCommentPath::Footer => None,
     }
 }
@@ -284,7 +286,7 @@ fn random_edit_sequences_keep_documents_valid() {
             let index = rng.below(entries.len());
             let entry = entries[index].clone();
 
-            match rng.below(6) {
+            match rng.below(7) {
                 0 => {
                     // 既存の値を置き換える
                     let (value, _) = generate_scalar(&mut rng);
@@ -347,6 +349,15 @@ fn random_edit_sequences_keep_documents_valid() {
                         });
                     comments
                         .retain(|(path, _)| path.to_string() != format!("{}:inline", entry.path));
+                }
+                5 if entry.is_container() => {
+                    // コンテナの閉じ区切りの直前にコメントを付ける
+                    let target = comment_path(&format!("{}:footer", entry.path));
+                    doc = doc
+                        .set_comment(target.clone(), "trail")
+                        .unwrap_or_else(|error| panic!("{context}: set_comment failed: {error}"));
+                    drop_comment_record(&mut comments, &target);
+                    comments.push((target, Some("trail".to_string())));
                 }
                 4 if entries.len() > 1 => {
                     // 既存の要素を削除する

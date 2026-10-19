@@ -222,6 +222,59 @@ fn cli_edit_sets_array_item_comment() {
 }
 
 #[test]
+fn cli_edit_sets_container_footer_comment() {
+    let input = "{\n  a: {\n    x: 1\n  }\n}\n";
+    let stdout = edit_stdout(&["edit", "--comment-set", "a:footer", "note"], input);
+
+    assert!(stdout.contains("x: 1\n    /* note */"), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_removes_container_footer_comment() {
+    let input = "{\n  a: {\n    x: 1\n    // note\n  }\n}\n";
+    let stdout = edit_stdout(&["edit", "--comment-remove", "a:footer"], input);
+
+    assert!(!stdout.contains("// note"), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_rejects_container_footer_on_scalar() {
+    let (_, stderr) = edit_failure(
+        &["edit", "--comment-set", "a:footer", "note"],
+        "{\n  a: 1\n}\n",
+    );
+    assert!(stderr.contains("Invalid target"), "{stderr}");
+}
+
+#[test]
+fn cli_edit_sets_container_footer_on_single_line_container() {
+    let input = "{\n  s: {a: 1}\n}\n";
+    let stdout = edit_stdout(&["edit", "--comment-set", "s:footer", "note"], input);
+
+    assert!(stdout.contains("a: 1\n    /* note */\n  }"), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_sets_comment_on_scalar_document() {
+    let stdout = edit_stdout(&["edit", "--comment-set", ":header", "note"], "123\n");
+
+    assert!(stdout.starts_with("/* note */"), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_sets_comment_on_last_array_element_alias() {
+    let input = "{\n  items: [\n    1\n    2\n  ]\n}\n";
+    let stdout = edit_stdout(&["edit", "--comment-set", "items[-]:inline", "last"], input);
+
+    assert!(stdout.contains("2 /* last */"), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
 fn cli_edit_no_verify_still_edits() {
     let stdout = edit_stdout(
         &["edit", "--no-verify", "--set", "b", "hello"],

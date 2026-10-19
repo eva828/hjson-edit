@@ -21,6 +21,7 @@ use crate::{
 /// - `:header` / `:footer`: 文書全体のコメント
 /// - `<path>:before`: 要素の前の行のコメント（接尾辞を省略した場合も同じ）
 /// - `<path>:inline`: 要素の値の後ろのコメント
+/// - `<path>:footer`: コンテナの閉じ区切りの直前のコメント（要素の後の行）
 ///
 /// `<path>` はメンバーでも配列要素でもよい。行末でしか終端できない値
 /// （引用符なし文字列）の直後にはコメントを置けないため、`:inline` は
@@ -68,8 +69,34 @@ impl HjsonDocument {
                 let trivia = slot_trivia(slot.container(), slot.index(), location)?;
                 Ok(extract_comment_bodies(&trivia))
             }
+            CommentTarget::ContainerFooter { path } => {
+                let container = resolve_container_node(self.syntax_root(), path)?;
+                let children = children_of(&container);
+                let range =
+                    container_footer_range(&container)?.ok_or_else(|| no_container_footer(path))?;
+                Ok(comments_in(&children, range))
+            }
         }
     }
+}
+
+/// パスが指すコンテナ（オブジェクト・配列）のノード。
+fn resolve_container_node(
+    root: &RedNode,
+    path: &HjsonObjectPath,
+) -> Result<RedNode, HjsonEditError> {
+    let not_container = || HjsonEditError::InvalidTarget {
+        path: path.clone(),
+        reason: "the path is not a container".to_string(),
+    };
+
+    let resolved = PathResolver::new(root.clone()).resolve_node(path)?;
+    let container =
+        crate::high_level::resolve::resolve_body(&resolved).map_err(|_| not_container())?;
+
+    matches!(container.kind(), SyntaxKind::Object | SyntaxKind::Array)
+        .then_some(container)
+        .ok_or_else(not_container)
 }
 
 impl HjsonDocumentCommentEdit for HjsonDocument {
@@ -111,6 +138,250 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
     }
 }
 
+/// 文書中のコメントが付く位置。
+///
+/// 「同じ本文のコメントが別の位置へ移った」ことを検出できるよう、
+/// コメントをテキストの集合ではなく位置ごとに識別する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CommentSlot {
+    DocumentHeader,
+    DocumentFooter,
+    Before(HjsonObjectPath),
+    Inline(HjsonObjectPath),
+    ContainerFooter(HjsonObjectPath),
+}
+
+impl CommentSlot {
+    /// 比較と表示のための一意なキー。
+    pub(crate) fn key(&self) -> String {
+        match self {
+            CommentSlot::DocumentHeader => ":header".to_string(),
+            CommentSlot::DocumentFooter => ":footer".to_string(),
+            CommentSlot::Before(path) => format!("{path}:before"),
+            CommentSlot::Inline(path) => format!("{path}:inline"),
+            // 文書直下のコンテナはパスが空になるため、`:footer` と衝突しない名前にする
+            CommentSlot::ContainerFooter(path) if path.segments().is_empty() => {
+                ".:footer".to_string()
+            }
+            CommentSlot::ContainerFooter(path) => format!("{path}:footer"),
+        }
+    }
+}
+
+/// 文書中のコメントを、付いている位置ごとに列挙する。
+///
+/// 値は位置順に並ぶため、コメントの並びが変われば列も変わる。
+pub(crate) fn comment_slots(
+    root: &RedNode,
+) -> Result<Vec<(CommentSlot, Vec<String>)>, HjsonEditError> {
+    let ast = Document::cast(root.clone())?;
+    let mut slots = vec![
+        (
+            CommentSlot::DocumentHeader,
+            extract_comment_bodies(&ast.leading_trivia),
+        ),
+        (
+            CommentSlot::DocumentFooter,
+            extract_comment_bodies(&ast.trailing_trivia),
+        ),
+    ];
+
+    // Root の直下は Value に包まれていることがあるため、実体のコンテナまで降りる。
+    // スカラー文書にはコンテナが無いため、文書全体のコメントだけを返す。
+    if let Some(container) = document_container(root) {
+        collect_container_comment_slots(
+            &container,
+            &HjsonObjectPath::from_segments(Vec::new()),
+            &mut slots,
+        )?;
+    }
+
+    Ok(slots)
+}
+
+/// 文書の本体がコンテナのとき、そのノード。
+fn document_container(root: &RedNode) -> Option<RedNode> {
+    let mut node = crate::high_level::resolve::resolve_body(root).ok()?;
+    while node.kind() == SyntaxKind::Value {
+        node = crate::high_level::resolve::resolve_body(&node).ok()?;
+    }
+
+    matches!(node.kind(), SyntaxKind::Object | SyntaxKind::Array).then_some(node)
+}
+
+/// 文書中のコメント本文をすべて集める（文書順）。
+///
+/// スロットで位置を特定できないコメントの取りこぼしを検出するために使う。
+pub(crate) fn all_comment_bodies(root: &RedNode) -> Vec<String> {
+    // Comment ノードとそのトークンの両方が現れるため、トークンだけを数える
+    root.descendants_with_tokens()
+        .filter(|element| matches!(element, rowan::NodeOrToken::Token(_)))
+        .filter_map(|element| trivia_from_element(&element))
+        .filter_map(|trivia| match trivia {
+            Trivia::Comment(comment) => Some(comment.body),
+            _ => None,
+        })
+        .collect()
+}
+
+/// コンテナ以下のコメントを、内側のコンテナから順に集める。
+fn collect_container_comment_slots(
+    container: &RedNode,
+    path: &HjsonObjectPath,
+    slots: &mut Vec<(CommentSlot, Vec<String>)>,
+) -> Result<(), HjsonEditError> {
+    let spans = crate::high_level::ops::insert::container_slots(container)?;
+    let children = children_of(container);
+
+    for (index, span) in spans.iter().enumerate() {
+        let Some(element_path) = element_path(container, index, path)? else {
+            continue;
+        };
+
+        let before = comments_in(&children, span.lead());
+        slots.push((CommentSlot::Before(element_path.clone()), before));
+
+        let inline = comments_in(&children, span.trail());
+        slots.push((CommentSlot::Inline(element_path.clone()), inline));
+
+        if let Some(child) = element_container(container, index) {
+            collect_container_comment_slots(&child, &element_path, slots)?;
+        }
+    }
+
+    // 閉じ区切りの直前（コンテナの footer）
+    if let Some(range) = container_footer_range(container)? {
+        let footer = comments_in(&children, range);
+        slots.push((CommentSlot::ContainerFooter(path.clone()), footer));
+    }
+
+    Ok(())
+}
+
+/// コンテナ内の要素に付くコメント本文。
+fn comments_in(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    range: Range<usize>,
+) -> Vec<String> {
+    children[range]
+        .iter()
+        .filter_map(trivia_from_element)
+        .filter_map(|trivia| match trivia {
+            Trivia::Comment(comment) => Some(comment.body),
+            _ => None,
+        })
+        .collect()
+}
+
+/// コンテナ内の要素のパス。要素が取れない場合は `None`。
+fn element_path(
+    container: &RedNode,
+    index: usize,
+    prefix: &HjsonObjectPath,
+) -> Result<Option<HjsonObjectPath>, HjsonEditError> {
+    let mut segments = prefix.segments().to_vec();
+
+    match container.kind() {
+        SyntaxKind::Object => {
+            let object = crate::ast::Object::cast(container.clone())?;
+            let members = object.members();
+            let Some(member) = members.get(index) else {
+                return Ok(None);
+            };
+            let Some(key) = member.member_key() else {
+                return Ok(None);
+            };
+            segments.push(crate::high_level::path::PathSegment::Key(key));
+        }
+        SyntaxKind::Array => {
+            segments.push(crate::high_level::path::PathSegment::Array(
+                crate::high_level::path::ArrayPathSegment::Index(index),
+            ));
+        }
+        _ => return Ok(None),
+    }
+
+    Ok(Some(HjsonObjectPath::from_segments(segments)))
+}
+
+/// コンテナ内の要素が中に持つコンテナ。
+fn element_container(container: &RedNode, index: usize) -> Option<RedNode> {
+    let element = match container.kind() {
+        SyntaxKind::Object => {
+            let object = crate::ast::Object::cast(container.clone()).ok()?;
+            let member = object.members().get(index)?.syntax().clone();
+            member
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Value)?
+        }
+        SyntaxKind::Array => {
+            let array = crate::ast::Array::cast(container.clone()).ok()?;
+            array.items().get(index)?.syntax().clone()
+        }
+        _ => return None,
+    };
+
+    let body = crate::high_level::resolve::resolve_body(&element).ok()?;
+    matches!(body.kind(), SyntaxKind::Object | SyntaxKind::Array).then_some(body)
+}
+
+/// 閉じ区切りの直前にあるコメントが占める範囲。
+///
+/// 最後の要素の行末より後ろから閉じ区切りまでを対象にする。要素が無い場合は
+/// 本文全体（開き区切りの直後から閉じ区切りまで）を対象にする。
+fn container_footer_range(container: &RedNode) -> Result<Option<Range<usize>>, HjsonEditError> {
+    let spans = crate::high_level::ops::insert::container_slots(container)?;
+    let children = children_of(container);
+
+    let closing = match container.kind() {
+        SyntaxKind::Object => crate::ast::Object::cast(container.clone())?.delimiter_style,
+        SyntaxKind::Array => crate::ast::Array::cast(container.clone())?.delimiter_style,
+        found => {
+            return Err(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Object,
+                found,
+            })
+        }
+    };
+    if closing == crate::ast::DelimiterStyle::Braceless {
+        return Ok(None);
+    }
+
+    let closing_kind = match container.kind() {
+        SyntaxKind::Object => SyntaxKind::RBrace,
+        _ => SyntaxKind::RBracket,
+    };
+    let closing_index = children
+        .iter()
+        .rposition(|child| matches!(child, rowan::NodeOrToken::Token(token) if token.kind() == closing_kind))
+        .unwrap_or(children.len());
+
+    let start = match spans.last() {
+        Some(last) => last.trail().end,
+        None => children
+            .iter()
+            .position(|child| {
+                matches!(
+                    child,
+                    rowan::NodeOrToken::Token(token)
+                        if matches!(token.kind(), SyntaxKind::LBrace | SyntaxKind::LBracket)
+                )
+            })
+            .map_or(0, |position| position + 1),
+    };
+
+    Ok(Some(start..closing_index.max(start)))
+}
+
+/// コンテナの footer が存在しない（ブレースレス）ことを示すエラー。
+fn no_container_footer(path: &HjsonObjectPath) -> HjsonEditError {
+    HjsonEditError::InvalidTarget {
+        path: path.clone(),
+        reason: "a braceless object has no closing delimiter; use :footer for the document"
+            .to_string(),
+    }
+}
+
 /// コメント編集の後処理（変更したコンテナの記録と検証）。
 fn finish_comment_edit(
     previous: &HjsonDocument,
@@ -135,6 +406,7 @@ fn comment_container(path: &HjsonCommentPath) -> Option<HjsonObjectPath> {
         HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
             path.split_last().map(|(parent, _)| parent)
         }
+        HjsonCommentPath::ContainerFooter(path) => Some(path.clone()),
     }
 }
 
@@ -153,6 +425,10 @@ enum CommentTarget<'a> {
         path: &'a HjsonObjectPath,
         location: CommentLocation,
     },
+    /// コンテナの閉じ区切りの直前。
+    ContainerFooter {
+        path: &'a HjsonObjectPath,
+    },
 }
 
 fn resolve_comment_target(path: &HjsonCommentPath) -> CommentTarget<'_> {
@@ -167,6 +443,7 @@ fn resolve_comment_target(path: &HjsonCommentPath) -> CommentTarget<'_> {
             path,
             location: CommentLocation::Inline,
         },
+        HjsonCommentPath::ContainerFooter(path) => CommentTarget::ContainerFooter { path },
     }
 }
 
@@ -321,6 +598,9 @@ fn update_comment(
         CommentTarget::Slot { path, location } => {
             build_slot_comment(root, path, location, comment, preferred, newline)
         }
+        CommentTarget::ContainerFooter { path } => {
+            build_container_footer_comment(root, path, comment, preferred, newline)
+        }
     }
 }
 
@@ -470,6 +750,155 @@ fn build_slot_comment(
 
     let updated = green_after_remove.splice_children(insert_at..insert_at, inserted);
     Ok(container.replace_with(updated))
+}
+
+/// コンテナの閉じ区切りの直前にあるコメントを差し替える。`None` なら削除する。
+fn build_container_footer_comment(
+    root: RedNode,
+    path: &HjsonObjectPath,
+    comment: Option<String>,
+    preferred: Prefer<CommentKind>,
+    newline: &str,
+) -> Result<GreenNode, HjsonEditError> {
+    let container = resolve_container_node(&root, path)?;
+    let children = children_of(&container);
+    let range = container_footer_range(&container)?.ok_or_else(|| no_container_footer(path))?;
+
+    let trivia: Vec<Trivia> = children[range.clone()]
+        .iter()
+        .filter_map(trivia_from_element)
+        .collect();
+    let existing_style = trivia_comment_style(&trivia);
+
+    // 閉じ区切りの手前は、要素の行末より後ろにあるトリビア（コメント・改行・空白）だけ。
+    // コメント行の行頭から閉じ区切りまでを一度に置き換え、体裁を作り直す。
+    let first_comment = range.clone().position(|index| is_comment(&children[index]));
+    let deletion_start = match first_comment {
+        Some(index) => {
+            let mut start = range.start + index;
+            while start > range.start && is_whitespace(&children[start - 1]) {
+                start -= 1;
+            }
+            start
+        }
+        None => {
+            let mut at = range.end;
+            while at > range.start && is_whitespace(&children[at - 1]) {
+                at -= 1;
+            }
+            at
+        }
+    };
+    // 置き換える範囲が無く、消すコメントも無ければ何もしない
+    if comment.is_none() && deletion_start == range.end {
+        return Ok(container.replace_with(container.green().clone().into_owned()));
+    }
+
+    let at_line_start = deletion_start > 0 && is_newline(&children[deletion_start - 1]);
+
+    let mut inserted: Vec<GreenElement> = Vec::new();
+    if let Some(comment) = comment {
+        let resolved_style = resolve_comment_style(preferred, existing_style);
+        // コメントは要素の後の行に置くため、直前が行末でなければ改行を足す
+        if !at_line_start {
+            inserted.push(SyntaxKind::Newline.create_token(newline).into());
+        }
+        inserted.push(element_indent(&children, &container)?);
+        inserted.extend(make_comment_nodes(resolved_style, &comment, newline));
+        inserted.push(SyntaxKind::Newline.create_token(newline).into());
+    }
+
+    // 閉じ区切りの字下げは元のテキストを保つ。行頭に無ければ開き区切りの行に合わせる。
+    let closing_indent = closing_indent_of(&children, &range, &container);
+    if !closing_indent.is_empty() {
+        inserted.push(
+            SyntaxKind::Whitespace
+                .create_token(closing_indent.as_str())
+                .into(),
+        );
+    }
+
+    let updated = container
+        .green()
+        .splice_children(deletion_start..range.end, inserted);
+    Ok(container.replace_with(updated))
+}
+
+/// 閉じ区切りの直前にある字下げ。
+fn closing_indent_of(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    range: &Range<usize>,
+    container: &RedNode,
+) -> String {
+    let mut text = String::new();
+    let mut at = range.end;
+    while at > range.start && is_whitespace(&children[at - 1]) {
+        at -= 1;
+        text = format!("{}{}", children[at], text);
+    }
+
+    // 閉じ区切りが元から行頭にある場合は字下げをそのまま保つ。
+    // 同じ行に続いている場合は、コンテナの行の字下げに合わせる。
+    let at_line_start = at > 0 && is_newline(&children[at - 1]);
+    if at_line_start {
+        text
+    } else {
+        line_indent(&root_of(container), container.text_range().start().into())
+    }
+}
+
+/// コンテナ内の要素の字下げ。
+///
+/// 要素があればその手前の空白を使う。空のコンテナでは、コンテナ自身の行の
+/// 字下げに文書のインデント 1 段を足したものを使う。
+fn element_indent(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    container: &RedNode,
+) -> Result<GreenElement, HjsonEditError> {
+    let spans = crate::high_level::ops::insert::container_slots(container)?;
+
+    if let Some(last) = spans.last() {
+        let lead = last.lead();
+        let index = lead
+            .clone()
+            .rev()
+            .find(|index| is_whitespace(&children[*index]));
+        if let Some(index) = index {
+            return Ok(to_green_element(&children[index]));
+        }
+    }
+
+    // 要素が無い場合は、コンテナ自身の行の字下げに 1 段を足す
+    let root = root_of(container);
+    let unit = match crate::high_level::style::detect_indent_from_ast(&root) {
+        crate::format::IndentStyle::Spaces(width) => " ".repeat(width as usize),
+        crate::format::IndentStyle::Tabs => "\t".to_string(),
+    };
+    let base = line_indent(&root, container.text_range().start().into());
+
+    Ok(SyntaxKind::Whitespace
+        .create_token(format!("{base}{unit}").as_str())
+        .into())
+}
+
+/// ノードを含む文書のルート。
+fn root_of(node: &RedNode) -> RedNode {
+    node.ancestors().last().unwrap_or_else(|| node.clone())
+}
+
+/// 指定位置の行の字下げ（直前の改行から位置までの先頭の空白）。
+fn line_indent(root: &RedNode, offset: usize) -> String {
+    let text = root.text().to_string();
+    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+
+    text[line_start..offset]
+        .chars()
+        .take_while(|ch| *ch == ' ' || *ch == '\t')
+        .collect()
+}
+
+fn is_newline(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    matches!(element, rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline)
 }
 
 /// スロットの直前にある字下げ（空白）。
