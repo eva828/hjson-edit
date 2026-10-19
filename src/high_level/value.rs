@@ -261,7 +261,10 @@ impl HjsonValue {
                             SyntaxKind::Value | SyntaxKind::Object | SyntaxKind::Array
                         )
                     })
-                    .ok_or(HjsonEditError::ParentNotFound)?;
+                    .ok_or(HjsonEditError::UnexpectedStructure {
+                        expected: SyntaxKind::Value,
+                        found: node.kind(),
+                    })?;
                 Self::from_node(&child)
             }
             SyntaxKind::Value => node
@@ -270,7 +273,10 @@ impl HjsonValue {
                     NodeOrToken::Node(child) => !child.kind().is_trivia(),
                     NodeOrToken::Token(token) => !token.kind().is_trivia(),
                 })
-                .ok_or(HjsonEditError::ParentNotFound)
+                .ok_or(HjsonEditError::UnexpectedStructure {
+                    expected: SyntaxKind::Value,
+                    found: node.kind(),
+                })
                 .and_then(|child| match child {
                     NodeOrToken::Node(child) => Self::from_node(&child),
                     NodeOrToken::Token(token) => Self::from_token(&token),
@@ -287,11 +293,17 @@ impl HjsonValue {
                         .find(|child| child.kind() == SyntaxKind::Key)
                         .and_then(|key_node| Key::cast(key_node).ok())
                         .and_then(|k| k.body_text())
-                        .ok_or(HjsonEditError::ParentNotFound)?;
+                        .ok_or(HjsonEditError::UnexpectedStructure {
+                            expected: SyntaxKind::Value,
+                            found: node.kind(),
+                        })?;
                     let value = member
                         .children()
                         .find(|child| child.kind() == SyntaxKind::Value)
-                        .ok_or(HjsonEditError::ParentNotFound)?;
+                        .ok_or(HjsonEditError::UnexpectedStructure {
+                            expected: SyntaxKind::Value,
+                            found: node.kind(),
+                        })?;
                     let parsed = Self::from_node(&value)?;
                     match entries.iter_mut().find(|(existing, _)| *existing == key) {
                         Some(entry) => entry.1 = parsed,
@@ -323,7 +335,10 @@ impl HjsonValue {
                     NodeOrToken::Token(token) if !token.kind().is_trivia() => Some(token),
                     _ => None,
                 })
-                .ok_or(HjsonEditError::ParentNotFound)
+                .ok_or(HjsonEditError::UnexpectedStructure {
+                    expected: SyntaxKind::Value,
+                    found: node.kind(),
+                })
                 .and_then(|token| Self::from_token(&token)),
             _ => Err(HjsonEditError::UnexpectedStructure {
                 expected: SyntaxKind::Value,

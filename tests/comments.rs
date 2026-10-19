@@ -82,12 +82,14 @@ fn set_before_comment_inserts_above_member() {
         .set_comment(HjsonCommentPath::try_from("name:before").unwrap(), "note")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  // note\nname: app\n}\n");
+    // 追加したコメント行は要素の字下げを引き継ぐ
+    assert_eq!(updated.to_string(), "{\n  // note\n  name: app\n}\n");
 }
 
 #[test]
 fn set_inline_comment_appends_after_value() {
-    let input = "{\n  name: app\n}\n";
+    // 引用符なし文字列は行末までを飲み込むため、引用符付きの値を対象にする
+    let input = "{\n  name: \"app\"\n}\n";
 
     let doc = HjsonDocument::parse(input)
         .unwrap()
@@ -96,7 +98,21 @@ fn set_inline_comment_appends_after_value() {
         .set_comment(HjsonCommentPath::try_from("name:inline").unwrap(), "note")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  name: app// note\n}\n");
+    // インラインコメントの前には空白を入れる
+    assert_eq!(updated.to_string(), "{\n  name: \"app\" // note\n}\n");
+}
+
+#[test]
+fn set_inline_comment_on_unquoted_string_is_rejected() {
+    // 引用符なし文字列の直後にコメントを置くと値に吸収されるため、エラーにする
+    let doc = HjsonDocument::parse("{\n  name: app\n}\n").unwrap();
+    let error = doc
+        .set_comment(HjsonCommentPath::try_from("name:inline").unwrap(), "note")
+        .unwrap_err();
+    assert!(
+        matches!(error, hjson_edit::HjsonEditError::InvalidTarget { .. }),
+        "unexpected error: {error:?}"
+    );
 }
 
 #[test]
@@ -205,7 +221,8 @@ fn set_before_comment_overwrites_existing() {
             "new comment",
         )
         .unwrap();
-    let expected = "{\n  // new comment\nfoo: 1\n}";
+    // 置き換えても要素の字下げは残る
+    let expected = "{\n  // new comment\n  foo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }
 

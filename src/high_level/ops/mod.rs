@@ -1,4 +1,5 @@
 pub mod comment;
+pub(crate) mod insert;
 pub mod merge;
 pub mod object;
 

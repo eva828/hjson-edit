@@ -2,7 +2,8 @@
 
 位置情報とコメントを保持しつつ、構造編集と整形を分離して扱える Rust 製 HJSON エディタ。
 
-- **編集**: `set` / `remove` / コメント操作は最小限のテキスト変更だけを行う
+- **編集**: `set` / `remove` / コメント操作 / `merge_from` は最小限のテキスト変更だけを行う
+- **検証**: 編集結果は毎回、再パース・値の一致・コメントの保存を検査する（崩れた結果はエラー）
 - **整形**: 全体整形（`format`）と、指定したコンテナだけの部分整形（`format_container`）
 - **CLI**: `edit` は編集後、変更したコンテナだけを文書の体裁に合わせて整形して出力する
 
@@ -42,20 +43,38 @@ hjson-edit edit in.hjson --set b hello
 #   a: 1
 #   b: hello
 # }
+
+# 配列要素にコメントを付ける（`:before` は要素の前の行、`:inline` は値の後ろ）
+hjson-edit edit in.hjson --comment-set 'items[0]:inline' '先頭の要素'
+
+# 値は HJSON の値として解釈される
+hjson-edit edit in.hjson --set name '"true"'   # 文字列 "true"
+hjson-edit edit in.hjson --set flag true       # 真偽値
+hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 ```
 
 | コマンド | 主なオプション |
 |---|---|
 | `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
 | `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>` |
-| `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
+| `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
 
-`PATH` は `key`、`server.host`、`items[0]`、`items[-]`（配列の末尾へ追加）、
+`PATH` は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（配列の末尾）、
 `items[+2]`（0 始まりの index 2 へ挿入）の形式。`--set` は中間のコンテナが無ければ作成する
 （`{}` に `--set a.b 1` で `a` と `b` を作る）。中間がスカラーの場合はエラーになる。
-`VALUE` は数値・`true` / `false` / `null`・`"..."` / `'''...'''`（引用スタイルを指定）・
-それ以外は引用符なし文字列として扱う。`--string-style` は後続の `--set` に適用され、
-値テキストで引用スタイルを指定した場合はそちらが優先される。
+
+`VALUE` は **HJSON の値**として解釈する（文書と同じ文法）。`hello` は引用符なし文字列、
+`8080` は数値、`true` / `null` はキーワード、`"true"` は文字列、`[1, 2]` は配列、
+`{a: 1}` はオブジェクト、`"a\nb"` は `\n` を解釈した文字列になる。空のテキストはエラーなので、
+空文字列を設定する場合は `""` を渡す。値テキストに引用符を書いた場合はその値だけに適用され、
+それ以外は `--string-style` が使われる。
+
+コメントの `PATH` は `key:before` / `key:inline`（要素の前の行／値の後ろ）に加えて
+配列要素（`items[0]:inline`）も指定できる。`:header` / `:footer` は文書全体のコメント。
+引用符なし文字列は行末までを飲み込むため、その直後への `:inline` はエラーになる。
+
+`--comment-style` と `--string-style` はその実行全体に適用する。
+`--no-verify` は編集ごとの検証（再パース・値の一致・コメントの保存）を無効化する。
 
 ### ライブラリ
 
@@ -70,18 +89,27 @@ let input = r#"{
 
 let document = HjsonDocument::parse(input)?;
 
-// 編集はテキストを最小限だけ変更する（既存の引用スタイルを保つ）
+// 編集はテキストを最小限だけ変更する（既存の引用スタイルを保つ）。
+// 編集結果は毎回、再パースと値の一致、コメントの保存が検査される。
 let edited = document.set(HjsonObjectPath::parse("name")?, "api")?;
 assert!(edited.to_string().contains("name: \"api\""));
 
-// 体裁を整えたいときは、変更したコンテナだけを整形する
-// （インデント・改行は文書から推定する）
-let root = HjsonObjectPath::parse("")?;
-let formatted = edited.format_container(&root, &edited.detected_format_config())?;
+// 変更したコンテナは `touched_containers` で分かる。
+// 体裁を整えたいときは、そのコンテナだけを整形する（インデント・改行は文書から推定する）。
+let config = edited.current_format_config();
+let mut formatted = edited.clone();
+for container in edited.touched_containers().to_vec() {
+    formatted = formatted.format_container(&container, &config)?;
+}
 assert_eq!(
     formatted.to_string(),
     "{\n    // Configuration\n    name: \"api\"\n    port: 8080\n}"
 );
+
+// スタイルと検証は文書ごとに設定できる
+let document = HjsonDocument::parse(input)?
+    .string_style(hjson_edit::Prefer::Explicit(hjson_edit::ast::QuoteStyle::DoubleQuoted))
+    .verify_edits(false);
 ```
 
 ## 制限と挙動
@@ -95,6 +123,12 @@ assert_eq!(
 | 重複キー | 値の層では後勝ち。lossless な木と `to_string()` は元のテキストを保持する |
 | BOM | パーサーは通常の文字として扱い、CLI がファイル読み込み時に除去する |
 | 編集結果の妥当性 | 行末でしか終端できない値（引用符なし文字列など）を挿入する場合は改行を補い、常に再パースできるテキストを返す |
+| 編集の検証 | 各編集の後に再パース・値の一致（`HjsonValue` を基準にする）・対象外コメントの保存を検査し、崩れた結果は `HjsonEditError::InvalidEdit` として返す（`verify_edits(false)` で無効化） |
+| 挿入位置 | 新しい要素は末尾の要素の後ろ、閉じ区切りの直前にあるコメント（footer）の手前に入る |
+| 引用符なし文字列への `:inline` | 値が行末までを飲み込むため付けられない。`HjsonEditError::InvalidTarget` を返す（`:before` か引用符付きの値を使う） |
+| `merge_from` のコメント | 新規メンバーは先頭コメント行と行末コメントごとコピーする。文書全体のヘッダー/フッターは対象外 |
+| `merge_from` の置き換え | 後勝ちで値だけを差し替え、キーとコメントはホスト側を保つ |
+| 配列の追加 | `[-]` と `[+]` はどちらも末尾を指す（読み取りは末尾要素、書き込みは末尾への追加） |
 
 ## hjson-cs 準拠
 

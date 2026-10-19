@@ -9,7 +9,8 @@ use hjson_edit::{
 
 #[test]
 fn set_inline_comment_on_deep_path() {
-    let input = "{\n  a: {\n    b: {\n      c: value\n    }\n  }\n}\n";
+    // 引用符なし文字列は行末までを飲み込むため、引用符付きの値を対象にする
+    let input = "{\n  a: {\n    b: {\n      c: \"value\"\n    }\n  }\n}\n";
     let doc = HjsonDocument::parse(input)
         .unwrap()
         .comment_style(Prefer::Explicit(CommentKind::Line));

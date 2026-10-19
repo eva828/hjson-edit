@@ -34,8 +34,6 @@ enum EditOp {
     CommentRemove {
         path: HjsonCommentPath,
     },
-    SetCommentStyle(Prefer<CommentKind>),
-    SetStringStyle(Prefer<QuoteStyle>),
 }
 
 pub fn edit_command() -> Command {
@@ -52,8 +50,9 @@ pub fn edit_command() -> Command {
                 .short('s')
                 .action(ArgAction::Append)
                 .num_args(2)
+                .allow_hyphen_values(true)
                 .value_names(["PATH", "VALUE"])
-                .help("Set a value at the given path (e.g., 'key', 'items[0]', 'items[-]')"),
+                .help("Set a value (VALUE is HJSON value text: 'hello', 8080, true, [1, 2], '{a: 1}')"),
         )
         .arg(
             Arg::new("remove")
@@ -68,14 +67,16 @@ pub fn edit_command() -> Command {
                 .long("comment-set")
                 .action(ArgAction::Append)
                 .num_args(2)
+                .allow_hyphen_values(true)
                 .value_names(["PATH", "TEXT"])
-                .help("Set a comment at the given path"),
+                .help("Set a comment at the given path (e.g., 'key:before', 'items[0]:inline')"),
         )
         .arg(
             Arg::new("comment-append")
                 .long("comment-append")
                 .action(ArgAction::Append)
                 .num_args(2)
+                .allow_hyphen_values(true)
                 .value_names(["PATH", "TEXT"])
                 .help("Append a comment at the given path"),
         )
@@ -89,18 +90,22 @@ pub fn edit_command() -> Command {
         .arg(
             Arg::new("comment-style")
                 .long("comment-style")
-                .action(ArgAction::Append)
                 .value_name("STYLE")
                 .value_parser(["line", "hash", "block"])
-                .help("Set comment style for subsequent comment operations"),
+                .help("Comment style used by comment operations"),
         )
         .arg(
             Arg::new("string-style")
                 .long("string-style")
-                .action(ArgAction::Append)
                 .value_name("STYLE")
                 .value_parser(["preserve", "double", "block", "unquoted"])
-                .help("Set string style for subsequent set operations"),
+                .help("String style used by set operations (default: preserve)"),
+        )
+        .arg(
+            Arg::new("no-verify")
+                .long("no-verify")
+                .action(ArgAction::SetTrue)
+                .help("Skip validating the result of each edit (faster, less safe)"),
         )
         .arg(
             Arg::new("in-place")
@@ -132,68 +137,6 @@ pub fn edit_command() -> Command {
                 .value_parser(["lf", "crlf"])
                 .help("Newline style for the formatted containers (default: detected from the document)"),
         )
-}
-
-/// 編集で変更したコンテナを記録する。
-///
-/// 編集の核心は最小限のテキスト変更に留め、体裁は変更したコンテナの部分整形で整える。
-fn push_container(containers: &mut Vec<HjsonObjectPath>, path: &HjsonObjectPath) {
-    if let Some((parent, _)) = path.split_last() {
-        containers.push(parent);
-    }
-}
-
-/// `set` が実際に書き込むコンテナ（パスのうち実在する最深の祖先）を返す。
-///
-/// 中間のコンテナが無い場合は、実在する最長の prefix の位置へまとめて挿入されるため、
-/// その祖先が「変更されたコンテナ」になる。
-fn insertion_container(doc: &HjsonDocument, path: &HjsonObjectPath) -> HjsonObjectPath {
-    let Some((parent, _)) = path.split_last() else {
-        return path.clone();
-    };
-
-    for depth in (1..=parent.depth()).rev() {
-        let Some((candidate, _)) = parent.split_at(depth) else {
-            break;
-        };
-        if doc.get(candidate.clone()).is_ok() {
-            return candidate;
-        }
-    }
-
-    // どの prefix も実在しない場合はルート（文書全体）へ挿入される
-    HjsonObjectPath::from_segments(Vec::new())
-}
-
-/// コメント操作が触れたコンテナを記録する。
-///
-/// ヘッダー/フッターは文書全体に付くため、コンテナの整形は不要。
-fn push_comment_container(containers: &mut Vec<HjsonObjectPath>, path: &HjsonCommentPath) {
-    match path {
-        HjsonCommentPath::Header | HjsonCommentPath::Footer => {}
-        HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
-            push_container(containers, path);
-        }
-    }
-}
-
-/// 互いに祖先・子孫の関係にあるコンテナは外側だけを残す。
-fn simplify_containers(mut containers: Vec<HjsonObjectPath>) -> Vec<HjsonObjectPath> {
-    containers.sort_by_key(|path| path.depth());
-    containers.dedup();
-
-    let mut kept: Vec<HjsonObjectPath> = Vec::new();
-    for path in containers {
-        let covered = kept.iter().any(|outer| {
-            let outer_segments = outer.segments();
-            outer_segments.len() <= path.segments().len()
-                && path.segments().starts_with(outer_segments)
-        });
-        if !covered {
-            kept.push(path);
-        }
-    }
-    kept
 }
 
 /// `--newline` の指定値。
@@ -240,50 +183,67 @@ fn format_config(matches: &ArgMatches, doc: &HjsonDocument) -> FormatConfig {
     config
 }
 
-struct CliValueParser;
-
-impl CliValueParser {
-    fn parse_value(raw: &str) -> HjsonValue {
-        match raw {
-            "null" => return HjsonValue::Null,
-            "true" => return HjsonValue::Bool(true),
-            "false" => return HjsonValue::Bool(false),
-            _ => {}
-        }
-
-        if let Ok(n) = raw.parse::<i64>() {
-            return HjsonValue::Integer(n);
-        }
-        if let Ok(n) = raw.parse::<f64>() {
-            return HjsonValue::Float(n);
-        }
-
-        if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-            return HjsonValue::String(raw[1..raw.len() - 1].to_string());
-        }
-
-        if raw.len() >= 6 && raw.starts_with("'''") && raw.ends_with("'''") {
-            return HjsonValue::String(raw[3..raw.len() - 3].to_string());
-        }
-
-        HjsonValue::String(raw.to_string())
-    }
-
-    fn detect_inline_string_style(raw: &str) -> Option<Prefer<QuoteStyle>> {
-        if raw.len() >= 6 && raw.starts_with("'''") && raw.ends_with("'''") {
-            return Some(Prefer::Explicit(QuoteStyle::Block));
-        }
-        if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-            return Some(Prefer::Explicit(QuoteStyle::DoubleQuoted));
-        }
-        None
-    }
-
-    fn parse_comment_path(raw: &str) -> Result<HjsonCommentPath> {
-        HjsonCommentPath::try_from(raw).with_context(|| format!("Invalid comment path: {raw}"))
-    }
+/// コメントパスを解釈する。
+fn parse_comment_path(raw: &str) -> Result<HjsonCommentPath> {
+    HjsonCommentPath::try_from(raw).with_context(|| format!("Invalid comment path: {raw}"))
 }
 
+/// オブジェクトパスを解釈する。
+fn parse_object_path(raw: &str) -> Result<HjsonObjectPath> {
+    HjsonObjectPath::parse(raw.to_string()).with_context(|| format!("Invalid path: {raw}"))
+}
+
+/// `--set` の値を HJSON の値として解釈する。
+///
+/// 文書と同じ文法を使うため、引用符の有無がそのまま値の種類になる。
+fn parse_value(raw: &str) -> Result<HjsonValue> {
+    if raw.trim().is_empty() {
+        anyhow::bail!("Invalid value: the value text is empty (use \"\" for an empty string)");
+    }
+
+    let document = HjsonDocument::parse(raw).with_context(|| format!("Invalid value: {raw}"))?;
+    let path = HjsonObjectPath::parse(String::new()).expect("the empty path is always valid");
+
+    document
+        .get(path)
+        .with_context(|| format!("Invalid value: {raw}"))
+}
+
+/// 値テキストの引用スタイル（`"..."` / `'''...'''`）。指定があればその値だけに使う。
+fn inline_string_style(raw: &str) -> Option<Prefer<QuoteStyle>> {
+    if raw.len() >= 6 && raw.starts_with("'''") && raw.ends_with("'''") {
+        return Some(Prefer::Explicit(QuoteStyle::Block));
+    }
+    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+        return Some(Prefer::Explicit(QuoteStyle::DoubleQuoted));
+    }
+    None
+}
+
+/// 値の引用スタイル。
+fn parse_string_style(raw: &str) -> Result<Prefer<QuoteStyle>> {
+    Ok(match raw {
+        "preserve" => Prefer::Preserve,
+        "double" => Prefer::Explicit(QuoteStyle::DoubleQuoted),
+        "block" => Prefer::Explicit(QuoteStyle::Block),
+        "unquoted" => Prefer::Explicit(QuoteStyle::Unquoted),
+        other => anyhow::bail!("Invalid string style: {other}"),
+    })
+}
+
+/// コメントのスタイル。
+fn parse_comment_style(raw: &str) -> Result<Prefer<CommentKind>> {
+    Ok(match raw {
+        "line" => Prefer::Explicit(CommentKind::Line),
+        "hash" => Prefer::Explicit(CommentKind::Hash),
+        "block" => Prefer::Explicit(CommentKind::Block),
+        other => anyhow::bail!("Invalid comment style: {other}"),
+    })
+}
+
+/// 引数の並び順で編集操作を集める。
+///
+/// スタイル指定はその回全体に適用するため、ここでは扱わない。
 struct EditOpCollector<'a> {
     matches: &'a ArgMatches,
     ops_with_indices: Vec<(usize, EditOp)>,
@@ -300,9 +260,11 @@ impl<'a> EditOpCollector<'a> {
     fn collect(mut self) -> Result<Vec<EditOp>> {
         self.collect_set_ops()?;
         self.collect_remove_ops();
-        self.collect_comment_ops()?;
-        self.collect_style_ops()?;
-        self.ops_with_indices.sort_by_key(|(idx, _)| *idx);
+        self.collect_comment_set_ops()?;
+        self.collect_comment_append_ops()?;
+        self.collect_comment_remove_ops()?;
+        self.ops_with_indices.sort_by_key(|(index, _)| *index);
+
         Ok(self
             .ops_with_indices
             .into_iter()
@@ -311,151 +273,121 @@ impl<'a> EditOpCollector<'a> {
     }
 
     fn collect_set_ops(&mut self) -> Result<()> {
-        if let Some(sets) = self.matches.get_raw("set") {
-            let vals: Vec<_> = sets.collect();
-            let indices = self.collect_indices("set");
-
-            for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
-                if chunk.len() != 2 {
-                    continue;
-                }
-                let path = chunk[0].to_string_lossy().to_string();
-                let value_str = chunk[1].to_string_lossy().to_string();
-                let value = CliValueParser::parse_value(&value_str);
-                self.ops_with_indices.push((
-                    idx_chunk[0],
-                    EditOp::Set {
-                        path,
-                        value,
-                        string_style: CliValueParser::detect_inline_string_style(&value_str),
-                    },
-                ));
+        for (index, values) in self.pairs("set") {
+            if values.len() != 2 {
+                continue;
             }
+            self.ops_with_indices.push((
+                index,
+                EditOp::Set {
+                    path: values[0].clone(),
+                    value: parse_value(&values[1])?,
+                    string_style: inline_string_style(&values[1]),
+                },
+            ));
         }
 
         Ok(())
     }
 
     fn collect_remove_ops(&mut self) {
-        if let Some(removes) = self.matches.get_raw("remove") {
-            let indices = self.collect_indices("remove");
-            for (idx, val) in indices.iter().zip(removes) {
-                self.ops_with_indices.push((
-                    *idx,
-                    EditOp::Remove {
-                        path: val.to_string_lossy().to_string(),
-                    },
-                ));
+        for (index, values) in self.pairs("remove") {
+            if let Some(path) = values.first() {
+                self.ops_with_indices
+                    .push((index, EditOp::Remove { path: path.clone() }));
             }
         }
-    }
-
-    fn collect_comment_ops(&mut self) -> Result<()> {
-        self.collect_comment_set_ops()?;
-        self.collect_comment_append_ops()?;
-        self.collect_comment_remove_ops()?;
-        Ok(())
     }
 
     fn collect_comment_set_ops(&mut self) -> Result<()> {
-        if let Some(sets) = self.matches.get_raw("comment-set") {
-            let vals: Vec<_> = sets.collect();
-            let indices = self.collect_indices("comment-set");
-            for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
-                if chunk.len() != 2 {
-                    continue;
-                }
-                self.ops_with_indices.push((
-                    idx_chunk[0],
-                    EditOp::CommentSet {
-                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())?,
-                        text: chunk[1].to_string_lossy().to_string(),
-                    },
-                ));
+        for (index, values) in self.pairs("comment-set") {
+            if values.len() != 2 {
+                continue;
             }
+            self.ops_with_indices.push((
+                index,
+                EditOp::CommentSet {
+                    path: parse_comment_path(&values[0])?,
+                    text: values[1].clone(),
+                },
+            ));
         }
+
         Ok(())
     }
 
     fn collect_comment_append_ops(&mut self) -> Result<()> {
-        if let Some(appends) = self.matches.get_raw("comment-append") {
-            let vals: Vec<_> = appends.collect();
-            let indices = self.collect_indices("comment-append");
-            for (chunk, idx_chunk) in vals.chunks(2).zip(indices.chunks(2)) {
-                if chunk.len() != 2 {
-                    continue;
-                }
-                self.ops_with_indices.push((
-                    idx_chunk[0],
-                    EditOp::CommentAppend {
-                        path: CliValueParser::parse_comment_path(&chunk[0].to_string_lossy())?,
-                        text: chunk[1].to_string_lossy().to_string(),
-                    },
-                ));
+        for (index, values) in self.pairs("comment-append") {
+            if values.len() != 2 {
+                continue;
             }
+            self.ops_with_indices.push((
+                index,
+                EditOp::CommentAppend {
+                    path: parse_comment_path(&values[0])?,
+                    text: values[1].clone(),
+                },
+            ));
         }
+
         Ok(())
     }
 
     fn collect_comment_remove_ops(&mut self) -> Result<()> {
-        if let Some(removes) = self.matches.get_raw("comment-remove") {
-            let indices = self.collect_indices("comment-remove");
-            for (idx, val) in indices.iter().zip(removes) {
+        for (index, values) in self.pairs("comment-remove") {
+            if let Some(path) = values.first() {
                 self.ops_with_indices.push((
-                    *idx,
+                    index,
                     EditOp::CommentRemove {
-                        path: CliValueParser::parse_comment_path(&val.to_string_lossy())?,
+                        path: parse_comment_path(path)?,
                     },
                 ));
             }
         }
+
         Ok(())
     }
 
-    fn collect_style_ops(&mut self) -> Result<()> {
-        self.collect_comment_style_ops()?;
-        self.collect_string_style_ops()?;
-        Ok(())
-    }
+    /// 引数名ごとに「出現位置」と「値の並び（出現ごと）」を返す。
+    fn pairs(&self, name: &str) -> Vec<(usize, Vec<String>)> {
+        let Some(raw) = self.matches.get_raw(name) else {
+            return Vec::new();
+        };
+        let values: Vec<String> = raw
+            .map(|value| value.to_string_lossy().to_string())
+            .collect();
+        let indices: Vec<usize> = self
+            .matches
+            .indices_of(name)
+            .map(|indices| indices.collect())
+            .unwrap_or_default();
 
-    fn collect_comment_style_ops(&mut self) -> Result<()> {
-        if let Some(styles) = self.matches.get_raw("comment-style") {
-            let indices = self.collect_indices("comment-style");
-            for (idx, val) in indices.iter().zip(styles) {
-                let style = match val.to_string_lossy().as_ref() {
-                    "line" => Prefer::Explicit(CommentKind::Line),
-                    "hash" => Prefer::Explicit(CommentKind::Hash),
-                    "block" => Prefer::Explicit(CommentKind::Block),
-                    other => anyhow::bail!("Invalid comment style: {}", other),
-                };
-                self.ops_with_indices
-                    .push((*idx, EditOp::SetCommentStyle(style)));
+        group_by_index(
+            indices,
+            values,
+            self.matches.get_one::<String>(name).is_some(),
+        )
+    }
+}
+
+/// `num_args(2)` の引数を、出現ごとの (先頭 index, 値の並び) にまとめる。
+fn group_by_index(
+    indices: Vec<usize>,
+    values: Vec<String>,
+    _is_single: bool,
+) -> Vec<(usize, Vec<String>)> {
+    let mut grouped: Vec<(usize, Vec<String>)> = Vec::new();
+    for (index, value) in indices.into_iter().zip(values) {
+        match grouped.last_mut() {
+            // 同じ出現の 2 つ目以降の値は、直前の出現に足す
+            Some((previous_start, collected)) if index == *previous_start + collected.len() => {
+                collected.push(value);
             }
+            _ => grouped.push((index, vec![value])),
         }
-        Ok(())
     }
 
-    fn collect_string_style_ops(&mut self) -> Result<()> {
-        if let Some(styles) = self.matches.get_raw("string-style") {
-            let indices = self.collect_indices("string-style");
-            for (idx, val) in indices.iter().zip(styles) {
-                let style = match val.to_string_lossy().as_ref() {
-                    "preserve" => Prefer::Preserve,
-                    "double" => Prefer::Explicit(QuoteStyle::DoubleQuoted),
-                    "block" => Prefer::Explicit(QuoteStyle::Block),
-                    "unquoted" => Prefer::Explicit(QuoteStyle::Unquoted),
-                    other => anyhow::bail!("Invalid string style: {}", other),
-                };
-                self.ops_with_indices
-                    .push((*idx, EditOp::SetStringStyle(style)));
-            }
-        }
-        Ok(())
-    }
-
-    fn collect_indices(&self, name: &str) -> Vec<usize> {
-        self.matches.indices_of(name).unwrap_or_default().collect()
-    }
+    grouped
 }
 
 pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
@@ -472,72 +404,59 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         Err(error) => anyhow::bail!("{error}"),
     };
 
-    let ops = collect_ops(matches)?;
+    let ops = EditOpCollector::new(matches).collect()?;
+    let config = format_config(matches, &doc);
+    let string_style = match matches.get_one::<String>("string-style") {
+        Some(style) => parse_string_style(style)?,
+        None => Prefer::Preserve,
+    };
 
-    if ops.is_empty() {
-        if matches.get_flag("in-place") {
-            std::fs::write(path, &content)
-                .with_context(|| format!("Failed to write file: {}", path.display()))?;
-        } else if let Some(output_path) = matches.get_one::<PathBuf>("output") {
-            std::fs::write(output_path, &content)
-                .with_context(|| format!("Failed to write file: {}", output_path.display()))?;
-        } else {
-            print!("{}", content);
-        }
-
-        return Ok(());
+    doc = doc
+        .verify_edits(!matches.get_flag("no-verify"))
+        .format_config(config)
+        .string_style(string_style);
+    if let Some(style) = matches.get_one::<String>("comment-style") {
+        doc = doc.comment_style(parse_comment_style(style)?);
     }
 
-    let mut changed_containers: Vec<HjsonObjectPath> = Vec::new();
+    if ops.is_empty() {
+        return write_output(matches, path, &doc.to_string(), &content);
+    }
 
     for op in ops {
         match op {
-            EditOp::SetCommentStyle(style) => {
-                doc = doc.comment_style(style);
-            }
-            EditOp::SetStringStyle(style) => {
-                doc = doc.string_style(style);
-            }
             EditOp::Set {
                 path,
                 value,
-                string_style,
+                string_style: inline_style,
             } => {
-                let parsed = HjsonObjectPath::parse(&path)
-                    .with_context(|| format!("Invalid path: {path}"))?;
-                changed_containers.push(insertion_container(&doc, &parsed));
-                // 値テキストのインラインスタイル（"..." / '''...'''）だけを上書きに使い、
-                // 指定が無ければ --string-style で設定した文書のスタイルを保つ。
-                let doc_with_style = match string_style {
+                let parsed = parse_object_path(&path)?;
+                // 値テキストの引用スタイルは、その値だけに適用する
+                let styled = match inline_style {
                     Some(style) => doc.string_style(style),
                     None => doc,
                 };
-                doc = doc_with_style.set(parsed, value)?;
+                doc = styled.set(parsed, value)?;
+                doc = doc.string_style(string_style);
             }
             EditOp::Remove { path } => {
-                let parsed = HjsonObjectPath::parse(&path)
-                    .with_context(|| format!("Invalid path: {path}"))?;
-                push_container(&mut changed_containers, &parsed);
-                doc = doc.remove(parsed)?;
+                doc = doc.remove(parse_object_path(&path)?)?;
             }
             EditOp::CommentSet { path, text } => {
-                push_comment_container(&mut changed_containers, &path);
                 doc = doc.set_comment(path, text)?;
             }
             EditOp::CommentAppend { path, text } => {
-                push_comment_container(&mut changed_containers, &path);
                 doc = doc.append_comment(path, text)?;
             }
             EditOp::CommentRemove { path } => {
-                push_comment_container(&mut changed_containers, &path);
                 doc = doc.remove_comment(path)?;
             }
         }
     }
 
     // 変更したコンテナだけを整形する。編集で消えた・コンテナでなくなった対象は対象外。
-    let config = format_config(matches, &doc);
-    for container in simplify_containers(changed_containers) {
+    let config = doc.current_format_config();
+    for container in doc.touched_containers().to_vec() {
         match doc.format_container(&container, &config) {
             Ok(updated) => doc = updated,
             Err(HjsonEditError::PathNotFound(_) | HjsonEditError::UnexpectedStructure { .. }) => {}
@@ -545,21 +464,33 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         }
     }
 
-    let result = doc.to_string();
+    write_output(matches, path, &doc.to_string(), &content)
+}
+
+/// 編集結果を、末尾の改行を保ったまま出力する。
+fn write_output(
+    matches: &ArgMatches,
+    path: &std::path::Path,
+    result: &str,
+    content: &str,
+) -> Result<()> {
+    use std::path::PathBuf;
+
     let result = match newline_override(matches) {
         // 文書末尾の改行はコンテナの外側にあるため、指定があれば揃える
         Some(newline) if content.ends_with('\n') => {
             let body = result
                 .strip_suffix("\r\n")
                 .or_else(|| result.strip_suffix('\n'))
-                .unwrap_or(&result);
+                .unwrap_or(result);
             format!("{body}{newline}")
         }
         _ if content.ends_with('\n') && !result.ends_with('\n') => {
-            format!("{}{}", result, doc.current_newline())
+            format!("{result}\n")
         }
-        _ => result,
+        _ => result.to_string(),
     };
+
     if matches.get_flag("in-place") {
         std::fs::write(path, &result)
             .with_context(|| format!("Failed to write file: {}", path.display()))?;
@@ -567,14 +498,10 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         std::fs::write(output_path, &result)
             .with_context(|| format!("Failed to write file: {}", output_path.display()))?;
     } else {
-        print!("{}", result);
+        print!("{result}");
     }
 
     Ok(())
-}
-
-fn collect_ops(matches: &clap::ArgMatches) -> Result<Vec<EditOp>> {
-    EditOpCollector::new(matches).collect()
 }
 
 #[cfg(test)]
@@ -582,53 +509,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cli_value_parser_keywords_and_numbers() {
+    fn test_parse_value_kinds() {
         assert!(matches!(
-            CliValueParser::parse_value("true"),
+            parse_value("true").unwrap(),
             HjsonValue::Bool(true)
         ));
         assert!(matches!(
-            CliValueParser::parse_value("false"),
+            parse_value("false").unwrap(),
             HjsonValue::Bool(false)
         ));
+        assert!(matches!(parse_value("null").unwrap(), HjsonValue::Null));
         assert!(matches!(
-            CliValueParser::parse_value("null"),
-            HjsonValue::Null
-        ));
-
-        assert!(matches!(
-            CliValueParser::parse_value("123"),
+            parse_value("123").unwrap(),
             HjsonValue::Integer(123)
         ));
-        let expected: f64 = "3.14".parse().unwrap();
+        assert!(matches!(parse_value("2.5").unwrap(), HjsonValue::Float(n) if n == 2.5));
+    }
+
+    #[test]
+    fn test_parse_value_strings_and_containers() {
+        assert!(matches!(parse_value("hello").unwrap(), HjsonValue::String(s) if s == "hello"));
+        assert!(matches!(parse_value("\"true\"").unwrap(), HjsonValue::String(s) if s == "true"));
+        assert!(matches!(parse_value("'''a'''").unwrap(), HjsonValue::String(s) if s == "a"));
         assert!(
-            matches!(CliValueParser::parse_value("3.14"), HjsonValue::Float(n) if n == expected)
+            matches!(parse_value("[1, 2]").unwrap(), HjsonValue::Array(items) if items.len() == 2)
+        );
+        assert!(
+            matches!(parse_value("{a: 1}").unwrap(), HjsonValue::Object(entries) if entries.len() == 1)
         );
     }
 
     #[test]
-    fn test_cli_value_parser_string_edge_cases() {
-        assert!(matches!(CliValueParser::parse_value(""), HjsonValue::String(s) if s.is_empty()));
-        assert!(matches!(CliValueParser::parse_value("\""), HjsonValue::String(s) if s == "\""));
-        assert!(
-            matches!(CliValueParser::parse_value("\"\""), HjsonValue::String(s) if s.is_empty())
-        );
-        assert!(
-            matches!(CliValueParser::parse_value("\"foo"), HjsonValue::String(s) if s == "\"foo")
-        );
-        assert!(matches!(CliValueParser::parse_value("'''"), HjsonValue::String(s) if s == "'''"));
-        assert!(
-            matches!(CliValueParser::parse_value("''''''"), HjsonValue::String(s) if s.is_empty())
-        );
+    fn test_parse_value_rejects_empty_text() {
+        assert!(parse_value("").is_err());
+        assert!(parse_value("   ").is_err());
     }
 
     #[test]
-    fn test_cli_value_parser_multibyte() {
-        assert!(
-            matches!(CliValueParser::parse_value("\"あ\""), HjsonValue::String(s) if s == "あ")
+    fn test_inline_string_style_detection() {
+        assert_eq!(inline_string_style("hello"), None);
+        assert_eq!(
+            inline_string_style("\"x\""),
+            Some(Prefer::Explicit(QuoteStyle::DoubleQuoted))
         );
-        assert!(
-            matches!(CliValueParser::parse_value("'''あ'''"), HjsonValue::String(s) if s == "あ")
+        assert_eq!(
+            inline_string_style("'''x'''"),
+            Some(Prefer::Explicit(QuoteStyle::Block))
         );
     }
 }

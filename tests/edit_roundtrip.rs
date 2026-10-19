@@ -41,9 +41,11 @@ fn append_unquoted_string_to_multiline_object() {
 
 #[test]
 fn append_unquoted_string_to_single_line_object() {
+    // 単一行コンテナでは、区切りを足して行末に改行を補うだけにする
+    // （コンテナの見た目を大きく変えない）。
     assert_eq!(
         set("{a: 1}", "b", "hello").to_string(),
-        "{a: 1\nb: hello\n}"
+        "{a: 1, b: hello\n}"
     );
 }
 
@@ -54,7 +56,8 @@ fn append_number_keeps_single_line_object() {
 
 #[test]
 fn append_to_empty_object() {
-    assert_eq!(set("{}", "name", "app").to_string(), "{\nname: app\n}");
+    // 行末でしか終端できない値なので、閉じ区切りの前で改行する
+    assert_eq!(set("{}", "name", "app").to_string(), "{name: app\n}");
     assert_eq!(set("{\n}", "name", "app").to_string(), "{\nname: app\n}");
     assert_eq!(set("{}", "count", 1).to_string(), "{count: 1}");
 }
@@ -70,12 +73,12 @@ fn push_unquoted_string_into_multiline_array() {
 #[test]
 fn push_into_single_line_array() {
     assert_eq!(set("[1, 2]", "[-]", 3).to_string(), "[1, 2, 3]");
-    assert_eq!(set("[1, 2]", "[-]", "three").to_string(), "[1, 2\nthree\n]");
+    assert_eq!(set("[1, 2]", "[-]", "three").to_string(), "[1, 2, three\n]");
 }
 
 #[test]
 fn push_into_empty_array() {
-    assert_eq!(set("[]", "[-]", "a").to_string(), "[\na\n]");
+    assert_eq!(set("[]", "[-]", "a").to_string(), "[a\n]");
     assert_eq!(set("[\n]", "[-]", 1).to_string(), "[\n1\n]");
 }
 
@@ -89,22 +92,22 @@ fn insert_unquoted_string_in_the_middle() {
 fn append_to_nested_and_inline_containers() {
     assert_eq!(
         set("{o: {x: 1}}", "o.y", "two").to_string(),
-        "{o: {x: 1\ny: two\n}}"
+        "{o: {x: 1, y: two\n}}"
     );
     assert_eq!(
         set("{o: [1]}", "o[-]", "two").to_string(),
-        "{o: [1\ntwo\n]}"
+        "{o: [1, two\n]}"
     );
     assert_eq!(
         set("[{a: 1}]", "[0].b", "two").to_string(),
-        "[{a: 1\nb: two\n}]"
+        "[{a: 1, b: two\n}]"
     );
 }
 
 #[test]
 fn append_to_braceless_root() {
     assert_eq!(set("a: one", "b", "two").to_string(), "a: one\nb: two");
-    assert_eq!(set("a: 1", "b", "two").to_string(), "a: 1, b: two");
+    assert_eq!(set("a: 1", "b", "two").to_string(), "a: 1\nb: two");
     assert_eq!(set("a: one\n", "b", "two").to_string(), "a: one\nb: two\n");
 }
 
@@ -171,7 +174,7 @@ fn append_into_single_line_container_keeps_crlf() {
     assert_roundtrip(&updated);
     assert_eq!(
         updated.to_string(),
-        "{\r\n  o: {a: 1\r\nb: hello\r\n}\r\n}\r\n"
+        "{\r\n  o: {a: 1, b: hello\r\n}\r\n}\r\n"
     );
 }
 

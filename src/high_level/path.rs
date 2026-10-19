@@ -50,6 +50,59 @@ impl TryFrom<&str> for HjsonCommentPath {
     }
 }
 
+impl std::fmt::Display for ArrayPathSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArrayPathSegment::Index(index) => write!(f, "[{index}]"),
+            ArrayPathSegment::InsertAt(index) => write!(f, "[+{index}]"),
+            ArrayPathSegment::Push => write!(f, "[-]"),
+        }
+    }
+}
+
+impl std::fmt::Display for PathSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathSegment::Key(key) => write!(f, "{key}"),
+            PathSegment::Array(segment) => write!(f, "{segment}"),
+        }
+    }
+}
+
+impl std::fmt::Display for HjsonObjectPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.segments.is_empty() {
+            return write!(f, "(document)");
+        }
+
+        let mut first = true;
+        for segment in &self.segments {
+            match segment {
+                PathSegment::Key(key) => {
+                    if !first {
+                        write!(f, ".")?;
+                    }
+                    write!(f, "{key}")?;
+                }
+                PathSegment::Array(array) => write!(f, "{array}")?,
+            }
+            first = false;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for HjsonCommentPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HjsonCommentPath::Header => write!(f, ":header"),
+            HjsonCommentPath::Footer => write!(f, ":footer"),
+            HjsonCommentPath::Before(path) => write!(f, "{path}:before"),
+            HjsonCommentPath::Inline(path) => write!(f, "{path}:inline"),
+        }
+    }
+}
+
 impl HjsonObjectPath {
     pub fn from_segments(segments: Vec<PathSegment>) -> Self {
         Self { segments }
@@ -129,7 +182,8 @@ impl HjsonObjectPath {
                 chars.next(); // consume ']'
 
                 // Parse the operation
-                if op_str == "-" {
+                if op_str == "-" || op_str == "+" {
+                    // `[-]` と `[+]` はどちらも末尾を指す
                     segments.push(PathSegment::Array(ArrayPathSegment::Push));
                 } else if let Some(stripped) = op_str.strip_prefix('+') {
                     let idx: usize = stripped

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AstNode, Key, Member},
+    ast::{Array as AstArray, AstNode, Key, Object as AstObject},
     high_level::{
         error::HjsonEditError,
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
@@ -19,9 +19,56 @@ pub(crate) struct ExistingPrefix {
     pub consumed: usize,
 }
 
+/// パスの末端が指す、コンテナ内の要素位置。
+///
+/// メンバー（オブジェクト）でも要素（配列）でも同じ形で扱うため、編集とコメント操作は
+/// この位置を経由して対象を決める。
+#[derive(Debug, Clone)]
+pub(crate) struct Slot {
+    container: RedNode,
+    index: usize,
+}
+
+impl Slot {
+    /// 対象を含むコンテナ（`Object` または `Array`）。
+    pub(crate) fn container(&self) -> &RedNode {
+        &self.container
+    }
+
+    /// コンテナ内での要素 index。
+    pub(crate) fn index(&self) -> usize {
+        self.index
+    }
+}
+
+/// オブジェクト内のメンバー位置を key で探す。
+///
+/// 比較は key の raw text ではなく body text（引用符を外した中身）で行う。
+pub(crate) fn member_index(container: &RedNode, key: &str) -> Option<usize> {
+    let object = AstObject::cast(container.clone()).ok()?;
+    object
+        .members()
+        .iter()
+        .position(|member| member.member_key().as_deref() == Some(key))
+}
+
+/// 配列内でセグメントが指す要素位置。
+///
+/// 読み取り位置は `Index(n)` / `InsertAt(n)` が `n`、`Push` が末尾要素。
+/// 範囲外のときは `None`。
+pub(crate) fn array_slot_index(container: &RedNode, segment: &ArrayPathSegment) -> Option<usize> {
+    let array = AstArray::cast(container.clone()).ok()?;
+    let len = array.slots().len();
+    match segment {
+        ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => {
+            (*index < len).then_some(*index)
+        }
+        ArrayPathSegment::Push => len.checked_sub(1),
+    }
+}
+
 /// Root または Value ノードから、実質的な中身のノードを取り出す。
-/// Root に有効な子がない場合は ParentNotFound エラーを返す。
-/// Value に中身がない場合もエラーを返す。
+/// Root に有効な子がない場合と、Value に中身がない場合はエラーを返す。
 pub(crate) fn resolve_body(node: &RedNode) -> Result<RedNode, HjsonEditError> {
     match node.kind() {
         SyntaxKind::Root => node
@@ -32,11 +79,17 @@ pub(crate) fn resolve_body(node: &RedNode) -> Result<RedNode, HjsonEditError> {
                     SyntaxKind::Object | SyntaxKind::Array | SyntaxKind::Value
                 )
             })
-            .ok_or(HjsonEditError::ParentNotFound),
+            .ok_or(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Object,
+                found: node.kind(),
+            }),
         SyntaxKind::Value => node
             .children()
             .find(|child| !child.kind().is_trivia())
-            .ok_or(HjsonEditError::ParentNotFound),
+            .ok_or(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Value,
+                found: node.kind(),
+            }),
         _ => Ok(node.clone()),
     }
 }
@@ -97,18 +150,34 @@ impl PathResolver {
         }
     }
 
-    /// comment API 用に、path が属する Member を返す。
-    /// 空 path は comment target として無効（InvalidPath）。
-    pub(crate) fn resolve_member(&self, path: &HjsonObjectPath) -> Result<Member, HjsonEditError> {
+    /// comment API 用に、path が指すコンテナ内の要素位置を返す。
+    ///
+    /// メンバー（オブジェクト）でも要素（配列）でも同じ形で扱う。
+    /// 空 path（文書全体）やスカラーは要素を持たないため `InvalidTarget` を返す。
+    pub(crate) fn resolve_slot(&self, path: &HjsonObjectPath) -> Result<Slot, HjsonEditError> {
         if path.depth() == 0 {
-            return Err(HjsonEditError::InvalidPath("empty path".to_string()));
+            return Err(HjsonEditError::InvalidTarget {
+                path: path.clone(),
+                reason: "the document body is not an element of a container".to_string(),
+            });
         }
-        let target = self.resolve_node(path)?;
-        let mut current = target;
-        while current.kind() != SyntaxKind::Member {
-            current = current.parent().ok_or(HjsonEditError::ParentNotFound)?;
+
+        let ParentResolution { parent, last } = self.resolve_parent(path)?;
+        let container = resolve_body(&parent).map_err(|_| HjsonEditError::InvalidTarget {
+            path: path.clone(),
+            reason: "the path points into a scalar value".to_string(),
+        })?;
+
+        let index = match (container.kind(), &last) {
+            (SyntaxKind::Object, PathSegment::Key(key)) => member_index(&container, key),
+            (SyntaxKind::Array, PathSegment::Array(segment)) => {
+                array_slot_index(&container, segment)
+            }
+            _ => None,
         }
-        Member::cast(current)
+        .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+
+        Ok(Slot { container, index })
     }
 
     /// 1 segment 解決ルールの集約。
@@ -414,68 +483,101 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // resolve_member
+    // resolve_slot
     // ------------------------------------------------------------------
 
     #[test]
-    fn resolve_member_simple_key() {
+    fn resolve_slot_simple_key() {
         let root = parse("{\n  name: app\n}\n");
         let resolver = PathResolver::new(root);
-        let member = resolver
-            .resolve_member(&HjsonObjectPath::parse("name").unwrap())
+        let slot = resolver
+            .resolve_slot(&HjsonObjectPath::parse("name").unwrap())
             .unwrap();
-        assert_eq!(member.syntax().kind(), SyntaxKind::Member);
+        assert_eq!(slot.container().kind(), SyntaxKind::Object);
+        assert_eq!(slot.index(), 0);
     }
 
     #[test]
-    fn resolve_member_nested() {
+    fn resolve_slot_nested_key() {
         let root = parse("{\n  server: { host: localhost\n}\n}\n");
         let resolver = PathResolver::new(root);
-        let member = resolver
-            .resolve_member(&HjsonObjectPath::parse("server.host").unwrap())
+        let slot = resolver
+            .resolve_slot(&HjsonObjectPath::parse("server.host").unwrap())
             .unwrap();
-        assert_eq!(member.syntax().kind(), SyntaxKind::Member);
-        assert_eq!(member.member_key(), Some("host".to_string()));
+        assert_eq!(slot.container().kind(), SyntaxKind::Object);
+        assert_eq!(slot.index(), 0);
     }
 
     #[test]
-    fn resolve_member_array_then_key() {
+    fn resolve_slot_array_element() {
+        let root = parse("{\n  items: [1, 2]\n}\n");
+        let resolver = PathResolver::new(root);
+        let slot = resolver
+            .resolve_slot(&HjsonObjectPath::parse("items[1]").unwrap())
+            .unwrap();
+        assert_eq!(slot.container().kind(), SyntaxKind::Array);
+        assert_eq!(slot.index(), 1);
+    }
+
+    #[test]
+    fn resolve_slot_root_array_element() {
+        let root = parse("[1, 2, 3]\n");
+        let resolver = PathResolver::new(root);
+        let slot = resolver
+            .resolve_slot(&HjsonObjectPath::parse("[2]").unwrap())
+            .unwrap();
+        assert_eq!(slot.container().kind(), SyntaxKind::Array);
+        assert_eq!(slot.index(), 2);
+    }
+
+    #[test]
+    fn resolve_slot_array_push_is_last_element() {
+        let root = parse("{\n  items: [1, 2, 3]\n}\n");
+        let resolver = PathResolver::new(root);
+        let slot = resolver
+            .resolve_slot(&HjsonObjectPath::parse("items[+]").unwrap())
+            .unwrap();
+        assert_eq!(slot.index(), 2);
+    }
+
+    #[test]
+    fn resolve_slot_member_inside_array_element() {
         let root = parse("{\n  items: [{ name: a\n}]\n}\n");
         let resolver = PathResolver::new(root);
-        let member = resolver
-            .resolve_member(&HjsonObjectPath::parse("items[0].name").unwrap())
+        let slot = resolver
+            .resolve_slot(&HjsonObjectPath::parse("items[0].name").unwrap())
             .unwrap();
-        assert_eq!(member.syntax().kind(), SyntaxKind::Member);
-        assert_eq!(member.member_key(), Some("name".to_string()));
+        assert_eq!(slot.container().kind(), SyntaxKind::Object);
+        assert_eq!(slot.index(), 0);
     }
 
     #[test]
-    fn resolve_member_empty_path_is_invalid() {
+    fn resolve_slot_empty_path_is_invalid_target() {
         let root = parse("{\n  name: app\n}\n");
         let resolver = PathResolver::new(root);
         let err = resolver
-            .resolve_member(&HjsonObjectPath::parse("").unwrap())
+            .resolve_slot(&HjsonObjectPath::parse("").unwrap())
             .unwrap_err();
-        assert!(matches!(err, HjsonEditError::InvalidPath(_)));
+        assert!(matches!(err, HjsonEditError::InvalidTarget { .. }));
     }
 
     #[test]
-    fn resolve_member_not_found() {
-        let root = parse("{\n  name: app\n}\n");
-        let resolver = PathResolver::new(root);
-        let err = resolver
-            .resolve_member(&HjsonObjectPath::parse("missing").unwrap())
-            .unwrap_err();
-        assert!(matches!(err, HjsonEditError::PathNotFound(_)));
-    }
-
-    #[test]
-    fn resolve_member_root_scalar_is_not_member() {
+    fn resolve_slot_scalar_root_is_invalid_target() {
         let root = parse("123\n");
         let resolver = PathResolver::new(root);
         let err = resolver
-            .resolve_member(&HjsonObjectPath::parse("").unwrap())
+            .resolve_slot(&HjsonObjectPath::parse("name").unwrap())
             .unwrap_err();
-        assert!(matches!(err, HjsonEditError::InvalidPath(_)));
+        assert!(matches!(err, HjsonEditError::InvalidTarget { .. }));
+    }
+
+    #[test]
+    fn resolve_slot_not_found() {
+        let root = parse("{\n  name: app\n}\n");
+        let resolver = PathResolver::new(root);
+        let err = resolver
+            .resolve_slot(&HjsonObjectPath::parse("missing").unwrap())
+            .unwrap_err();
+        assert!(matches!(err, HjsonEditError::PathNotFound(_)));
     }
 }

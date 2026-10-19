@@ -446,6 +446,84 @@ pub enum DelimiterStyle {
     Braceless,
 }
 
+/// コンテナ内の要素（メンバーまたは配列要素）1 つの位置。
+///
+/// 位置は「コンテナの子要素の並び」での index 範囲で表す。挿入・削除・コメント操作が
+/// 同じ位置計算を共有できるよう、要素本体だけでなく前後のトリビアと、
+/// 要素の行を終わらせる改行の位置も保持する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotSpan {
+    lead: Range<usize>,
+    elem: Range<usize>,
+    trail: Range<usize>,
+    at_line_start: bool,
+    line_break: Option<usize>,
+}
+
+impl SlotSpan {
+    /// 要素本体（`Member` または `Value`）の範囲。
+    pub fn elem(&self) -> Range<usize> {
+        self.elem.clone()
+    }
+
+    /// 要素の直前にあるトリビア（インデント・改行・コメント）の範囲。
+    pub fn lead(&self) -> Range<usize> {
+        self.lead.clone()
+    }
+
+    /// 要素の直後にあるトリビア（行末コメントと、行を終わらせる改行まで）の範囲。
+    pub fn trail(&self) -> Range<usize> {
+        self.trail.clone()
+    }
+
+    /// この要素の直前へ挿入する位置が行頭か。
+    ///
+    /// 真のとき、挿入する要素はそれだけで 1 行を占める（行末の改行が必要になる）。
+    pub fn at_line_start(&self) -> bool {
+        self.at_line_start
+    }
+
+    /// 要素の行を終わらせる改行の位置。要素の後に閉じ区切りが続く場合は `None`。
+    pub fn line_break(&self) -> Option<usize> {
+        self.line_break
+    }
+
+    /// 直前のトリビアを含む要素全体の範囲。要素の削除に使う。
+    pub fn span(&self) -> Range<usize> {
+        self.lead.start..self.trail.end
+    }
+
+    /// この要素の直前へ挿入する位置。
+    pub fn insert_before(&self) -> usize {
+        self.lead.start
+    }
+}
+
+/// 本文が空のコンテナへ最初の要素を挿入する位置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyInsertion {
+    index: usize,
+    terminate_line: bool,
+    start_new_line: bool,
+}
+
+impl BodyInsertion {
+    /// 挿入位置。
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// 挿入する要素の後ろに改行が必要か（閉じ区切りが独立した行にある）。
+    pub fn terminate_line(&self) -> bool {
+        self.terminate_line
+    }
+
+    /// 挿入する要素の前に改行が必要か（同じ行に先行する内容がある）。
+    pub fn start_new_line(&self) -> bool {
+        self.start_new_line
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Array {
     syntax: RedNode,
@@ -678,6 +756,16 @@ impl Object {
             .collect()
     }
 
+    /// メンバーの位置を、コンテナ内の並び順に返す。
+    pub fn slots(&self) -> Vec<SlotSpan> {
+        container_slots(&self.syntax, SyntaxKind::Member)
+    }
+
+    /// 本文が空のときに、最初のメンバーを挿入する位置。
+    pub fn body_insertion(&self) -> BodyInsertion {
+        body_insertion(&self.syntax, self.delimiter_style, SyntaxKind::RBrace)
+    }
+
     pub fn append_member_index_before_footer(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
@@ -793,6 +881,16 @@ impl Array {
             .collect()
     }
 
+    /// 配列要素の位置を、コンテナ内の並び順に返す。
+    pub fn slots(&self) -> Vec<SlotSpan> {
+        container_slots(&self.syntax, SyntaxKind::Value)
+    }
+
+    /// 本文が空のときに、最初の要素を挿入する位置。
+    pub fn body_insertion(&self) -> BodyInsertion {
+        body_insertion(&self.syntax, self.delimiter_style, SyntaxKind::RBracket)
+    }
+
     pub fn append_value_index_before_footer(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
@@ -904,7 +1002,10 @@ impl AstNode for Comment {
             });
         }
 
-        let trivia = collect_comment_trivia(&node).ok_or(HjsonEditError::ParentNotFound)?;
+        let trivia = collect_comment_trivia(&node).ok_or(HjsonEditError::UnexpectedStructure {
+            expected: SyntaxKind::Comment,
+            found: node.kind(),
+        })?;
 
         Ok(Self {
             syntax: node,
@@ -1044,7 +1145,10 @@ impl Value {
                 NodeOrToken::Node(node) => !node.kind().is_trivia(),
                 NodeOrToken::Token(token) => !token.kind().is_trivia(),
             })
-            .ok_or(HjsonEditError::ParentNotFound)?;
+            .ok_or(HjsonEditError::UnexpectedStructure {
+                expected: SyntaxKind::Value,
+                found: self.syntax.kind(),
+            })?;
 
         Ok(match child {
             NodeOrToken::Node(node) => match node.kind() {
@@ -1235,6 +1339,133 @@ fn collect_container_leading_trivia(
     collect_trivia_slice(&children[start..leading_end])
 }
 
+/// コンテナの子要素（メンバーまたは配列要素）の位置を、子の並び順に返す。
+fn container_slots(node: &RedNode, element_kind: SyntaxKind) -> Vec<SlotSpan> {
+    let children = node.children_with_tokens().collect::<Vec<_>>();
+    let mut slots = Vec::new();
+
+    for (index, child) in children.iter().enumerate() {
+        if !matches!(child, NodeOrToken::Node(element) if element.kind() == element_kind) {
+            continue;
+        }
+
+        let lead = leading_trivia_start(&children, index);
+        let trail_end = trailing_trivia_end(&children, index + 1);
+        slots.push(SlotSpan {
+            lead: lead..index,
+            elem: index..index + 1,
+            trail: index + 1..trail_end,
+            at_line_start: follows_line_break(&children, lead),
+            line_break: first_newline_index(&children, index + 1..trail_end),
+        });
+    }
+
+    slots
+}
+
+/// 本文が空のコンテナへ最初の要素を挿入する位置を返す。
+fn body_insertion(
+    node: &RedNode,
+    delimiter_style: DelimiterStyle,
+    closing_kind: SyntaxKind,
+) -> BodyInsertion {
+    let children = node.children_with_tokens().collect::<Vec<_>>();
+
+    if delimiter_style == DelimiterStyle::Braceless {
+        // 閉じ区切りが無いので、本文の末尾（末尾トリビアの先頭）へ入れる
+        let index = children
+            .iter()
+            .rposition(|child| match child {
+                NodeOrToken::Token(token) => !token.kind().is_trivia(),
+                NodeOrToken::Node(node) => node.kind() != SyntaxKind::Comment,
+            })
+            .map_or(0, |position| position + 1);
+
+        // 本文が空のときは、文書先頭のコメントなどが同じ行に残っている場合がある
+        let start_new_line = index == 0 && has_same_line_content_before(node);
+
+        return BodyInsertion {
+            index,
+            terminate_line: true,
+            start_new_line,
+        };
+    }
+
+    let index = children
+        .iter()
+        .position(
+            |child| matches!(child, NodeOrToken::Token(token) if token.kind() == closing_kind),
+        )
+        .unwrap_or(children.len());
+
+    // 閉じ区切りの直前（空白を飛ばして）が改行なら、要素は独立した行を占める
+    let terminate_line = follows_line_break(&children, index);
+    let start_new_line = !terminate_line && children[..index].iter().any(is_comment_element);
+
+    BodyInsertion {
+        index,
+        terminate_line,
+        start_new_line,
+    }
+}
+
+/// コメントの要素か。
+fn is_comment_element(element: &NodeOrToken<RedNode, RedToken>) -> bool {
+    match element {
+        NodeOrToken::Node(node) => node.kind() == SyntaxKind::Comment,
+        NodeOrToken::Token(token) => token.kind().is_comment(),
+    }
+}
+
+/// ノードの直前（親の子要素の並び）に、同じ行の内容があるか。
+fn has_same_line_content_before(node: &RedNode) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    let children = parent.children_with_tokens().collect::<Vec<_>>();
+    let Some(position) = children
+        .iter()
+        .position(|child| matches!(child, NodeOrToken::Node(child) if child == node))
+    else {
+        return false;
+    };
+
+    children[..position]
+        .iter()
+        .rev()
+        .find(|child| {
+            !matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace)
+        })
+        .is_some_and(|child| {
+            !matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline)
+        })
+}
+
+/// `index` の直前（空白を飛ばして）に改行があるか。
+///
+/// 真なら、その位置へ挿入する要素は行頭から始まり、行末の改行が必要になる。
+fn follows_line_break(children: &[NodeOrToken<RedNode, RedToken>], index: usize) -> bool {
+    children[..index]
+        .iter()
+        .rev()
+        .find(|child| {
+            !matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace)
+        })
+        .is_some_and(|child| {
+            matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline)
+        })
+}
+
+/// 範囲内で最初に現れる改行トークンの位置。
+fn first_newline_index(
+    children: &[NodeOrToken<RedNode, RedToken>],
+    range: Range<usize>,
+) -> Option<usize> {
+    range.into_iter().find(|index| {
+        matches!(&children[*index], NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline)
+    })
+}
+
 fn trailing_trivia_end(children: &[NodeOrToken<RedNode, RedToken>], start: usize) -> usize {
     let mut cursor = start;
     while cursor < children.len() {
@@ -1274,8 +1505,12 @@ fn collect_container_trailing_trivia(
         .rposition(|elem| matches!(elem, NodeOrToken::Node(node) if node.kind() == item_kind))
         .map(|relative| start + relative);
 
-    let trailing_start =
-        last_item_index.map_or(start, |idx| trailing_trivia_end(&children, idx + 1));
+    let trailing_start = match last_item_index {
+        Some(idx) => trailing_trivia_end(&children, idx + 1),
+        // 要素が 1 つも無いときは、間に挟まるコメントは前側に属する
+        // （そうしないと leading と trailing が同じコメントを指し、整形で重複する）
+        None => end,
+    };
     collect_trivia_slice(&children[trailing_start..end])
 }
 
@@ -1318,46 +1553,43 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
     };
 
     let index = node.index();
-    if index == 0 {
-        return Vec::new();
-    }
+    let start = leading_trivia_start(&children, index);
 
-    let mut trivia = Vec::new();
+    children[start..index]
+        .iter()
+        .filter_map(trivia_from_element)
+        .collect()
+}
+
+/// 指定 index の要素の直前にあるトリビアの開始 index。
+///
+/// カンマ・行を区切る改行・非トリビア要素で区切られた「最後の連続したトリビア列」の
+/// 先頭を返す。`collect_leading_trivia` と同じ規則を共有するための唯一の実装。
+fn leading_trivia_start(children: &[NodeOrToken<RedNode, RedToken>], index: usize) -> usize {
+    let mut start = 0usize;
     let mut saw_boundary_newline = false;
-    let mut prev_has_trailing = false;
 
-    for elem in children.iter().take(index) {
+    for (position, elem) in children.iter().enumerate().take(index) {
         let Some(item) = trivia_from_element(elem) else {
-            trivia.clear();
+            start = position + 1;
             saw_boundary_newline = false;
-            prev_has_trailing = matches!(elem.kind(), SyntaxKind::Member | SyntaxKind::Value);
             continue;
         };
 
         match item {
             Trivia::Comma(_) => {
-                trivia.clear();
+                start = position + 1;
                 saw_boundary_newline = false;
-                prev_has_trailing = false;
-            }
-            Trivia::Newline { .. } if prev_has_trailing && !saw_boundary_newline => {
-                trivia.clear();
-                saw_boundary_newline = true;
-                prev_has_trailing = false;
             }
             Trivia::Newline { .. } if !saw_boundary_newline => {
-                trivia.clear();
+                start = position + 1;
                 saw_boundary_newline = true;
-                prev_has_trailing = false;
             }
-            other => {
-                trivia.push(other);
-                prev_has_trailing = false;
-            }
+            _ => {}
         }
     }
 
-    trivia
+    start
 }
 
 fn collect_root_leading_trivia(node: &RedNode) -> Vec<Trivia> {
@@ -1475,7 +1707,7 @@ fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
     }
 }
 
-fn trivia_from_element(element: &NodeOrToken<RedNode, RedToken>) -> Option<Trivia> {
+pub(crate) fn trivia_from_element(element: &NodeOrToken<RedNode, RedToken>) -> Option<Trivia> {
     match element {
         NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment => {
             collect_comment_trivia(node).map(Trivia::Comment)
@@ -1549,6 +1781,107 @@ mod tests {
         let parsed = Parser::new(src, tokens.tokens).parse();
         let root = RedNode::new_root(parsed.green);
         root.descendants().find(|node| node.kind() == kind).unwrap()
+    }
+
+    fn element_text(element: &NodeOrToken<RedNode, RedToken>) -> String {
+        match element {
+            NodeOrToken::Node(node) => node.text().to_string(),
+            NodeOrToken::Token(token) => token.text().to_string(),
+        }
+    }
+
+    fn slice(node: &RedNode, range: std::ops::Range<usize>) -> String {
+        node.children_with_tokens().collect::<Vec<_>>()[range]
+            .iter()
+            .map(element_text)
+            .collect()
+    }
+
+    #[test]
+    fn slots_split_members_into_lead_elem_trail() {
+        let src = "{\n  a: 1,\n  // c\n  b: 2\n}\n";
+        let node = parse_and_find_node(src, SyntaxKind::Object);
+        let object = Object::cast(node.clone()).unwrap();
+        let slots = object.slots();
+
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slice(&node, slots[0].lead()), "  ");
+        assert_eq!(slice(&node, slots[0].elem()), "a: 1");
+        assert_eq!(slice(&node, slots[0].trail()), ",\n");
+        assert_eq!(slice(&node, slots[1].lead()), "  // c\n  ");
+        assert_eq!(slice(&node, slots[1].elem()), "b: 2");
+        assert_eq!(slice(&node, slots[1].trail()), "\n");
+        assert!(slots[0].at_line_start());
+        assert!(slots[1].at_line_start());
+        assert_eq!(slots[0].line_break(), Some(5));
+        assert!(slots[1].line_break().is_some());
+        assert_eq!(slice(&node, slots[0].span()), "  a: 1,\n");
+        assert_eq!(slice(&node, slots[1].span()), "  // c\n  b: 2\n");
+    }
+
+    #[test]
+    fn slots_split_array_items_into_lead_elem_trail() {
+        let src = "[1, 2]";
+        let node = parse_and_find_node(src, SyntaxKind::Array);
+        let array = Array::cast(node.clone()).unwrap();
+        let slots = array.slots();
+
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slice(&node, slots[0].lead()), "");
+        assert_eq!(slice(&node, slots[0].elem()), "1");
+        assert_eq!(slice(&node, slots[0].trail()), ", ");
+        assert_eq!(slice(&node, slots[1].lead()), " ");
+        assert_eq!(slice(&node, slots[1].elem()), "2");
+        assert_eq!(slice(&node, slots[1].trail()), "");
+        assert!(!slots[0].at_line_start());
+        assert!(!slots[1].at_line_start());
+        assert_eq!(slots[1].line_break(), None);
+    }
+
+    #[test]
+    fn slots_report_braceless_members_and_line_breaks() {
+        let src = "a: 1\nb: 2\n";
+        let node = parse_and_find_node(src, SyntaxKind::Object);
+        let object = Object::cast(node.clone()).unwrap();
+        let slots = object.slots();
+
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slice(&node, slots[0].elem()), "a: 1");
+        assert_eq!(slice(&node, slots[0].trail()), "\n");
+        assert_eq!(slice(&node, slots[1].elem()), "b: 2");
+        assert_eq!(slots[0].line_break(), Some(1));
+        assert_eq!(slots[1].line_break(), Some(3));
+        assert_eq!(slots[1].insert_before(), 2);
+    }
+
+    #[test]
+    fn body_insertion_points_before_the_closing_delimiter() {
+        let cases = [
+            ("{}", 1, false),
+            ("{  }", 2, false),
+            ("{\n}", 2, true),
+            ("{\n  }", 3, true),
+        ];
+        for (src, index, at_line_start) in cases {
+            let object = Object::cast(parse_and_find_node(src, SyntaxKind::Object)).unwrap();
+            let insertion = object.body_insertion();
+            assert_eq!(
+                (insertion.index(), insertion.terminate_line()),
+                (index, at_line_start),
+                "{src}"
+            );
+        }
+
+        let cases = [("[]", 1, false), ("[\n]", 2, true)];
+        for (src, index, at_line_start) in cases {
+            let array = Array::cast(parse_and_find_node(src, SyntaxKind::Array)).unwrap();
+            let insertion = array.body_insertion();
+            assert_eq!(
+                (insertion.index(), insertion.terminate_line()),
+                (index, at_line_start),
+                "{src}"
+            );
+        }
     }
 
     #[test]

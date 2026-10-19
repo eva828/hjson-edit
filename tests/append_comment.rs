@@ -30,7 +30,7 @@ fn append_comment_to_existing_header_appends_below() {
 
 #[test]
 fn append_comment_to_existing_inline_appends_inline() {
-    let input = "{\n  name: app\n}\n";
+    let input = "{\n  name: \"app\"\n}\n";
 
     let doc = HjsonDocument::parse(input)
         .unwrap()
@@ -42,8 +42,11 @@ fn append_comment_to_existing_inline_appends_inline() {
         .append_comment(HjsonCommentPath::try_from("name:inline").unwrap(), "second")
         .unwrap();
 
-    // Multi-line text forces Block style regardless of original inline style.
-    assert_eq!(appended.to_string(), "{\n  name: app/* first\nsecond */}\n");
+    // 複数行の本文は元のスタイルに関わらず 1 つのブロックコメントにまとめる。
+    assert_eq!(
+        appended.to_string(),
+        "{\n  name: \"app\" /* first\nsecond */\n}\n"
+    );
 }
 
 #[test]
@@ -57,7 +60,8 @@ fn append_comment_to_member_without_existing_comment_inserts_new() {
         .append_comment(HjsonCommentPath::try_from("name:before").unwrap(), "note")
         .unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  // note\nname: app\n}\n");
+    // 追加したコメント行は要素の字下げを引き継ぐ
+    assert_eq!(updated.to_string(), "{\n  // note\n  name: app\n}\n");
 }
 
 #[test]

@@ -59,9 +59,16 @@ fn parse_non_numeric_index_fails() {
 }
 
 #[test]
-fn parse_plus_without_number_fails() {
-    let result = HjsonObjectPath::parse("name[+]");
-    assert!(result.is_err());
+fn parse_plus_without_number_is_push() {
+    // `[+]` は `[-]` と同じく配列の末尾を指す
+    let path = HjsonObjectPath::parse("name[+]").unwrap();
+    assert_eq!(
+        path.segments(),
+        &[
+            PathSegment::Key("name".to_string()),
+            PathSegment::Array(ArrayPathSegment::Push)
+        ]
+    );
 }
 
 #[test]

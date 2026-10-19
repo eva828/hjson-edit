@@ -18,8 +18,13 @@ pub enum HjsonEditError {
         expected: SyntaxKind,
         found: SyntaxKind,
     },
-    #[error("Parent node not found")]
-    ParentNotFound,
+    #[error("Invalid target {}: {}", format_path(.path), format_text(.reason))]
+    InvalidTarget {
+        path: HjsonObjectPath,
+        reason: String,
+    },
+    #[error("Edit produced an invalid document at {}: {}", format_text(.target), format_text(.detail))]
+    InvalidEdit { target: String, detail: String },
     #[error("Parse errors:\n{}", format_parse_errors(errors, line_index))]
     ParseError {
         errors: Vec<ParseError>,

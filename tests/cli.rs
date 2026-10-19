@@ -148,6 +148,106 @@ fn assert_parses(text: &str) {
         .success();
 }
 
+/// 失敗する実行の stderr を返す。
+fn edit_failure(args: &[&str], input: &str) -> (String, String) {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{input}").unwrap();
+    file.flush().unwrap();
+
+    let output = Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(args)
+        .arg(file.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "expected failure: {args:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+
+    (stdout, stderr)
+}
+
+#[test]
+fn cli_edit_parses_value_as_hjson() {
+    // 引用符付きは文字列、括弧は配列、エスケープもそのまま解釈される
+    let stdout = edit_stdout(
+        &[
+            "edit",
+            "--set",
+            "name",
+            "\"true\"",
+            "--set",
+            "flag",
+            "true",
+            "--set",
+            "items",
+            "[1, 2]",
+            "--set",
+            "msg",
+            "\"a\\nb\"",
+        ],
+        "{\n  server: {\n    host: old\n  }\n}\n",
+    );
+
+    assert!(stdout.contains("name: \"true\""), "{stdout}");
+    assert!(stdout.contains("flag: true"), "{stdout}");
+    assert!(stdout.contains("items: ["), "{stdout}");
+    assert!(stdout.contains("1\n    2"), "{stdout}");
+    assert!(stdout.contains("msg: \"a\\nb\""), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_rejects_empty_value() {
+    let (stdout, stderr) = edit_failure(&["edit", "--set", "name", ""], "{a: 1}\n");
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("Invalid value"), "{stderr}");
+}
+
+#[test]
+fn cli_edit_rejects_invalid_value() {
+    let (_, stderr) = edit_failure(&["edit", "--set", "name", "{"], "{a: 1}\n");
+    assert!(stderr.contains("Invalid value"), "{stderr}");
+}
+
+#[test]
+fn cli_edit_sets_array_item_comment() {
+    let input = "{\n  a: [\n    1 // item\n    2\n  ] // keep\n}\n";
+    let stdout = edit_stdout(&["edit", "--comment-set", "a[0]:inline", "changed"], input);
+
+    // 要素のコメントだけが変わり、メンバーのコメントは残る
+    assert!(stdout.contains("1 // changed"), "{stdout}");
+    assert!(stdout.contains("] // keep"), "{stdout}");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_no_verify_still_edits() {
+    let stdout = edit_stdout(
+        &["edit", "--no-verify", "--set", "b", "hello"],
+        "{\n  a: 1\n}\n",
+    );
+    assert!(stdout.contains("b: hello"), "{stdout}");
+}
+
+#[test]
+fn cli_edit_reports_edit_errors_without_writing() {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{{\n  a: 1\n}}\n").unwrap();
+    file.flush().unwrap();
+    let path = file.path().to_path_buf();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--set", "a.b", "1", "--in-place"])
+        .arg(&path)
+        .assert()
+        .failure();
+
+    // 失敗した編集はファイルを書き換えない
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\n  a: 1\n}\n");
+}
+
 #[test]
 fn cli_edit_appends_string_and_formats_changed_container() {
     let stdout = edit_stdout(&["edit", "--set", "b", "hello"], "{a: 1}\n");

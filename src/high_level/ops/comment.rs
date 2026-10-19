@@ -1,14 +1,32 @@
+use std::ops::Range;
+
 use rowan::GreenNode;
 
 use crate::{
-    ast::{AstNode, CommentKind, Document, Member, Trivia},
+    ast::{trivia_from_element, AstNode, CommentKind, Document, SlotSpan, Trivia},
     high_level::{
-        error::HjsonEditError, path::HjsonCommentPath, resolve::PathResolver, HjsonDocument, Prefer,
+        error::HjsonEditError,
+        ops::insert::slot_at,
+        path::{HjsonCommentPath, HjsonObjectPath},
+        resolve::PathResolver,
+        HjsonDocument, Prefer,
     },
     syntax::{GreenElement, RedNode, SyntaxKind},
 };
 
+/// コメントの取得・設定・追加・削除。
+///
+/// # パスの意味
+///
+/// - `:header` / `:footer`: 文書全体のコメント
+/// - `<path>:before`: 要素の前の行のコメント（接尾辞を省略した場合も同じ）
+/// - `<path>:inline`: 要素の値の後ろのコメント
+///
+/// `<path>` はメンバーでも配列要素でもよい。行末でしか終端できない値
+/// （引用符なし文字列）の直後にはコメントを置けないため、`:inline` は
+/// [`HjsonEditError::InvalidTarget`] を返す。`:before` を使うか値を引用符で囲む。
 pub trait HjsonDocumentCommentEdit {
+    /// パスが指す位置のコメント。複数行は `\n` で連結して返す。
     fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;
     fn set_comment(
         self,
@@ -29,27 +47,34 @@ pub trait HjsonDocumentCommentEdit {
         Self: Sized;
 }
 
-impl HjsonDocumentCommentEdit for HjsonDocument {
-    fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError> {
-        match resolve_comment_target(&path) {
+impl HjsonDocument {
+    /// 指定した位置のコメント本文。複数のコメントは並び順に返す。
+    pub(crate) fn comment_bodies(
+        &self,
+        path: &HjsonCommentPath,
+    ) -> Result<Vec<String>, HjsonEditError> {
+        match resolve_comment_target(path) {
             CommentTarget::Document { header } => {
-                let ast = self.ast().ok();
+                let ast = self.ast()?;
                 let trivia = if header {
-                    ast.as_ref().map(|a| &*a.leading_trivia)
+                    &ast.leading_trivia
                 } else {
-                    ast.as_ref().map(|a| &*a.trailing_trivia)
+                    &ast.trailing_trivia
                 };
-                Ok(trivia.and_then(join_comment_bodies))
+                Ok(extract_comment_bodies(trivia))
             }
-            CommentTarget::Member { path, location } => {
-                let member = PathResolver::new(self.syntax_root().clone()).resolve_member(path)?;
-                let trivia = match location {
-                    MemberCommentLocation::Before => &member.leading_trivia,
-                    MemberCommentLocation::Inline => &member.trailing_trivia,
-                };
-                Ok(join_comment_bodies(trivia))
+            CommentTarget::Slot { path, location } => {
+                let slot = PathResolver::new(self.syntax_root().clone()).resolve_slot(path)?;
+                let trivia = slot_trivia(slot.container(), slot.index(), location)?;
+                Ok(extract_comment_bodies(&trivia))
             }
         }
+    }
+}
+
+impl HjsonDocumentCommentEdit for HjsonDocument {
+    fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError> {
+        Ok(join_comment_bodies(self.comment_bodies(&path)?))
     }
 
     fn set_comment(
@@ -57,8 +82,11 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
         path: HjsonCommentPath,
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError> {
-        let updated = update_comment(&self, path, Some(comment.into()))?;
-        Ok(self.root(updated))
+        let comment = comment.into();
+        let previous = self.clone();
+        let updated = update_comment(&self, path.clone(), Some(comment.clone()))?;
+
+        finish_comment_edit(&previous, self.root(updated), &path, Some(comment.as_str()))
     }
 
     fn append_comment(
@@ -76,13 +104,43 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
     }
 
     fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError> {
-        let updated = update_comment(&self, path, None)?;
-        Ok(self.root(updated))
+        let previous = self.clone();
+        let updated = update_comment(&self, path.clone(), None)?;
+
+        finish_comment_edit(&previous, self.root(updated), &path, None)
     }
 }
 
+/// コメント編集の後処理（変更したコンテナの記録と検証）。
+fn finish_comment_edit(
+    previous: &HjsonDocument,
+    updated: HjsonDocument,
+    path: &HjsonCommentPath,
+    expected: Option<&str>,
+) -> Result<HjsonDocument, HjsonEditError> {
+    if previous.current_verify() {
+        crate::high_level::verify::comment_edit(previous, &updated, path, expected)?;
+    }
+
+    Ok(match comment_container(path) {
+        Some(container) => updated.note_touched(container),
+        None => updated,
+    })
+}
+
+/// コメント操作が触れたコンテナ。ヘッダー/フッターは文書全体に付くため対象外。
+fn comment_container(path: &HjsonCommentPath) -> Option<HjsonObjectPath> {
+    match path {
+        HjsonCommentPath::Header | HjsonCommentPath::Footer => None,
+        HjsonCommentPath::Before(path) | HjsonCommentPath::Inline(path) => {
+            path.split_last().map(|(parent, _)| parent)
+        }
+    }
+}
+
+/// コメントを付ける位置。要素の前の行か、要素の行末か。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MemberCommentLocation {
+enum CommentLocation {
     Before,
     Inline,
 }
@@ -91,9 +149,9 @@ enum CommentTarget<'a> {
     Document {
         header: bool,
     },
-    Member {
-        path: &'a crate::high_level::path::HjsonObjectPath,
-        location: MemberCommentLocation,
+    Slot {
+        path: &'a HjsonObjectPath,
+        location: CommentLocation,
     },
 }
 
@@ -101,15 +159,102 @@ fn resolve_comment_target(path: &HjsonCommentPath) -> CommentTarget<'_> {
     match path {
         HjsonCommentPath::Header => CommentTarget::Document { header: true },
         HjsonCommentPath::Footer => CommentTarget::Document { header: false },
-        HjsonCommentPath::Before(path) => CommentTarget::Member {
+        HjsonCommentPath::Before(path) => CommentTarget::Slot {
             path,
-            location: MemberCommentLocation::Before,
+            location: CommentLocation::Before,
         },
-        HjsonCommentPath::Inline(path) => CommentTarget::Member {
+        HjsonCommentPath::Inline(path) => CommentTarget::Slot {
             path,
-            location: MemberCommentLocation::Inline,
+            location: CommentLocation::Inline,
         },
     }
+}
+
+/// コンテナの子要素の並び。
+fn children_of(container: &RedNode) -> Vec<rowan::NodeOrToken<RedNode, crate::RedToken>> {
+    container.children_with_tokens().collect()
+}
+
+/// スロットの前後にあるトリビア。
+fn slot_trivia(
+    container: &RedNode,
+    index: usize,
+    location: CommentLocation,
+) -> Result<Vec<Trivia>, HjsonEditError> {
+    let span = slot_at(container, index)?;
+    let range = match location {
+        CommentLocation::Before => span.lead(),
+        CommentLocation::Inline => span.trail(),
+    };
+
+    Ok(children_of(container)[range]
+        .iter()
+        .filter_map(trivia_from_element)
+        .collect())
+}
+
+/// 既存コメントが占める範囲。無ければ `None`。
+///
+/// `Before` は直前のトリビアにある最初のコメントから要素の直前まで、
+/// `Inline` は要素の直後にある最初のコメント（直前の空白を含む）から行末まで。
+fn comment_range(
+    container: &RedNode,
+    index: usize,
+    location: CommentLocation,
+) -> Result<Option<Range<usize>>, HjsonEditError> {
+    let span = slot_at(container, index)?;
+    let children = children_of(container);
+
+    match location {
+        CommentLocation::Before => {
+            let lead = span.lead();
+            let start = lead
+                .clone()
+                .find(|position| is_comment(&children[*position]));
+            Ok(start.map(|start| start..lead.end))
+        }
+        CommentLocation::Inline => {
+            let trail = span.trail();
+            let Some(comment) = trail
+                .clone()
+                .find(|position| is_comment(&children[*position]))
+            else {
+                return Ok(None);
+            };
+
+            let mut start = comment;
+            while start > trail.start && is_whitespace(&children[start - 1]) {
+                start -= 1;
+            }
+
+            // 行末の改行は残す（置き換えで次の行を巻き込まないため）
+            let mut end = comment + 1;
+            while end < trail.end
+                && (is_comment(&children[end])
+                    || (is_whitespace(&children[end])
+                        && end + 1 < trail.end
+                        && is_comment(&children[end + 1])))
+            {
+                end += 1;
+            }
+            Ok(Some(start..end))
+        }
+    }
+}
+
+fn is_comment(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    match element {
+        rowan::NodeOrToken::Node(node) => node.kind() == SyntaxKind::Comment,
+        rowan::NodeOrToken::Token(token) => token.kind().is_comment(),
+    }
+}
+
+fn is_whitespace(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    matches!(element, rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace)
+}
+
+fn is_comma(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    matches!(element, rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma)
 }
 
 fn extract_comment_bodies(trivia: &[Trivia]) -> Vec<String> {
@@ -122,8 +267,7 @@ fn extract_comment_bodies(trivia: &[Trivia]) -> Vec<String> {
         .collect()
 }
 
-fn join_comment_bodies(trivia: &[Trivia]) -> Option<String> {
-    let bodies = extract_comment_bodies(trivia);
+fn join_comment_bodies(bodies: Vec<String>) -> Option<String> {
     if bodies.is_empty() {
         None
     } else {
@@ -161,36 +305,6 @@ fn trivia_comment_style(trivia: &[Trivia]) -> Option<CommentKind> {
     })
 }
 
-fn member_comment_range(
-    member: &Member,
-    location: MemberCommentLocation,
-) -> Option<(usize, usize)> {
-    let parent_index = member.node().index();
-    match location {
-        MemberCommentLocation::Before => {
-            let trivia = &member.leading_trivia;
-            let start_rel = trivia
-                .iter()
-                .position(|elem| matches!(elem, Trivia::Comment(_)))?;
-            let base = parent_index.saturating_sub(trivia.len());
-            Some((base + start_rel, parent_index))
-        }
-        MemberCommentLocation::Inline => {
-            let trivia = &member.trailing_trivia;
-            let comment_rel = trivia
-                .iter()
-                .position(|elem| matches!(elem, Trivia::Comment(_)))?;
-            let mut start_rel = comment_rel;
-            while start_rel > 0 && matches!(trivia[start_rel - 1], Trivia::Whitespace(_)) {
-                start_rel -= 1;
-            }
-            let start = parent_index + 1 + start_rel;
-            let end = parent_index + 1 + trivia.len();
-            Some((start, end))
-        }
-    }
-}
-
 fn update_comment(
     doc: &HjsonDocument,
     path: HjsonCommentPath,
@@ -204,8 +318,8 @@ fn update_comment(
         CommentTarget::Document { header } => {
             build_document_comment(&root, header, comment, preferred, newline)
         }
-        CommentTarget::Member { path, location } => {
-            build_member_comment(root, path, location, comment, preferred, newline)
+        CommentTarget::Slot { path, location } => {
+            build_slot_comment(root, path, location, comment, preferred, newline)
         }
     }
 }
@@ -273,80 +387,120 @@ fn build_document_comment(
     Ok(green)
 }
 
-fn build_member_comment(
+/// スロットの前後のコメントを差し替える。`comment` が `None` なら削除する。
+fn build_slot_comment(
     root: RedNode,
-    path: &crate::high_level::path::HjsonObjectPath,
-    location: MemberCommentLocation,
+    path: &HjsonObjectPath,
+    location: CommentLocation,
     comment: Option<String>,
     preferred: Prefer<CommentKind>,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let member = PathResolver::new(root.clone()).resolve_member(path)?;
-    let parent = member
-        .node()
-        .parent()
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let member_index = member.node().index();
+    let slot = PathResolver::new(root).resolve_slot(path)?;
+    let container = slot.container().clone();
+    let index = slot.index();
+    let span = slot_at(&container, index)?;
 
-    let existing_style = trivia_comment_style(match location {
-        MemberCommentLocation::Before => &member.leading_trivia,
-        MemberCommentLocation::Inline => &member.trailing_trivia,
-    });
-
-    let comment_range = member_comment_range(&member, location);
-    let green_after_remove = if let Some((start, end)) = comment_range {
-        parent.green().splice_children(start..end, vec![])
-    } else {
-        parent.green().clone().into_owned()
+    let existing_style = trivia_comment_style(&slot_trivia(&container, index, location)?);
+    let existing_range = comment_range(&container, index, location)?;
+    let green_after_remove = match &existing_range {
+        Some(range) => container.green().splice_children(range.clone(), vec![]),
+        None => container.green().clone().into_owned(),
     };
 
-    let comment = match comment {
-        Some(comment) => comment,
-        None => {
-            return if parent.kind() == SyntaxKind::Root {
-                Ok(green_after_remove)
-            } else {
-                Ok(parent.replace_with(green_after_remove))
-            };
-        }
+    let Some(comment) = comment else {
+        return Ok(container.replace_with(green_after_remove));
     };
+
     let resolved_style = resolve_comment_style(preferred, existing_style);
+    let children = children_of(&container);
 
-    let insert_index = match location {
-        MemberCommentLocation::Before => comment_range
-            .map(|(start, _)| start)
-            .unwrap_or(member_index),
-        MemberCommentLocation::Inline => member_index + 1,
-    };
-
-    let inserted: Vec<GreenElement> = match location {
-        MemberCommentLocation::Before => {
-            let nl = SyntaxKind::Newline.create_token(newline);
-            let mut inserted: Vec<GreenElement> = Vec::new();
-            for (i, line) in comment.split('\n').enumerate() {
-                if i > 0 {
-                    inserted.push(nl.clone().into());
-                }
-                inserted.push(make_comment_node(resolved_style, line).into());
+    let (insert_at, inserted) = match location {
+        CommentLocation::Before => {
+            let mut inserted = make_comment_nodes(resolved_style, &comment, newline);
+            inserted.push(SyntaxKind::Newline.create_token(newline).into());
+            // 要素の字下げを新しい行にも引き継ぐ
+            if let Some(indent) = trailing_whitespace(&children, &span) {
+                inserted.push(indent);
             }
-            inserted.push(nl.into());
-            inserted
+            let at = existing_range
+                .as_ref()
+                .map(|range| range.start)
+                .unwrap_or_else(|| span.elem().start);
+            (at, inserted)
         }
-        MemberCommentLocation::Inline => {
-            let resolved_style = if comment.contains('\n') {
-                CommentKind::Block
-            } else {
+        CommentLocation::Inline => {
+            // 引用符なし文字列は行末までを飲み込むため、その直後にコメントを置けない。
+            if children
+                .get(span.elem().start)
+                .is_some_and(ends_with_unquoted_string)
+            {
+                return Err(HjsonEditError::InvalidTarget {
+                    path: path.clone(),
+                    reason: "an inline comment cannot follow an unquoted string value; \
+                             quote the value or use the :before suffix"
+                        .to_string(),
+                });
+            }
+
+            // 行末でない位置では行コメントが後続を飲み込むため、ブロックコメントにする。
+            // 複数行の本文も 1 つのブロックコメントにまとめる（行の構造を変えない）。
+            let style = if span.line_break().is_some() && !comment.contains('\n') {
                 resolved_style
+            } else {
+                CommentKind::Block
             };
-            vec![make_comment_node(resolved_style, &comment).into()]
+            let mut inserted = vec![SyntaxKind::Whitespace.create_token(" ").into()];
+            inserted.extend(make_comment_nodes(style, &comment, newline));
+
+            let at = match &existing_range {
+                Some(range) => range.start,
+                None => {
+                    // 区切りカンマがある場合はその直後に置く
+                    let mut at = span.trail().start;
+                    if children.get(at).is_some_and(is_comma) {
+                        at += 1;
+                    }
+                    at
+                }
+            };
+            (at, inserted)
         }
     };
 
-    let new_parent = green_after_remove.splice_children(insert_index..insert_index, inserted);
-    if parent.kind() == SyntaxKind::Root {
-        Ok(new_parent)
-    } else {
-        Ok(parent.replace_with(new_parent))
+    let updated = green_after_remove.splice_children(insert_at..insert_at, inserted);
+    Ok(container.replace_with(updated))
+}
+
+/// スロットの直前にある字下げ（空白）。
+fn trailing_whitespace(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    span: &SlotSpan,
+) -> Option<GreenElement> {
+    let lead = span.lead();
+    let last = lead
+        .end
+        .checked_sub(1)
+        .filter(|index| *index >= lead.start)?;
+    let element = children.get(last)?;
+    is_whitespace(element).then(|| to_green_element(element))
+}
+
+/// 要素の末尾が引用符なし文字列か。
+fn ends_with_unquoted_string(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    match element {
+        rowan::NodeOrToken::Node(node) => node
+            .last_token()
+            .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString),
+        rowan::NodeOrToken::Token(token) => token.kind() == SyntaxKind::UnquotedString,
+    }
+}
+
+/// 赤ノードの要素を green 要素にする。
+fn to_green_element(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> GreenElement {
+    match element {
+        rowan::NodeOrToken::Node(node) => node.green().clone().into(),
+        rowan::NodeOrToken::Token(token) => token.kind().create_token(token.text()).into(),
     }
 }
 
@@ -478,7 +632,7 @@ mod tests {
     #[test]
     fn test_join_comment_bodies_empty_trivia() {
         let trivia = vec![Trivia::Whitespace("  ".to_string())];
-        assert_eq!(join_comment_bodies(&trivia), None);
+        assert_eq!(join_comment_bodies(extract_comment_bodies(&trivia)), None);
     }
 
     #[test]
@@ -488,7 +642,10 @@ mod tests {
             text: "// hello".to_string(),
             body: "hello".to_string(),
         })];
-        assert_eq!(join_comment_bodies(&trivia), Some("hello".to_string()));
+        assert_eq!(
+            join_comment_bodies(extract_comment_bodies(&trivia)),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
@@ -506,7 +663,7 @@ mod tests {
             }),
         ];
         assert_eq!(
-            join_comment_bodies(&trivia),
+            join_comment_bodies(extract_comment_bodies(&trivia)),
             Some("first\nsecond".to_string())
         );
     }
@@ -555,11 +712,11 @@ mod tests {
     fn test_resolve_comment_target_before() {
         let path = HjsonCommentPath::Before(HjsonObjectPath::parse("a").unwrap());
         match resolve_comment_target(&path) {
-            CommentTarget::Member {
-                location: MemberCommentLocation::Before,
+            CommentTarget::Slot {
+                location: CommentLocation::Before,
                 ..
             } => {}
-            _ => panic!("expected Member Before"),
+            _ => panic!("expected Slot Before"),
         }
     }
 
@@ -567,11 +724,11 @@ mod tests {
     fn test_resolve_comment_target_inline() {
         let path = HjsonCommentPath::Inline(HjsonObjectPath::parse("a").unwrap());
         match resolve_comment_target(&path) {
-            CommentTarget::Member {
-                location: MemberCommentLocation::Inline,
+            CommentTarget::Slot {
+                location: CommentLocation::Inline,
                 ..
             } => {}
-            _ => panic!("expected Member Inline"),
+            _ => panic!("expected Slot Inline"),
         }
     }
 }

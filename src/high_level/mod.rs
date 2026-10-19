@@ -9,11 +9,14 @@ pub mod path;
 pub(crate) mod resolve;
 pub mod style;
 pub mod value;
+mod value_ops;
+mod verify;
 
 use crate::ast as semantic_ast;
 use crate::ast::{AstNode, CommentKind, QuoteStyle};
+use crate::format::FormatConfig;
 use crate::high_level::error::HjsonEditError;
-use crate::high_level::ops::object::AppendMode;
+use crate::high_level::path::HjsonObjectPath;
 use crate::high_level::style::detect_newline_from_ast;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
@@ -36,7 +39,9 @@ pub struct HjsonDocument {
     root: RedNode,
     string_style: Prefer<QuoteStyle>,
     comment_style: Prefer<CommentKind>,
-    append_mode: AppendMode,
+    verify: bool,
+    format: Option<FormatConfig>,
+    touched: Vec<HjsonObjectPath>,
     newline: String,
     warnings: Vec<String>,
 }
@@ -98,7 +103,9 @@ impl HjsonDocument {
             root,
             string_style: Prefer::default(),
             comment_style: Prefer::default(),
-            append_mode: AppendMode::default(),
+            verify: true,
+            format: None,
+            touched: Vec::new(),
             newline,
             warnings,
         })
@@ -119,11 +126,6 @@ impl HjsonDocument {
         self
     }
 
-    pub fn append_mode(mut self, mode: AppendMode) -> Self {
-        self.append_mode = mode;
-        self
-    }
-
     pub(crate) fn root(self, root: GreenNode) -> HjsonDocument {
         HjsonDocument {
             root: RedNode::new_root(root),
@@ -139,8 +141,51 @@ impl HjsonDocument {
         self.comment_style
     }
 
-    pub(crate) fn current_append_mode(&self) -> AppendMode {
-        self.append_mode
+    /// 編集結果の検証（再パース・値一致・コメント差分）を有効にするか。既定は有効。
+    ///
+    /// 検証に失敗した編集は結果を返さずエラーになる。入力長に比例する追加コストが
+    /// かかるため、巨大な文書では無効化できる。
+    pub fn verify_edits(mut self, verify: bool) -> Self {
+        self.verify = verify;
+        self
+    }
+
+    pub(crate) fn current_verify(&self) -> bool {
+        self.verify
+    }
+
+    /// 部分整形（`format_container`）で使う整形設定。既定は文書から検出したもの。
+    pub fn format_config(mut self, config: FormatConfig) -> Self {
+        self.format = Some(config);
+        self
+    }
+
+    /// 文書に設定された整形設定。
+    pub fn current_format_config(&self) -> FormatConfig {
+        self.format
+            .clone()
+            .unwrap_or_else(|| self.detected_format_config())
+    }
+
+    /// 編集で子が変わったコンテナ（外側優先・重複排除済み）。
+    ///
+    /// `format_container` に渡すことで、変更した箇所だけを整形できる。
+    pub fn touched_containers(&self) -> &[HjsonObjectPath] {
+        &self.touched
+    }
+
+    /// 変更したコンテナを記録する。祖先に覆われるものは残さない。
+    pub(crate) fn note_touched(mut self, path: HjsonObjectPath) -> Self {
+        let covered = self
+            .touched
+            .iter()
+            .any(|existing| path.segments().starts_with(existing.segments()));
+        if !covered {
+            self.touched
+                .retain(|existing| !existing.segments().starts_with(path.segments()));
+            self.touched.push(path);
+        }
+        self
     }
 
     pub fn current_newline(&self) -> &str {

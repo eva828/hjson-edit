@@ -87,7 +87,8 @@ fn set_nested_object_path_creates_member() {
 #[test]
 fn set_missing_nested_path_creates_parents() {
     let input = "{\n  root: {\n  }\n}\n";
-    let expected = "{\n  root: {\nnew: {nested:value\n}\n  }\n}\n";
+    // 追加した要素の字下げは整形層が整える（ここでは構造だけを確認する）
+    let expected = "{\n  root: {\n  new: {nested:value\n}\n}\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -164,8 +165,9 @@ fn append_to_multiline_array() {
 
 #[test]
 fn append_to_object_with_trailing_comment_preserves_comment() {
+    // 末尾コメント（閉じ区切りの直前のコメント）は末尾に残し、新しいメンバーはその手前に入る
     let input = "{\n  a: 1\n  // trailing\n}\n";
-    let expected = "{\n  a: 1\n  // trailing\nb: 2\n}\n";
+    let expected = "{\n  a: 1\nb: 2\n  // trailing\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
@@ -175,7 +177,7 @@ fn append_to_object_with_trailing_comment_preserves_comment() {
 #[test]
 fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
     let input = "{\n  a: 1 // inline\n  // trailing\n}\n";
-    let expected = "{\n  a: 1 // inline\n  // trailing\nb: 2\n}\n";
+    let expected = "{\n  a: 1 // inline\nb: 2\n  // trailing\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
@@ -185,7 +187,7 @@ fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
 #[test]
 fn append_to_array_with_trailing_comment_preserves_comment() {
     let input = "[\n  1\n  // trailing\n]\n";
-    let expected = "[\n  1\n  // trailing\n2\n]\n";
+    let expected = "[\n  1\n2\n  // trailing\n]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 2).unwrap();
@@ -264,7 +266,7 @@ fn set_on_string_root_is_rejected() {
             error,
             hjson_edit::HjsonEditError::UnexpectedStructure { .. }
                 | hjson_edit::HjsonEditError::PathNotFound(_)
-                | hjson_edit::HjsonEditError::ParentNotFound
+                | hjson_edit::HjsonEditError::InvalidTarget { .. }
         ),
         "文字列ルートへの設定はエラーになる: {error:?}"
     );

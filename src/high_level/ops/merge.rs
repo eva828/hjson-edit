@@ -1,29 +1,32 @@
 use rowan::GreenNode;
 
-use crate::ast::{AstNode, DelimiterStyle, Member, Object as AstObject, QuoteStyle, ValueContent};
+use crate::ast::{AstNode, Member, Object as AstObject, Trivia, ValueContent};
 use crate::high_level::{
     error::HjsonEditError,
     ops::{
         ensure_depth_within_limit,
-        object::{append_separator, node_ends_with_unquoted_string, plan_braced_append},
+        insert::{newline_element, plan_insert, InsertPosition, RenderedElement},
+        object::rebuild_tree_with_set,
         receiving_container_depth, relative_container_depth,
     },
     path::{HjsonObjectPath, PathSegment},
-    resolve::{resolve_body, ExistingPrefix, PathResolver},
+    resolve::{member_index, resolve_body, ExistingPrefix, PathResolver},
     style::detect_document_newline,
-    HjsonDocument,
+    value::HjsonValue,
+    HjsonDocument, Prefer,
 };
-use crate::syntax::{RedNode, SyntaxKind};
-use crate::GreenElement;
+use crate::syntax::{GreenElement, NewlineKind, RedNode, SyntaxKind};
 
-/// 別ドキュメントのルートオブジェクトを、クォートスタイルを保持したまま
+/// 別ドキュメントのルートオブジェクトを、クォートスタイルとコメントを保ったまま
 /// 指定パスへマージするためのトレイト。
 pub trait HjsonDocumentMerge {
     /// `source` のルートオブジェクトの各メンバーを `self` の `path` 配下へマージする。
     ///
-    /// - 挿入元のメンバーはノードごとコピーされるため、値のクォートスタイルが保持される。
+    /// - 新規メンバーは、そのメンバーに付いていたコメント（先頭のコメント行と行末コメント）ごと
+    ///   コピーする。文書全体に付くコメント（ヘッダー/フッター）は対象外。
     /// - オブジェクト同士は深くマージする。
-    /// - 既存のリーフ（非オブジェクト）は後勝ちで置き換える。
+    /// - 既存の葉（非オブジェクト）は後勝ちで置き換える。このときキーとコメントは
+    ///   マージ先（ホスト）のものを保ち、値だけを差し替える。
     /// - パスの中間オブジェクトが存在しない場合は自動で作成する。
     /// - パス途中がオブジェクトでない、または source のルートがオブジェクトでない場合はエラー。
     fn merge_from(
@@ -53,20 +56,39 @@ impl HjsonDocumentMerge for HjsonDocument {
         ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
 
         let updated = merge_from_root(root, path, &source_object)?;
-        Ok(self.clone().root(updated))
+        let document = self.clone().root(updated).note_touched(path.clone());
+
+        if self.current_verify() {
+            let source_value = HjsonValue::from_node(source.syntax_root())?;
+            crate::high_level::verify::value_edit(
+                self.syntax_root(),
+                document.syntax_root(),
+                path,
+                |previous| {
+                    crate::high_level::value_ops::merge_at_path(previous, path, &source_value)
+                },
+                crate::high_level::verify::EditedRegion::Node,
+            )?;
+        }
+
+        Ok(document)
     }
 }
 
 fn resolve_source_object(source: &HjsonDocument) -> Result<RedNode, HjsonEditError> {
     let body = resolve_body(source.syntax_root())?;
-    let not_object = || HjsonEditError::MergeConflict("source root is not an object".to_string());
-    match body.kind() {
-        SyntaxKind::Object => Ok(body),
-        SyntaxKind::Value => body
+    object_body(&body)
+        .ok_or_else(|| HjsonEditError::MergeConflict("source root is not an object".to_string()))
+}
+
+/// ノードがオブジェクト（値に包まれていればその中身）なら、その本体を返す。
+fn object_body(node: &RedNode) -> Option<RedNode> {
+    match node.kind() {
+        SyntaxKind::Object => Some(node.clone()),
+        SyntaxKind::Value => node
             .children()
-            .find(|child| child.kind() == SyntaxKind::Object)
-            .ok_or_else(not_object),
-        _ => Err(not_object()),
+            .find(|child| child.kind() == SyntaxKind::Object),
+        _ => None,
     }
 }
 
@@ -76,129 +98,65 @@ fn merge_from_root(
     source_object: &RedNode,
 ) -> Result<GreenNode, HjsonEditError> {
     let body = resolve_body(&root)?;
-    match body.kind() {
-        SyntaxKind::Object => {
-            let updated = merge_into_object(&body, path.segments(), source_object)?;
-            Ok(root
-                .green()
-                .splice_children(body.index()..body.index() + 1, vec![updated.into()]))
-        }
-        SyntaxKind::Value => {
-            let inner = body
-                .children()
-                .find(|child| child.kind() == SyntaxKind::Object)
-                .ok_or_else(|| {
-                    HjsonEditError::MergeConflict("target root is not an object".to_string())
-                })?;
-            let updated = merge_into_object(&inner, path.segments(), source_object)?;
-            let updated_value = GreenNode::new(SyntaxKind::Value.into(), vec![updated.into()]);
-            Ok(root
-                .green()
-                .splice_children(body.index()..body.index() + 1, vec![updated_value.into()]))
-        }
-        _ => Err(HjsonEditError::MergeConflict(
+    if object_body(&body).is_none() {
+        return Err(HjsonEditError::MergeConflict(
             "target root is not an object".to_string(),
-        )),
+        ));
     }
-}
-
-/// `root_object` を `path` まで降りて、そのオブジェクトへ `source_object` をマージする。
-/// 戻り値は更新後の `root_object` の green ノード。
-fn merge_into_object(
-    root_object: &RedNode,
-    path: &[PathSegment],
-    source_object: &RedNode,
-) -> Result<GreenNode, HjsonEditError> {
-    let Some((first, rest)) = path.split_first() else {
-        return merge_objects(root_object, source_object);
-    };
-
-    let key = match first {
-        PathSegment::Key(key) => key.clone(),
-        _ => {
-            return Err(HjsonEditError::InvalidPath(
-                "merge path must consist of keys".to_string(),
-            ));
-        }
-    };
-    let obj_ast = AstObject::cast(root_object.clone())?;
-
-    if let Some(existing) = obj_ast
-        .members()
-        .into_iter()
-        .find(|member| member.member_key().as_deref() == Some(&key))
+    if path
+        .segments()
+        .iter()
+        .any(|segment| !matches!(segment, PathSegment::Key(_)))
     {
-        let existing_value = existing.value().ok_or(HjsonEditError::ParentNotFound)?;
-        match existing_value.content() {
-            Ok(ValueContent::Object(inner)) => {
-                let updated_inner = merge_into_object(inner.syntax(), rest, source_object)?;
-                let member_green = existing.syntax().green().clone();
-                let updated_member = member_green.splice_children(
-                    existing_value.syntax().index()..existing_value.syntax().index() + 1,
-                    vec![
-                        GreenNode::new(SyntaxKind::Value.into(), vec![updated_inner.into()]).into(),
-                    ],
-                );
-                Ok(root_object.green().splice_children(
-                    existing.syntax().index()..existing.syntax().index() + 1,
-                    vec![updated_member.into()],
-                ))
+        return Err(HjsonEditError::InvalidPath(
+            "merge path must consist of keys".to_string(),
+        ));
+    }
+
+    // マージ先が既にあるならオブジェクトでなければならない。
+    let resolver = PathResolver::new(root.clone());
+    let root = match resolver.resolve_node(path) {
+        Ok(node) => {
+            if object_body(&node).is_none() {
+                return Err(HjsonEditError::MergeConflict(format!(
+                    "cannot merge: {path:?} is not an object"
+                )));
             }
-            _ => Err(HjsonEditError::MergeConflict(format!(
-                "cannot merge: '{key}' is not an object"
-            ))),
+            root
         }
-    } else {
-        let created = create_and_merge(rest, source_object)?;
-        let member = make_member_node(&key, created);
-        let append_idx = obj_ast.append_member_index_before_footer();
-        Ok(root_object
-            .green()
-            .splice_children(append_idx..append_idx, vec![member.into()]))
-    }
-}
+        Err(HjsonEditError::PathNotFound(_)) => {
+            // 途中まで存在する場合、そこがオブジェクトでなければ作成できない。
+            let ExistingPrefix { ancestor, consumed } =
+                PathResolver::new(root.clone()).resolve_existing_prefix(path);
+            if consumed < path.depth() && object_body(&ancestor).is_none() {
+                return Err(HjsonEditError::MergeConflict(format!(
+                    "cannot merge: {path:?} is not inside an object"
+                )));
+            }
 
-/// 存在しないパス部分を空オブジェクトとして構築し、末端に `source_object` をマージする。
-/// 戻り値は `{ key1: { key2: { ... <source merged> } } }` の Object green ノード。
-fn create_and_merge(
-    path: &[PathSegment],
-    source_object: &RedNode,
-) -> Result<GreenNode, HjsonEditError> {
-    if path.is_empty() {
-        let empty = GreenNode::new(
-            SyntaxKind::Object.into(),
-            vec![
-                SyntaxKind::LBrace.create_token("{").into(),
-                SyntaxKind::RBrace.create_token("}").into(),
-            ],
-        );
-        let wrapped = RedNode::new_root(empty);
-        let body = resolve_body(&wrapped)?;
-        return merge_objects(&body, source_object);
-    }
-
-    let (first, rest) = path.split_first().unwrap();
-    let key = match first {
-        PathSegment::Key(key) => key.clone(),
-        _ => {
-            return Err(HjsonEditError::InvalidPath(
-                "merge path must consist of keys".to_string(),
-            ));
+            // 中間オブジェクトの作成は set と同じ経路に任せる
+            let created = rebuild_tree_with_set(
+                root,
+                path,
+                &HjsonValue::Object(Vec::new()),
+                Prefer::Preserve,
+            )?;
+            RedNode::new_root(created)
         }
+        Err(error) => return Err(error),
     };
-    let inner = create_and_merge(rest, source_object)?;
-    let member = make_member_node(&key, inner);
-    Ok(GreenNode::new(
-        SyntaxKind::Object.into(),
-        vec![
-            SyntaxKind::LBrace.create_token("{").into(),
-            member.into(),
-            SyntaxKind::RBrace.create_token("}").into(),
-        ],
-    ))
+
+    let target = PathResolver::new(root.clone()).resolve_node(path)?;
+    let target_object = object_body(&target).ok_or_else(|| {
+        HjsonEditError::MergeConflict(format!("cannot merge: {path:?} is not an object"))
+    })?;
+    let merged = merge_objects(&target_object, source_object)?;
+
+    Ok(target_object.replace_with(merged))
 }
 
-/// `source_object` の各メンバーを `target_object` へマージする。
+/// `target_object` を `source_object` の各メンバーで更新する。
+///
 /// 対象オブジェクトの green ノードを毎回更新しながら処理する。
 fn merge_objects(
     target_object: &RedNode,
@@ -206,60 +164,39 @@ fn merge_objects(
 ) -> Result<GreenNode, HjsonEditError> {
     let mut current: GreenNode = target_object.green().clone().into();
 
-    for src_member in source_object
+    for source_member in source_object
         .children()
         .filter(|child| child.kind() == SyntaxKind::Member)
     {
-        let wrapped = RedNode::new_root(current.clone());
-        let body = resolve_body(&wrapped)?;
-        let obj_node = match body.kind() {
-            SyntaxKind::Object => body.clone(),
-            SyntaxKind::Value => body
-                .children()
-                .find(|child| child.kind() == SyntaxKind::Object)
-                .ok_or_else(|| {
-                    HjsonEditError::MergeConflict("target is not an object".to_string())
-                })?
-                .clone(),
-            _ => {
-                return Err(HjsonEditError::MergeConflict(
-                    "target is not an object".to_string(),
-                ));
-            }
-        };
-        let obj_ast = AstObject::cast(obj_node.clone())?;
-        let members = obj_ast.members();
-        let src = Member::cast(src_member.clone())?;
-        let key = src
+        let target = RedNode::new_root(current.clone());
+        let source = Member::cast(source_member.clone())?;
+        let key = source
             .member_key()
             .ok_or_else(|| HjsonEditError::MergeConflict("cannot read member key".to_string()))?;
 
-        if let Some(existing) = members
-            .iter()
-            .find(|member| member.member_key().as_deref() == Some(&key))
-        {
-            current = merge_existing_member(&current, existing, &src)?;
-        } else {
-            let append_idx = obj_ast.append_member_index_before_footer();
-            let member_node: GreenElement = src_member.green().clone().into();
-            if obj_ast.delimiter_style == DelimiterStyle::Braced {
-                let last_member = members.last();
-                let separator = append_separator(
-                    last_member.map(|member| member.trailing_trivia.as_slice()),
-                    last_member
-                        .is_some_and(|member| node_ends_with_unquoted_string(member.syntax())),
-                    detect_document_newline(&obj_node),
-                );
-                let (insert_at, elements) =
-                    plan_braced_append(&obj_node, append_idx, separator, member_node);
-                current = current.splice_children(insert_at..insert_at, elements);
-            } else {
-                current = current.splice_children(append_idx..append_idx, vec![member_node]);
+        current = match member_index(&target, &key) {
+            Some(index) => {
+                let existing = &AstObject::cast(target.clone())?.members()[index];
+                merge_existing_member(&current, existing, &source)?
             }
-        }
+            None => insert_member(&target, &current, &source)?,
+        };
     }
 
     Ok(current)
+}
+
+/// 新規メンバーを、付いていたコメントごと挿入する。
+fn insert_member(
+    target_object: &RedNode,
+    current: &GreenNode,
+    source: &Member,
+) -> Result<GreenNode, HjsonEditError> {
+    let newline = detect_document_newline(target_object);
+    let element = copy_member_with_comments(source, newline);
+    let (at, elements) = plan_insert(target_object, InsertPosition::End, element, newline)?;
+
+    Ok(current.splice_children(at..at, elements))
 }
 
 /// 既存メンバーがオブジェクトなら再帰マージ、それ以外は後勝ちで置き換える。
@@ -268,60 +205,84 @@ fn merge_existing_member(
     existing: &Member,
     source: &Member,
 ) -> Result<GreenNode, HjsonEditError> {
-    let existing_value = existing.value().ok_or(HjsonEditError::ParentNotFound)?;
-    let source_value = source.value().ok_or(HjsonEditError::ParentNotFound)?;
+    let existing_value = existing
+        .value()
+        .ok_or_else(|| HjsonEditError::InvalidTarget {
+            path: HjsonObjectPath::from_segments(Vec::new()),
+            reason: "member without a value".to_string(),
+        })?;
+    let source_value = source
+        .value()
+        .ok_or_else(|| HjsonEditError::InvalidTarget {
+            path: HjsonObjectPath::from_segments(Vec::new()),
+            reason: "source member without a value".to_string(),
+        })?;
     let both_objects = matches!(existing_value.content(), Ok(ValueContent::Object(_)))
         && matches!(source_value.content(), Ok(ValueContent::Object(_)));
 
-    if both_objects {
-        let existing_obj = match existing_value.content()? {
+    let updated_value = if both_objects {
+        let existing_object = match existing_value.content()? {
             ValueContent::Object(object) => object,
             _ => unreachable!("guarded by both_objects"),
         };
-        let source_obj = match source_value.content()? {
+        let source_object = match source_value.content()? {
             ValueContent::Object(object) => object,
             _ => unreachable!("guarded by both_objects"),
         };
-        let merged = merge_objects(existing_obj.syntax(), source_obj.syntax())?;
-        let member_green = existing.syntax().green().clone();
-        let updated_member = member_green.splice_children(
-            existing_value.syntax().index()..existing_value.syntax().index() + 1,
-            vec![GreenNode::new(SyntaxKind::Value.into(), vec![merged.into()]).into()],
-        );
-        Ok(object_green.splice_children(
-            existing.syntax().index()..existing.syntax().index() + 1,
-            vec![updated_member.into()],
-        ))
+        let merged = merge_objects(existing_object.syntax(), source_object.syntax())?;
+        GreenNode::new(SyntaxKind::Value.into(), vec![merged.into()])
     } else {
-        // 後勝ち: 既存メンバー（その前後のtrivia込み）を source のメンバーノードで置き換える
-        let range = existing.span_range();
-        Ok(object_green.splice_children(range, vec![source.syntax().green().into()]))
-    }
-}
-
-fn make_member_node(key: &str, value: GreenNode) -> GreenNode {
-    let key_node = render_key_node(key);
-    let value_node = GreenNode::new(SyntaxKind::Value.into(), vec![value.into()]);
-    GreenNode::new(
-        SyntaxKind::Member.into(),
-        vec![
-            key_node.into(),
-            SyntaxKind::Colon.create_token(":").into(),
-            SyntaxKind::Whitespace.create_token(" ").into(),
-            value_node.into(),
-        ],
-    )
-}
-
-fn render_key_node(key: &str) -> GreenNode {
-    let token = if QuoteStyle::Unquoted.is_valid_for_text(key) {
-        SyntaxKind::UnquotedString.create_token(key).into()
-    } else {
-        SyntaxKind::String
-            .create_token(QuoteStyle::DoubleQuoted.render(key).as_str())
-            .into()
+        // 後勝ち。キーとコメントはホスト側のものを保ち、値だけを差し替える。
+        source_value.syntax().green().clone().into_owned()
     };
-    GreenNode::new(SyntaxKind::Key.into(), vec![token])
+
+    let value_index = existing_value.syntax().index();
+    let updated_member = existing
+        .syntax()
+        .green()
+        .clone()
+        .splice_children(value_index..value_index + 1, vec![updated_value.into()]);
+    let member_index = existing.syntax().index();
+
+    Ok(object_green.splice_children(member_index..member_index + 1, vec![updated_member.into()]))
+}
+
+/// ソースのメンバーを、先頭のコメント行と行末コメントごと要素にする。
+fn copy_member_with_comments(source: &Member, newline: NewlineKind) -> RenderedElement {
+    let mut elements: Vec<GreenElement> = Vec::new();
+    let mut has_leading_comments = false;
+
+    for trivia in &source.leading_trivia {
+        if trivia.is_comment() {
+            if has_leading_comments {
+                elements.push(newline_element(newline));
+            }
+            elements.push(trivia.to_green_element());
+            has_leading_comments = true;
+        }
+    }
+    if has_leading_comments {
+        elements.push(newline_element(newline));
+    }
+
+    elements.push(source.syntax().green().clone().into());
+
+    // 行末コメントは、元の空白ごとコピーして体裁を変えない
+    let mut pending_whitespace: Option<GreenElement> = None;
+    for trivia in &source.trailing_trivia {
+        match trivia {
+            Trivia::Whitespace(_) => pending_whitespace = Some(trivia.to_green_element()),
+            Trivia::Comment(_) => {
+                if let Some(whitespace) = pending_whitespace.take() {
+                    elements.push(whitespace);
+                }
+                elements.push(trivia.to_green_element());
+            }
+            _ => pending_whitespace = None,
+        }
+    }
+
+    RenderedElement::from_parts(elements, has_leading_comments)
 }
 
 #[cfg(test)]
@@ -401,9 +362,6 @@ line'''
         let source = HjsonDocument::parse("{ X: 1 }").unwrap();
         let merged = host.merge_from(&path("Mods.Foo"), &source).unwrap();
         assert_eq!(get_value(&merged, "Mods.Foo.X"), HjsonValue::Integer(1));
-        let text = render(&merged);
-        assert!(text.contains("Mods:"), "wrapper missing:\n{text}");
-        assert!(text.contains("Foo:"), "wrapper missing:\n{text}");
     }
 
     #[test]

@@ -1,33 +1,48 @@
-use rowan::{GreenNode, NodeOrToken};
+use rowan::GreenNode;
 
 use crate::{
     ast::{
-        detected_string_style_of_node, Array as AstArray, AstNode, DelimiterStyle,
-        Object as AstObject, QuoteStyle, Trivia,
+        detected_string_style_of_node, Array as AstArray, AstNode, Object as AstObject, QuoteStyle,
+        Trivia,
     },
+    high_level::value_ops::build_nested_value,
     high_level::{
         error::HjsonEditError,
-        ops::{container_depth_of_value, ensure_depth_within_limit, receiving_container_depth},
+        ops::{
+            container_depth_of_value, ensure_depth_within_limit,
+            insert::{plan_insert, plan_remove, plan_replace, InsertPosition, RenderedElement},
+            receiving_container_depth,
+        },
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
-        resolve::{resolve_body, ExistingPrefix, ParentResolution, PathResolver},
+        resolve::{array_slot_index, resolve_body, ExistingPrefix, ParentResolution, PathResolver},
         style::detect_document_newline,
-        value::{ends_with_unquoted_string, HjsonValue, RenderConfig},
+        value::{HjsonValue, RenderConfig},
         HjsonDocument, Prefer,
     },
-    syntax::HjsonLanguage,
     syntax::{NewlineKind, RedNode, SyntaxKind},
     GreenElement,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AppendMode {
-    #[default]
-    BeforeFooter,
-    AfterComments,
-}
-
+/// パスで指した値の取得・設定・削除。
+///
+/// # パスの意味
+///
+/// | 記法 | 取得 | 設定 |
+/// |---|---|---|
+/// | `key` | メンバーの値 | 置き換え（無ければ追加） |
+/// | `[n]` | 要素 `n` | 要素 `n` の置き換え（範囲外は [`HjsonEditError::ArrayIndexOutOfBounds`]） |
+/// | `[+n]` | 要素 `n` | `n` の位置へ挿入（`0 <= n <= 長さ`） |
+/// | `[-]` / `[+]` | 末尾の要素 | 末尾へ追加 |
+///
+/// 空のパスは文書全体（設定は置き換え、取得は文書の値）を指す。
+/// 設定で中間のコンテナが無い場合は作成し、途中がスカラーなら
+/// [`HjsonEditError::InvalidTarget`] を返す。同じキーのメンバーが複数ある場合は、
+/// 値の層（後勝ち）に合わせてすべてを同じ値にする。
 pub trait HjsonDocumentObjectEdit {
+    /// パスが指す値を返す。
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError>;
+
+    /// パスが指す値を設定した文書を返す。
     fn set(
         self,
         path: HjsonObjectPath,
@@ -35,6 +50,8 @@ pub trait HjsonDocumentObjectEdit {
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
+
+    /// パスが指す要素を削除した文書を返す。
     fn remove(self, path: HjsonObjectPath) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
@@ -51,24 +68,55 @@ impl HjsonDocumentObjectEdit for HjsonDocument {
         path: HjsonObjectPath,
         value: impl Into<HjsonValue>,
     ) -> Result<Self, HjsonEditError> {
-        let append_mode = self.current_append_mode();
         let value = value.into();
 
         let root = self.syntax_root().clone();
         let string_style = self.current_string_style();
+        let verify = self.current_verify();
+        let touched = receiving_container(&root, &path);
+
         let updated = if path.depth() == 0 {
             replace_root_value(&root, &value, string_style)?
         } else {
-            rebuild_tree_with_set(root.clone(), &path, &value, string_style, append_mode)?
+            rebuild_tree_with_set(root.clone(), &path, &value, string_style)?
         };
+        let document = self.root(updated).note_touched(touched);
 
-        Ok(self.root(updated))
+        if verify {
+            crate::high_level::verify::value_edit(
+                &root,
+                document.syntax_root(),
+                &path,
+                |previous| crate::high_level::value_ops::set_path(previous, &path, value),
+                crate::high_level::verify::EditedRegion::Node,
+            )?;
+        }
+
+        Ok(document)
     }
 
     fn remove(self, path: HjsonObjectPath) -> Result<Self, HjsonEditError> {
         let root = self.syntax_root().clone();
+        let verify = self.current_verify();
+        let touched = path.split_last().map(|(parent, _)| parent);
+
         let updated = rebuild_tree_with_remove(root.clone(), &path)?;
-        Ok(self.root(updated))
+        let document = match touched {
+            Some(container) => self.root(updated).note_touched(container),
+            None => self.root(updated),
+        };
+
+        if verify {
+            crate::high_level::verify::value_edit(
+                &root,
+                document.syntax_root(),
+                &path,
+                |previous| crate::high_level::value_ops::remove_path(previous, &path),
+                crate::high_level::verify::EditedRegion::Slot,
+            )?;
+        }
+
+        Ok(document)
     }
 }
 
@@ -96,7 +144,6 @@ pub(crate) fn rebuild_tree_with_set(
     path: &HjsonObjectPath,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    append_mode: AppendMode,
 ) -> Result<GreenNode, HjsonEditError> {
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
@@ -105,7 +152,7 @@ pub(crate) fn rebuild_tree_with_set(
                 receiving_container_depth(&parent) + container_depth_of_value(value),
             )?;
 
-            let new_parent = apply_set_to_node(&parent, &last, value, string_style, append_mode)?;
+            let new_parent = apply_set_to_node(&parent, &last, value, string_style)?;
 
             if parent.kind() == SyntaxKind::Root {
                 Ok(new_parent)
@@ -127,8 +174,7 @@ pub(crate) fn rebuild_tree_with_set(
             ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
 
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
-            let new_parent =
-                apply_set_to_node(&ancestor, missing, &nested_value, string_style, append_mode)?;
+            let new_parent = apply_set_to_node(&ancestor, missing, &nested_value, string_style)?;
 
             if ancestor.kind() == SyntaxKind::Root {
                 Ok(new_parent)
@@ -154,6 +200,7 @@ pub(crate) fn rebuild_tree_with_remove(
     }
 }
 
+/// Root / Value を降りて、実際に要素を書き換えるコンテナへ適用する。
 fn transform_node(
     node: &RedNode,
     last: &PathSegment,
@@ -162,7 +209,10 @@ fn transform_node(
 ) -> Result<GreenNode, HjsonEditError> {
     match node.kind() {
         SyntaxKind::Root | SyntaxKind::Value => {
-            let child = resolve_body(node)?;
+            let child = resolve_body(node).map_err(|_| HjsonEditError::InvalidTarget {
+                path: HjsonObjectPath::from_segments(vec![last.clone()]),
+                reason: "the path points into a scalar value".to_string(),
+            })?;
             let updated_child = transform_node(&child, last, on_object, on_array)?;
             Ok(node
                 .green()
@@ -170,11 +220,10 @@ fn transform_node(
         }
         SyntaxKind::Object => on_object(node, last),
         SyntaxKind::Array => on_array(node, last),
-        // resolve_parent は Object/Array/Value/Root を返すはずだが、
-        // 万一それ以外のノードが返った場合も安全のためフォールバックとする
-        _ => Err(HjsonEditError::PathNotFound(
-            HjsonObjectPath::from_segments(vec![last.clone()]),
-        )),
+        found => Err(HjsonEditError::UnexpectedStructure {
+            expected: SyntaxKind::Object,
+            found,
+        }),
     }
 }
 
@@ -183,13 +232,12 @@ fn apply_set_to_node(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    append_mode: AppendMode,
 ) -> Result<GreenNode, HjsonEditError> {
     transform_node(
         node,
         last,
-        |node, last| set_object_child(node, last, value, string_style, append_mode),
-        |node, last| set_array_child(node, last, value, string_style, append_mode),
+        |node, last| set_object_child(node, last, value, string_style),
+        |node, last| set_array_child(node, last, value, string_style),
     )
 }
 
@@ -202,7 +250,6 @@ fn set_object_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    append_mode: AppendMode,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
         PathSegment::Key(key) => key,
@@ -216,32 +263,56 @@ fn set_object_child(
 
     let object_ast = AstObject::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, object_ast.detected_string_style());
-    let members = object_ast.members();
-
-    if let Some(member) = members
-        .iter()
-        .find(|member| member.member_key().as_deref() == Some(key.as_str()))
-    {
-        let member_node = member.syntax().clone();
-        let replace_config = RenderConfig {
-            string_style: None,
-            newline: detect_document_newline(parent),
-        };
-        let updated = replace_member_value(&member_node, value, string_style, &replace_config)?;
-        return Ok(parent.green().splice_children(
-            member_node.index()..member_node.index() + 1,
-            vec![updated.into()],
-        ));
-    }
-
-    let insert_pos = match append_mode {
-        AppendMode::BeforeFooter => object_ast.append_member_index_before_footer(),
-        AppendMode::AfterComments => object_ast.append_member_index_after_comments(),
-    };
-    let member_config = RenderConfig {
+    let newline = detect_document_newline(parent);
+    let config = RenderConfig {
         string_style: insert_style,
-        newline: detect_document_newline(parent),
+        newline,
     };
+
+    // 既存のメンバーは値だけを差し替える。キー・区切り・前後のコメントはそのまま残る。
+    // 同じキーが複数ある場合はすべて同じ値にする（値の層では後勝ちのため）。
+    let members = object_ast.members();
+    let existing: Vec<usize> = members
+        .iter()
+        .enumerate()
+        .filter(|(_, member)| member.member_key().as_deref() == Some(key.as_str()))
+        .map(|(index, _)| index)
+        .collect();
+
+    if !existing.is_empty() {
+        let mut green: GreenNode = parent.green().clone().into_owned();
+        for index in existing {
+            let member = &members[index];
+            let value_child = member
+                .value()
+                .ok_or_else(|| HjsonEditError::InvalidTarget {
+                    path: HjsonObjectPath::from_segments(vec![last.clone()]),
+                    reason: "member without a value".to_string(),
+                })?;
+            let updated = render_value_like_node(
+                value_child.syntax(),
+                value,
+                string_style,
+                &RenderConfig {
+                    string_style: None,
+                    newline,
+                },
+            );
+            // 値はメンバーの子なので、メンバー → オブジェクトの順に差し替える
+            let value_index = value_child.syntax().index();
+            let updated_member = member
+                .syntax()
+                .green()
+                .clone()
+                .splice_children(value_index..value_index + 1, vec![updated.into()]);
+            let member_index = member.syntax().index();
+
+            green =
+                green.splice_children(member_index..member_index + 1, vec![updated_member.into()]);
+        }
+
+        return Ok(green);
+    }
 
     let (before_colon_trivia, after_colon_trivia) = if let Some(first_member) = members.first() {
         (
@@ -256,32 +327,16 @@ fn set_object_child(
         .render_member_node(
             key,
             None,
-            &member_config,
+            &config,
             &before_colon_trivia,
             &after_colon_trivia,
         )
         .into();
+    let element = RenderedElement::single(member_node);
 
-    let last_member = members.last();
-    let separator = append_separator(
-        last_member.map(|member| member.trailing_trivia.as_slice()),
-        last_member.is_some_and(|member| node_ends_with_unquoted_string(member.syntax())),
-        detect_document_newline(parent),
-    );
-
-    if object_ast.delimiter_style == DelimiterStyle::Braced {
-        let (insert_at, elements) = plan_braced_append(parent, insert_pos, separator, member_node);
-        return Ok(parent
-            .green()
-            .splice_children(insert_at..insert_at, elements));
-    }
-
-    // ブレースレス: 閉じ区切りが無いので区切りとメンバーを末尾へ追加するだけでよい
-    let mut inserted = separator;
-    inserted.push(member_node);
-    Ok(parent
-        .green()
-        .splice_children(insert_pos..insert_pos, inserted))
+    let (at, elements) = plan_insert(parent, InsertPosition::End, element, newline)
+        .map_err(|error| with_segment(error, last))?;
+    Ok(parent.green().splice_children(at..at, elements))
 }
 
 fn set_array_child(
@@ -289,7 +344,6 @@ fn set_array_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    append_mode: AppendMode,
 ) -> Result<GreenNode, HjsonEditError> {
     let seg = match last {
         PathSegment::Array(seg) => seg,
@@ -303,118 +357,70 @@ fn set_array_child(
 
     let array_ast = AstArray::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, array_ast.detected_string_style());
-    let items = array_ast.items();
-
-    // Normalize Push to InsertAt at the end
-    let push_target = ArrayPathSegment::InsertAt(items.len());
-    let seg = match seg {
-        ArrayPathSegment::Push => &push_target,
-        other => other,
-    };
+    let newline = detect_document_newline(parent);
+    let len = array_ast.slots().len();
 
     match seg {
-        ArrayPathSegment::Index(idx) => {
-            let Some(current_value) = items.get(*idx) else {
-                return Err(HjsonEditError::PathNotFound(
-                    HjsonObjectPath::from_segments(vec![last.clone()]),
-                ));
-            };
-            let value_config = RenderConfig {
-                string_style: insert_style,
-                newline: detect_document_newline(parent),
-            };
-            let updated =
-                render_value_like_node(current_value.syntax(), value, string_style, &value_config);
-            Ok(parent.green().splice_children(
-                current_value.syntax().index()..current_value.syntax().index() + 1,
-                vec![updated.into()],
-            ))
-        }
-        ArrayPathSegment::InsertAt(idx) => {
-            if *idx > items.len() {
-                return Err(HjsonEditError::ArrayIndexOutOfBounds {
-                    index: *idx,
-                    len: items.len(),
-                });
+        ArrayPathSegment::Index(index) => {
+            if *index >= len {
+                return Err(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len });
             }
-            if *idx >= items.len() {
-                let insert_pos = match append_mode {
-                    AppendMode::BeforeFooter => array_ast.append_value_index_before_footer(),
-                    AppendMode::AfterComments => array_ast.append_value_index_after_comments(),
-                };
-                let value_config = RenderConfig {
+            let current = &array_ast.items()[*index];
+            let updated = render_value_like_node(
+                current.syntax(),
+                value,
+                string_style,
+                &RenderConfig {
                     string_style: insert_style,
-                    newline: detect_document_newline(parent),
-                };
-
-                let value_node: GreenElement = value.render_value_node(&value_config).into();
-                let last_item = items.last();
-                let separator = append_separator(
-                    last_item.map(|item| item.trailing_trivia.as_slice()),
-                    last_item.is_some_and(|item| node_ends_with_unquoted_string(item.syntax())),
-                    detect_document_newline(parent),
-                );
-
-                if array_ast.delimiter_style == DelimiterStyle::Braced {
-                    let (insert_at, elements) =
-                        plan_braced_append(parent, insert_pos, separator, value_node);
-                    return Ok(parent
-                        .green()
-                        .splice_children(insert_at..insert_at, elements));
-                }
-
-                // 閉じ区切りを持たない配列（通常は発生しない）は末尾へ追加する
-                let mut inserted = separator;
-                inserted.push(value_node);
-                Ok(parent
-                    .green()
-                    .splice_children(insert_pos..insert_pos, inserted))
+                    newline,
+                },
+            );
+            let rendered = RenderedElement::single(updated.into());
+            let (at, elements) = plan_replace(parent, *index, rendered)
+                .map_err(|error| with_segment(error, last))?;
+            Ok(parent.green().splice_children(at..at + 1, elements))
+        }
+        ArrayPathSegment::InsertAt(index) => {
+            if *index > len {
+                return Err(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len });
+            }
+            let position = if *index == len {
+                InsertPosition::End
             } else {
-                let target_value = &items[*idx];
-                let insert_pos = target_value.insert_before_index();
-                let insert_config = RenderConfig {
-                    string_style: insert_style,
-                    newline: detect_document_newline(parent),
-                };
-                let mut inserted: Vec<crate::GreenElement> = Vec::new();
-                if *idx > 0 {
-                    if let Some(prev_value) = items.get(*idx - 1) {
-                        let needs_separator = prev_value.trailing_trivia.iter().all(|trivia| {
-                            !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
-                        });
-                        if needs_separator {
-                            inserted.push(
-                                SyntaxKind::Comma
-                                    .create_token(SyntaxKind::Comma.canonical_text())
-                                    .into(),
-                            );
-                            inserted.push(
-                                SyntaxKind::Whitespace
-                                    .create_token(SyntaxKind::Whitespace.canonical_text())
-                                    .into(),
-                            );
-                        }
-                    }
-                }
-                let value_node: GreenElement = value.render_value_node(&insert_config).into();
-                let ends_with_unquoted = ends_with_unquoted_string(&value_node);
-                inserted.push(value_node);
-                inserted.push(if ends_with_unquoted {
-                    // 引用符なし文字列の直後のカンマは値に吸収される
-                    newline_element(detect_document_newline(parent))
-                } else {
-                    SyntaxKind::Comma
-                        .create_token(SyntaxKind::Comma.canonical_text())
-                        .into()
-                });
-
-                Ok(parent
-                    .green()
-                    .splice_children(insert_pos..insert_pos, inserted))
-            }
+                InsertPosition::Before(*index)
+            };
+            insert_array_element(parent, position, value, insert_style, newline, last)
         }
-        ArrayPathSegment::Push => unreachable!("Push should have been normalized"),
+        ArrayPathSegment::Push => insert_array_element(
+            parent,
+            InsertPosition::End,
+            value,
+            insert_style,
+            newline,
+            last,
+        ),
     }
+}
+
+fn insert_array_element(
+    parent: &RedNode,
+    position: InsertPosition,
+    value: &HjsonValue,
+    insert_style: Option<QuoteStyle>,
+    newline: NewlineKind,
+    last: &PathSegment,
+) -> Result<GreenNode, HjsonEditError> {
+    let value_node: GreenElement = value
+        .render_value_node(&RenderConfig {
+            string_style: insert_style,
+            newline,
+        })
+        .into();
+    let element = RenderedElement::single(value_node);
+
+    let (at, elements) = plan_insert(parent, position, element, newline)
+        .map_err(|error| with_segment(error, last))?;
+    Ok(parent.green().splice_children(at..at, elements))
 }
 
 fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -427,22 +433,32 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         }
     };
 
-    let object_ast = AstObject::cast(parent.clone())?;
-    let members = object_ast.members();
-    let member_pos = members
+    // 同じキーが複数ある場合はすべて削除する（値の層では 1 つのキーになるため）
+    let object = AstObject::cast(parent.clone())?;
+    let members = object.members();
+    if !members
         .iter()
-        .position(|member| member.member_key().as_deref() == Some(key.as_str()));
-
-    let Some(member_pos) = member_pos else {
+        .any(|member| member.member_key().as_deref() == Some(key.as_str()))
+    {
         return Err(HjsonEditError::PathNotFound(
             HjsonObjectPath::from_segments(vec![last.clone()]),
         ));
-    };
+    }
 
-    let member = &members[member_pos];
-    Ok(parent
-        .green()
-        .splice_children(member.span_range(), Vec::new()))
+    let mut ranges: Vec<_> = members
+        .iter()
+        .zip(object.slots())
+        .filter(|(member, _)| member.member_key().as_deref() == Some(key.as_str()))
+        .map(|(_, slot)| slot.span())
+        .collect();
+    ranges.sort_by_key(|range| range.start);
+
+    let mut green: GreenNode = parent.green().clone().into_owned();
+    for range in ranges.into_iter().rev() {
+        green = green.splice_children(range, Vec::new());
+    }
+
+    Ok(green)
 }
 
 fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode, HjsonEditError> {
@@ -455,33 +471,36 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
         }
     };
 
-    let array_ast = AstArray::cast(parent.clone())?;
-    let items = array_ast.items();
-    let idx = match seg {
-        ArrayPathSegment::Index(idx) | ArrayPathSegment::InsertAt(idx) => *idx,
-        ArrayPathSegment::Push => items.len().saturating_sub(1),
-    };
-    let item = items.get(idx).ok_or_else(|| {
+    let index = array_slot_index(parent, seg).ok_or_else(|| {
         HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![last.clone()]))
     })?;
+    let range = plan_remove(parent, index).map_err(|error| with_segment(error, last))?;
 
-    Ok(parent
-        .green()
-        .splice_children(item.span_range(), Vec::new()))
+    Ok(parent.green().splice_children(range, Vec::new()))
 }
 
-fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
-    let mut current = value;
-    for segment in path.iter().rev() {
-        current = match segment {
-            PathSegment::Key(key) => HjsonValue::Object(vec![(key.clone(), current)]),
-            PathSegment::Array(ArrayPathSegment::Index(_))
-            | PathSegment::Array(ArrayPathSegment::InsertAt(_))
-            | PathSegment::Array(ArrayPathSegment::Push) => HjsonValue::Array(vec![current]),
-        };
+/// 挿入層が返す位置エラーに、対象のセグメントを補う。
+fn with_segment(error: HjsonEditError, last: &PathSegment) -> HjsonEditError {
+    match error {
+        HjsonEditError::InvalidTarget { reason, .. } => HjsonEditError::InvalidTarget {
+            path: HjsonObjectPath::from_segments(vec![last.clone()]),
+            reason,
+        },
+        other => other,
     }
+}
 
-    current
+/// `set` が実際に書き込むコンテナ（実在する最深の祖先）のパス。
+fn receiving_container(root: &RedNode, path: &HjsonObjectPath) -> HjsonObjectPath {
+    let Some((parent, _)) = path.split_last() else {
+        return path.clone();
+    };
+
+    let prefix = PathResolver::new(root.clone()).resolve_existing_prefix(&parent);
+    parent
+        .split_at(prefix.consumed)
+        .map(|(prefix, _)| prefix)
+        .unwrap_or_else(|| HjsonObjectPath::from_segments(Vec::new()))
 }
 
 fn render_value_like_node(
@@ -496,75 +515,6 @@ fn render_value_like_node(
         string_style: Some(quote_style),
         newline: config.newline,
     })
-}
-
-/// 赤ノードの要素（トリビアを値の前後へ移すために使う）。
-type RedElement = rowan::SyntaxElement<HjsonLanguage>;
-
-fn replace_member_value(
-    member: &RedNode,
-    value: &HjsonValue,
-    string_style: Prefer<QuoteStyle>,
-    config: &RenderConfig,
-) -> Result<GreenNode, HjsonEditError> {
-    let value_child = member
-        .children()
-        .find(|child| child.kind() == SyntaxKind::Value)
-        .ok_or(HjsonEditError::ParentNotFound)?;
-    let updated_value = render_value_like_node(&value_child, value, string_style, config);
-    let value_index = value_child.index();
-
-    let is_empty_value = value_child.children_with_tokens().all(|child| match child {
-        NodeOrToken::Node(node) => node.kind().is_trivia(),
-        NodeOrToken::Token(token) => token.kind().is_trivia(),
-    });
-
-    if is_empty_value {
-        // 値が空のとき（`key:` や `key: //c`）は、値の位置が行コメントの直後になる。
-        // そのまま差し込むとコメントの内側に入って値が設定されないため、
-        // コロンの直後に置き、トリビアは値の後ろへ回す。
-        let elements: Vec<RedElement> = member.children_with_tokens().collect();
-        let colon_index = elements
-            .iter()
-            .position(|element| {
-                matches!(element, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Colon)
-            })
-            .ok_or(HjsonEditError::ParentNotFound)?;
-        let between = &elements[colon_index + 1..value_index];
-        let has_comment = between.iter().any(|element| {
-            matches!(element, NodeOrToken::Node(node) if node.kind() == SyntaxKind::Comment)
-                || matches!(element, NodeOrToken::Token(token) if token.kind().is_comment())
-        });
-
-        if has_comment {
-            let to_green = |element: &RedElement| -> GreenElement {
-                match element {
-                    NodeOrToken::Node(node) => node.green().clone().into(),
-                    NodeOrToken::Token(token) => token.kind().create_token(token.text()).into(),
-                }
-            };
-
-            let mut children: Vec<GreenElement> =
-                elements[..=colon_index].iter().map(to_green).collect();
-            let mut rest = between.iter().peekable();
-            // コロン直後の空白は値の前の区切りとして残す
-            if let Some(NodeOrToken::Token(token)) = rest.peek() {
-                if token.kind() == SyntaxKind::Whitespace {
-                    children.push(to_green(rest.next().unwrap()));
-                }
-            }
-            children.push(updated_value.into());
-            // 行コメントが値に吸収されないよう区切りを入れる
-            children.push(SyntaxKind::Whitespace.create_token(" ").into());
-            children.extend(rest.map(to_green));
-            children.extend(elements[value_index + 1..].iter().map(to_green));
-            return Ok(GreenNode::new(SyntaxKind::Member.into(), children));
-        }
-    }
-
-    Ok(member
-        .green()
-        .splice_children(value_index..value_index + 1, vec![updated_value.into()]))
 }
 
 fn resolve_quote_style(preference: Prefer<QuoteStyle>, detected: Option<QuoteStyle>) -> QuoteStyle {
@@ -584,104 +534,11 @@ fn resolve_insert_style(
     }
 }
 
-/// 波括弧コンテナの末尾へ要素を追加する挿入位置と挿入する要素を返す。
-///
-/// - 閉じ区切りが独立した行にあるときは、その行頭の改行の直前に `[改行, 要素]` を入れ、
-///   閉じ区切りの行はそのまま残す。追加要素のインデントは整形層に任せる。
-/// - 閉じ区切りが同一行にあるときは、要素が区切り文字で終端できるなら同じ行へ `separator`
-///   と共に置き、終端できない（引用符なし文字列で終わる）なら前後に改行を補って独立した行にする。
-pub(super) fn plan_braced_append(
-    parent: &RedNode,
-    insert_pos: usize,
-    separator: Vec<GreenElement>,
-    value: GreenElement,
-) -> (usize, Vec<GreenElement>) {
-    let children: Vec<_> = parent.children_with_tokens().collect();
-
-    // 閉じ区切りの直前にある空白・改行・コメントの先頭
-    let mut trivia_start = insert_pos;
-    while trivia_start > 0 {
-        let is_trivia = match &children[trivia_start - 1] {
-            NodeOrToken::Token(token) => token.kind().is_trivia(),
-            NodeOrToken::Node(node) => node.kind() == SyntaxKind::Comment,
-        };
-        if !is_trivia {
-            break;
-        }
-        trivia_start -= 1;
-    }
-
-    // 閉じ区切りが独立した行にあるなら、その行頭の改行
-    let line_break = (trivia_start..insert_pos)
-        .rev()
-        .find(|index| match &children[*index] {
-            NodeOrToken::Token(token) => token.kind() == SyntaxKind::Newline,
-            NodeOrToken::Node(_) => false,
-        });
-
-    if let Some(line_break) = line_break {
-        let kind = match &children[line_break] {
-            NodeOrToken::Token(token) => NewlineKind::from_text(token.text()).unwrap_or_default(),
-            _ => NewlineKind::default(),
-        };
-        return (line_break, vec![newline_element(kind), value]);
-    }
-
-    if ends_with_unquoted_string(&value) {
-        let kind = detect_document_newline(parent);
-        return (
-            trivia_start,
-            vec![newline_element(kind), value, newline_element(kind)],
-        );
-    }
-
-    let mut elements = separator;
-    elements.push(value);
-    (insert_pos, elements)
-}
-
-/// 末尾へ要素を追加するときの区切りを返す。
-///
-/// 直前の要素が無ければ区切りは不要。既にカンマか改行で区切られている場合と、
-/// 直前の値が引用符なし文字列で終わる場合（カンマが文字列に吸収される）は改行を返す。
-pub(super) fn append_separator(
-    last_trailing_trivia: Option<&[Trivia]>,
-    last_ends_with_unquoted_string: bool,
-    newline: NewlineKind,
-) -> Vec<GreenElement> {
-    let Some(trailing_trivia) = last_trailing_trivia else {
-        return Vec::new();
-    };
-    let already_separated = trailing_trivia
-        .iter()
-        .any(|trivia| matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-    if already_separated || last_ends_with_unquoted_string {
-        return vec![newline_element(newline)];
-    }
-    vec![
-        SyntaxKind::Comma
-            .create_token(SyntaxKind::Comma.canonical_text())
-            .into(),
-        SyntaxKind::Whitespace
-            .create_token(SyntaxKind::Whitespace.canonical_text())
-            .into(),
-    ]
-}
-
-fn newline_element(kind: NewlineKind) -> GreenElement {
-    SyntaxKind::Newline.create_token(kind.as_str()).into()
-}
-
-/// メンバーや配列項目の値の末尾が引用符なし文字列かどうか。
-pub(super) fn node_ends_with_unquoted_string(node: &RedNode) -> bool {
-    node.last_token()
-        .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::QuoteStyle;
+    use crate::high_level::value_ops::build_nested_value;
 
     #[test]
     fn test_resolve_quote_style() {
