@@ -10,11 +10,12 @@ use crate::{
         ops::{container_depth_of_value, ensure_depth_within_limit, receiving_container_depth},
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         resolve::{resolve_body, ExistingPrefix, ParentResolution, PathResolver},
-        value::{HjsonValue, RenderConfig},
+        style::detect_document_newline,
+        value::{ends_with_unquoted_string, HjsonValue, RenderConfig},
         HjsonDocument, Prefer,
     },
     syntax::HjsonLanguage,
-    syntax::{RedNode, SyntaxKind},
+    syntax::{NewlineKind, RedNode, SyntaxKind},
     GreenElement,
 };
 
@@ -79,7 +80,10 @@ pub(crate) fn replace_root_value(
     ensure_depth_within_limit(container_depth_of_value(value))?;
 
     let child = resolve_body(root)?;
-    let config = RenderConfig { string_style: None };
+    let config = RenderConfig {
+        string_style: None,
+        newline: detect_document_newline(&child),
+    };
     let updated_child = render_value_like_node(&child, value, string_style, &config);
 
     Ok(root
@@ -111,9 +115,6 @@ pub(crate) fn rebuild_tree_with_set(
         }
         Err(HjsonEditError::PathNotFound(_)) => {
             let ExistingPrefix { ancestor, consumed } = resolver.resolve_existing_prefix(path);
-            if consumed == 0 {
-                return Err(HjsonEditError::PathNotFound(path.clone()));
-            }
 
             let missing = &path.segments()[consumed];
 
@@ -222,7 +223,10 @@ fn set_object_child(
         .find(|member| member.member_key().as_deref() == Some(key.as_str()))
     {
         let member_node = member.syntax().clone();
-        let replace_config = RenderConfig { string_style: None };
+        let replace_config = RenderConfig {
+            string_style: None,
+            newline: detect_document_newline(parent),
+        };
         let updated = replace_member_value(&member_node, value, string_style, &replace_config)?;
         return Ok(parent.green().splice_children(
             member_node.index()..member_node.index() + 1,
@@ -236,9 +240,9 @@ fn set_object_child(
     };
     let member_config = RenderConfig {
         string_style: insert_style,
+        newline: detect_document_newline(parent),
     };
 
-    let is_empty = members.is_empty();
     let (before_colon_trivia, after_colon_trivia) = if let Some(first_member) = members.first() {
         (
             first_member.before_colon_trivia.clone(),
@@ -247,90 +251,37 @@ fn set_object_child(
     } else {
         (vec![], vec![Trivia::Whitespace(" ".to_string())])
     };
-    if is_empty {
-        let range_start = resolve_insert_range_start(parent, insert_pos);
-        let inserted = vec![value
-            .render_member_node(
-                key,
-                None,
-                &member_config,
-                &before_colon_trivia,
-                &after_colon_trivia,
-            )
-            .into()];
-        return Ok(parent
-            .green()
-            .splice_children(range_start..insert_pos, inserted));
-    }
 
-    let mut inserted: Vec<crate::GreenElement> = Vec::new();
-    if let Some(last_member) = members.last() {
-        let needs_separator = last_member
-            .trailing_trivia
-            .iter()
-            .all(|trivia| !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
-        if needs_separator {
-            inserted.push(
-                SyntaxKind::Comma
-                    .create_token(SyntaxKind::Comma.canonical_text())
-                    .into(),
-            );
-            inserted.push(
-                SyntaxKind::Whitespace
-                    .create_token(SyntaxKind::Whitespace.canonical_text())
-                    .into(),
-            );
-        } else {
-            let kind = last_member
-                .trailing_trivia
-                .iter()
-                .find_map(|t| t.newline_kind())
-                .unwrap_or_default();
-            inserted.push(SyntaxKind::Newline.create_token(kind.as_str()).into());
-        }
-    }
-    inserted.push(
-        value
-            .render_member_node(
-                key,
-                None,
-                &member_config,
-                &before_colon_trivia,
-                &after_colon_trivia,
-            )
-            .into(),
+    let member_node: GreenElement = value
+        .render_member_node(
+            key,
+            None,
+            &member_config,
+            &before_colon_trivia,
+            &after_colon_trivia,
+        )
+        .into();
+
+    let last_member = members.last();
+    let separator = append_separator(
+        last_member.map(|member| member.trailing_trivia.as_slice()),
+        last_member.is_some_and(|member| node_ends_with_unquoted_string(member.syntax())),
+        detect_document_newline(parent),
     );
 
-    let splice_start = if object_ast.delimiter_style == DelimiterStyle::Braced {
-        let mut removable_trailing = 0usize;
-        let mut found_non_trivial_in_container = false;
-        for triv in object_ast.trailing_trivia.iter().rev() {
-            if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
-                removable_trailing += 1;
-            } else {
-                found_non_trivial_in_container = true;
-                break;
-            }
-        }
-        if !found_non_trivial_in_container {
-            if let Some(last_member) = members.last() {
-                for triv in last_member.trailing_trivia.iter().rev() {
-                    if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
-                        removable_trailing += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-        insert_pos.saturating_sub(removable_trailing)
-    } else {
-        insert_pos
-    };
+    if object_ast.delimiter_style == DelimiterStyle::Braced {
+        let (insert_at, elements) = plan_braced_append(parent, insert_pos, separator, member_node);
+        return Ok(parent
+            .green()
+            .splice_children(insert_at..insert_at, elements));
+    }
 
+    // ブレースレス: 閉じ区切りが無いので区切りとメンバーを末尾へ追加するだけでよい
+    let mut inserted = separator;
+    inserted.push(member_node);
     Ok(parent
         .green()
-        .splice_children(splice_start..insert_pos, inserted))
+        .splice_children(insert_pos..insert_pos, inserted))
 }
 
 fn set_array_child(
@@ -370,6 +321,7 @@ fn set_array_child(
             };
             let value_config = RenderConfig {
                 string_style: insert_style,
+                newline: detect_document_newline(parent),
             };
             let updated =
                 render_value_like_node(current_value.syntax(), value, string_style, &value_config);
@@ -392,79 +344,37 @@ fn set_array_child(
                 };
                 let value_config = RenderConfig {
                     string_style: insert_style,
+                    newline: detect_document_newline(parent),
                 };
 
-                let mut inserted = Vec::new();
-                if !items.is_empty() {
-                    if let Some(last_value) = items.last() {
-                        let needs_separator = last_value.trailing_trivia.iter().all(|trivia| {
-                            !matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. })
-                        });
-                        if needs_separator {
-                            inserted.push(
-                                SyntaxKind::Comma
-                                    .create_token(SyntaxKind::Comma.canonical_text())
-                                    .into(),
-                            );
-                            inserted.push(
-                                SyntaxKind::Whitespace
-                                    .create_token(SyntaxKind::Whitespace.canonical_text())
-                                    .into(),
-                            );
-                        } else {
-                            let kind = last_value
-                                .trailing_trivia
-                                .iter()
-                                .find_map(|t| t.newline_kind())
-                                .unwrap_or_default();
-                            inserted.push(SyntaxKind::Newline.create_token(kind.as_str()).into());
-                        }
-                    }
-                }
-                inserted.push(value.render_value_node(&value_config).into());
+                let value_node: GreenElement = value.render_value_node(&value_config).into();
+                let last_item = items.last();
+                let separator = append_separator(
+                    last_item.map(|item| item.trailing_trivia.as_slice()),
+                    last_item.is_some_and(|item| node_ends_with_unquoted_string(item.syntax())),
+                    detect_document_newline(parent),
+                );
 
-                if items.is_empty() {
-                    let range_start = resolve_insert_range_start(parent, insert_pos);
+                if array_ast.delimiter_style == DelimiterStyle::Braced {
+                    let (insert_at, elements) =
+                        plan_braced_append(parent, insert_pos, separator, value_node);
                     return Ok(parent
                         .green()
-                        .splice_children(range_start..insert_pos, inserted));
+                        .splice_children(insert_at..insert_at, elements));
                 }
 
-                let splice_start = if array_ast.delimiter_style == DelimiterStyle::Braced {
-                    let mut removable_trailing = 0usize;
-                    let mut found_non_trivial_in_container = false;
-                    for triv in array_ast.trailing_trivia.iter().rev() {
-                        if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
-                            removable_trailing += 1;
-                        } else {
-                            found_non_trivial_in_container = true;
-                            break;
-                        }
-                    }
-                    if !found_non_trivial_in_container {
-                        if let Some(last_item) = items.last() {
-                            for triv in last_item.trailing_trivia.iter().rev() {
-                                if matches!(triv, Trivia::Whitespace(_) | Trivia::Newline { .. }) {
-                                    removable_trailing += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    insert_pos.saturating_sub(removable_trailing)
-                } else {
-                    insert_pos
-                };
-
+                // 閉じ区切りを持たない配列（通常は発生しない）は末尾へ追加する
+                let mut inserted = separator;
+                inserted.push(value_node);
                 Ok(parent
                     .green()
-                    .splice_children(splice_start..insert_pos, inserted))
+                    .splice_children(insert_pos..insert_pos, inserted))
             } else {
                 let target_value = &items[*idx];
                 let insert_pos = target_value.insert_before_index();
                 let insert_config = RenderConfig {
                     string_style: insert_style,
+                    newline: detect_document_newline(parent),
                 };
                 let mut inserted: Vec<crate::GreenElement> = Vec::new();
                 if *idx > 0 {
@@ -486,12 +396,17 @@ fn set_array_child(
                         }
                     }
                 }
-                inserted.push(value.render_value_node(&insert_config).into());
-                inserted.push(
+                let value_node: GreenElement = value.render_value_node(&insert_config).into();
+                let ends_with_unquoted = ends_with_unquoted_string(&value_node);
+                inserted.push(value_node);
+                inserted.push(if ends_with_unquoted {
+                    // 引用符なし文字列の直後のカンマは値に吸収される
+                    newline_element(detect_document_newline(parent))
+                } else {
                     SyntaxKind::Comma
                         .create_token(SyntaxKind::Comma.canonical_text())
-                        .into(),
-                );
+                        .into()
+                });
 
                 Ok(parent
                     .green()
@@ -573,12 +488,13 @@ fn render_value_like_node(
     node: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
-    _config: &RenderConfig,
+    config: &RenderConfig,
 ) -> GreenNode {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
     value.render_value_node(&RenderConfig {
         string_style: Some(quote_style),
+        newline: config.newline,
     })
 }
 
@@ -668,22 +584,98 @@ fn resolve_insert_style(
     }
 }
 
-fn resolve_insert_range_start(parent: &RedNode, insert_pos: usize) -> usize {
-    let mut start = insert_pos;
-    while start > 0 {
-        let Some(elem) = parent.children_with_tokens().nth(start - 1) else {
-            break;
+/// 波括弧コンテナの末尾へ要素を追加する挿入位置と挿入する要素を返す。
+///
+/// - 閉じ区切りが独立した行にあるときは、その行頭の改行の直前に `[改行, 要素]` を入れ、
+///   閉じ区切りの行はそのまま残す。追加要素のインデントは整形層に任せる。
+/// - 閉じ区切りが同一行にあるときは、要素が区切り文字で終端できるなら同じ行へ `separator`
+///   と共に置き、終端できない（引用符なし文字列で終わる）なら前後に改行を補って独立した行にする。
+pub(super) fn plan_braced_append(
+    parent: &RedNode,
+    insert_pos: usize,
+    separator: Vec<GreenElement>,
+    value: GreenElement,
+) -> (usize, Vec<GreenElement>) {
+    let children: Vec<_> = parent.children_with_tokens().collect();
+
+    // 閉じ区切りの直前にある空白・改行・コメントの先頭
+    let mut trivia_start = insert_pos;
+    while trivia_start > 0 {
+        let is_trivia = match &children[trivia_start - 1] {
+            NodeOrToken::Token(token) => token.kind().is_trivia(),
+            NodeOrToken::Node(node) => node.kind() == SyntaxKind::Comment,
         };
-        match &elem {
-            NodeOrToken::Token(token)
-                if matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline) =>
-            {
-                start -= 1;
-            }
-            _ => break,
+        if !is_trivia {
+            break;
         }
+        trivia_start -= 1;
     }
-    start
+
+    // 閉じ区切りが独立した行にあるなら、その行頭の改行
+    let line_break = (trivia_start..insert_pos)
+        .rev()
+        .find(|index| match &children[*index] {
+            NodeOrToken::Token(token) => token.kind() == SyntaxKind::Newline,
+            NodeOrToken::Node(_) => false,
+        });
+
+    if let Some(line_break) = line_break {
+        let kind = match &children[line_break] {
+            NodeOrToken::Token(token) => NewlineKind::from_text(token.text()).unwrap_or_default(),
+            _ => NewlineKind::default(),
+        };
+        return (line_break, vec![newline_element(kind), value]);
+    }
+
+    if ends_with_unquoted_string(&value) {
+        let kind = detect_document_newline(parent);
+        return (
+            trivia_start,
+            vec![newline_element(kind), value, newline_element(kind)],
+        );
+    }
+
+    let mut elements = separator;
+    elements.push(value);
+    (insert_pos, elements)
+}
+
+/// 末尾へ要素を追加するときの区切りを返す。
+///
+/// 直前の要素が無ければ区切りは不要。既にカンマか改行で区切られている場合と、
+/// 直前の値が引用符なし文字列で終わる場合（カンマが文字列に吸収される）は改行を返す。
+pub(super) fn append_separator(
+    last_trailing_trivia: Option<&[Trivia]>,
+    last_ends_with_unquoted_string: bool,
+    newline: NewlineKind,
+) -> Vec<GreenElement> {
+    let Some(trailing_trivia) = last_trailing_trivia else {
+        return Vec::new();
+    };
+    let already_separated = trailing_trivia
+        .iter()
+        .any(|trivia| matches!(trivia, Trivia::Comma(_) | Trivia::Newline { .. }));
+    if already_separated || last_ends_with_unquoted_string {
+        return vec![newline_element(newline)];
+    }
+    vec![
+        SyntaxKind::Comma
+            .create_token(SyntaxKind::Comma.canonical_text())
+            .into(),
+        SyntaxKind::Whitespace
+            .create_token(SyntaxKind::Whitespace.canonical_text())
+            .into(),
+    ]
+}
+
+fn newline_element(kind: NewlineKind) -> GreenElement {
+    SyntaxKind::Newline.create_token(kind.as_str()).into()
+}
+
+/// メンバーや配列項目の値の末尾が引用符なし文字列かどうか。
+pub(super) fn node_ends_with_unquoted_string(node: &RedNode) -> bool {
+    node.last_token()
+        .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString)
 }
 
 #[cfg(test)]

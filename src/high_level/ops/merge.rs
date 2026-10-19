@@ -1,14 +1,20 @@
 use rowan::GreenNode;
 
-use crate::ast::{AstNode, Member, Object as AstObject, QuoteStyle, ValueContent};
+use crate::ast::{AstNode, DelimiterStyle, Member, Object as AstObject, QuoteStyle, ValueContent};
 use crate::high_level::{
     error::HjsonEditError,
-    ops::{ensure_depth_within_limit, receiving_container_depth, relative_container_depth},
+    ops::{
+        ensure_depth_within_limit,
+        object::{append_separator, node_ends_with_unquoted_string, plan_braced_append},
+        receiving_container_depth, relative_container_depth,
+    },
     path::{HjsonObjectPath, PathSegment},
     resolve::{resolve_body, ExistingPrefix, PathResolver},
+    style::detect_document_newline,
     HjsonDocument,
 };
 use crate::syntax::{RedNode, SyntaxKind};
+use crate::GreenElement;
 
 /// 別ドキュメントのルートオブジェクトを、クォートスタイルを保持したまま
 /// 指定パスへマージするためのトレイト。
@@ -221,22 +227,35 @@ fn merge_objects(
                 ));
             }
         };
-        let obj_ast = AstObject::cast(obj_node)?;
+        let obj_ast = AstObject::cast(obj_node.clone())?;
+        let members = obj_ast.members();
         let src = Member::cast(src_member.clone())?;
         let key = src
             .member_key()
             .ok_or_else(|| HjsonEditError::MergeConflict("cannot read member key".to_string()))?;
 
-        if let Some(existing) = obj_ast
-            .members()
-            .into_iter()
+        if let Some(existing) = members
+            .iter()
             .find(|member| member.member_key().as_deref() == Some(&key))
         {
-            current = merge_existing_member(&current, &existing, &src)?;
+            current = merge_existing_member(&current, existing, &src)?;
         } else {
             let append_idx = obj_ast.append_member_index_before_footer();
-            current =
-                current.splice_children(append_idx..append_idx, vec![src_member.green().into()]);
+            let member_node: GreenElement = src_member.green().clone().into();
+            if obj_ast.delimiter_style == DelimiterStyle::Braced {
+                let last_member = members.last();
+                let separator = append_separator(
+                    last_member.map(|member| member.trailing_trivia.as_slice()),
+                    last_member
+                        .is_some_and(|member| node_ends_with_unquoted_string(member.syntax())),
+                    detect_document_newline(&obj_node),
+                );
+                let (insert_at, elements) =
+                    plan_braced_append(&obj_node, append_idx, separator, member_node);
+                current = current.splice_children(insert_at..insert_at, elements);
+            } else {
+                current = current.splice_children(append_idx..append_idx, vec![member_node]);
+            }
         }
     }
 

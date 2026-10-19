@@ -2,7 +2,7 @@ use rowan::{GreenNode, NodeOrToken};
 
 use crate::ast::{AstNode, Key, QuoteStyle, Trivia};
 use crate::high_level::error::HjsonEditError;
-use crate::syntax::{GreenElement, SyntaxKind};
+use crate::syntax::{GreenElement, NewlineKind, SyntaxKind};
 use crate::{RedNode, RedToken};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +19,8 @@ pub enum HjsonValue {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderConfig {
     pub string_style: Option<QuoteStyle>,
+    /// 入れ子の値を1行で描けないときに使う改行コード。
+    pub newline: NewlineKind,
 }
 
 impl From<&str> for HjsonValue {
@@ -137,9 +139,11 @@ impl HjsonValue {
                 for (idx, item) in items.iter().enumerate() {
                     children.push(item.render_value_node(config).into());
                     if idx + 1 != items.len() {
-                        children.push(SyntaxKind::Comma.create_token(",").into());
+                        let separator = render_separator(children.last().unwrap(), config);
+                        children.push(separator);
                     }
                 }
+                push_terminating_newline(&mut children, config);
                 children.push(SyntaxKind::RBracket.create_token("]").into());
                 vec![GreenNode::new(SyntaxKind::Array.into(), children).into()]
             }
@@ -148,13 +152,55 @@ impl HjsonValue {
                 for (idx, (key, value)) in entries.iter().enumerate() {
                     children.push(value.render_member_node(key, None, config, &[], &[]).into());
                     if idx + 1 != entries.len() {
-                        children.push(SyntaxKind::Comma.create_token(",").into());
+                        let separator = render_separator(children.last().unwrap(), config);
+                        children.push(separator);
                     }
                 }
+                push_terminating_newline(&mut children, config);
                 children.push(SyntaxKind::RBrace.create_token("}").into());
                 vec![GreenNode::new(SyntaxKind::Object.into(), children).into()]
             }
         }
+    }
+}
+
+/// 要素の末尾が引用符なし文字列かどうか。
+///
+/// 引用符なし文字列は行末でしか終端しないため、直後に `,` や `}`/`]` を置くと
+/// それらが値に吸収されて文書が壊れる。挿入位置と改行の判断に使う。
+pub(crate) fn ends_with_unquoted_string(element: &GreenElement) -> bool {
+    match element {
+        NodeOrToken::Token(token) => token.kind() == SyntaxKind::UnquotedString.into(),
+        NodeOrToken::Node(node) => RedNode::new_root(node.clone())
+            .last_token()
+            .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString),
+    }
+}
+
+/// 描画した要素の後ろに置く区切り（カンマまたは改行）を返す。
+///
+/// 直前の要素が引用符なし文字列で終わる場合、カンマはその文字列に吸収されるため改行を使う。
+fn render_separator(element: &GreenElement, config: &RenderConfig) -> GreenElement {
+    if ends_with_unquoted_string(element) {
+        newline_element(config)
+    } else {
+        SyntaxKind::Comma.create_token(",").into()
+    }
+}
+
+fn newline_element(config: &RenderConfig) -> GreenElement {
+    SyntaxKind::Newline
+        .create_token(config.newline.as_str())
+        .into()
+}
+
+/// 閉じ区切りの直前に引用符なし文字列が来るとき、値の終端として改行を補う。
+///
+/// オブジェクト/配列を1行で描画する際、最後の要素が引用符なし文字列だと
+/// 閉じ区切りがその文字列に吸収されるため、区切りの前で行を終わらせる。
+fn push_terminating_newline(children: &mut Vec<GreenElement>, config: &RenderConfig) {
+    if children.last().is_some_and(ends_with_unquoted_string) {
+        children.push(newline_element(config));
     }
 }
 
@@ -352,6 +398,7 @@ mod tests {
     fn test_render_body_string_double_quoted_style() {
         let config = RenderConfig {
             string_style: Some(QuoteStyle::DoubleQuoted),
+            ..RenderConfig::default()
         };
         let s = HjsonValue::String("foo".to_string());
         let body = s.render_body(&config);
@@ -362,6 +409,7 @@ mod tests {
     fn test_render_body_string_block_style() {
         let config = RenderConfig {
             string_style: Some(QuoteStyle::Block),
+            ..RenderConfig::default()
         };
         let s = HjsonValue::String("foo".to_string());
         let body = s.render_body(&config);
