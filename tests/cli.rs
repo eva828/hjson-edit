@@ -115,6 +115,203 @@ fn cli_deeply_nested_input_fails_without_aborting() {
     }
 }
 
+/// 編集結果のテキスト（標準出力）。
+fn edit_stdout(args: &[&str], input: &str) -> String {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{input}").unwrap();
+    file.flush().unwrap();
+
+    let output = Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(args)
+        .arg(file.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// テキストが `parse` で読めること。
+fn assert_parses(text: &str) {
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(text.as_bytes()).unwrap();
+    file.flush().unwrap();
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("parse")
+        .arg(file.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn cli_edit_appends_string_and_formats_changed_container() {
+    let stdout = edit_stdout(&["edit", "--set", "b", "hello"], "{a: 1}\n");
+    assert_eq!(stdout, "{\n  a: 1\n  b: hello\n}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_readme_example_formats_appended_item() {
+    let input = "{\n  server: {\n    host: old\n  }\n  items: [\n    a\n  ]\n}\n";
+    let stdout = edit_stdout(
+        &[
+            "edit",
+            "--set",
+            "server.host",
+            "localhost",
+            "--set",
+            "items[-]",
+            "newValue",
+        ],
+        input,
+    );
+    assert_eq!(
+        stdout,
+        "{\n  server: {\n    host: localhost\n  }\n  items: [\n    a\n    newValue\n  ]\n}\n"
+    );
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_keeps_detected_indent_style() {
+    let stdout = edit_stdout(&["edit", "--set", "b", "hello"], "{\n    a: 1\n}\n");
+    assert_eq!(stdout, "{\n    a: 1\n    b: hello\n}\n");
+}
+
+#[test]
+fn cli_edit_honors_indent_width() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "b", "hello", "--indent-width", "4"],
+        "{a: 1}\n",
+    );
+    assert_eq!(stdout, "{\n    a: 1\n    b: hello\n}\n");
+}
+
+#[test]
+fn cli_edit_in_place_writes_formatted_output() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "{{a: 1}}").unwrap();
+    temp_file.flush().unwrap();
+    let path = temp_file.path().to_str().unwrap().to_string();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--in-place", "--set", "b", "hello"])
+        .arg(&path)
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(content, "{\n  a: 1\n  b: hello\n}\n");
+    assert_parses(&content);
+}
+
+#[test]
+fn cli_edit_creates_missing_nested_path() {
+    let stdout = edit_stdout(&["edit", "--set", "a.b", "1"], "{}\n");
+    assert_eq!(stdout, "{\n  a: {\n    b: 1\n  }\n}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_formats_the_container_that_received_the_insertion() {
+    // 中間コンテナを生成する場合は、実在する最深の祖先（ここでは a）を整形する
+    let stdout = edit_stdout(&["edit", "--set", "a.b.c", "hello"], "{\n  a: {\n  }\n}\n");
+    assert_eq!(
+        stdout,
+        "{\n  a: {\n    b: {\n      c: hello\n    }\n  }\n}\n"
+    );
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_string_style_applies_to_subsequent_sets() {
+    let stdout = edit_stdout(
+        &["edit", "--string-style", "double", "--set", "b", "hello"],
+        "{a: 1}\n",
+    );
+    assert_eq!(stdout, "{\n  a: 1\n  b: \"hello\"\n}\n");
+
+    let stdout = edit_stdout(
+        &[
+            "edit",
+            "--string-style",
+            "unquoted",
+            "--set",
+            "b",
+            "hello world",
+        ],
+        "{a: 1}\n",
+    );
+    assert_eq!(stdout, "{\n  a: 1\n  b: hello world\n}\n");
+}
+
+#[test]
+fn cli_edit_inline_string_style_overrides_string_style() {
+    let stdout = edit_stdout(
+        &["edit", "--string-style", "unquoted", "--set", "b", "\"x\""],
+        "{a: 1}\n",
+    );
+    assert_eq!(stdout, "{\n  a: 1\n  b: \"x\"\n}\n");
+}
+
+#[test]
+fn cli_edit_honors_newline_option() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "b", "hello", "--newline", "crlf"],
+        "{a: 1}\n",
+    );
+    assert_eq!(stdout, "{\r\n  a: 1\r\n  b: hello\r\n}\r\n");
+}
+
+#[test]
+fn cli_edit_honors_indent_style_spaces_with_detected_width() {
+    // --indent-style spaces のみの指定では、文書から検出した幅を保つ
+    let stdout = edit_stdout(
+        &["edit", "--set", "b", "hello", "--indent-style", "spaces"],
+        "{\n    a: 1\n}\n",
+    );
+    assert_eq!(stdout, "{\n    a: 1\n    b: hello\n}\n");
+}
+
+#[test]
+fn cli_edit_braceless_root_is_not_indented() {
+    let stdout = edit_stdout(&["edit", "--set", "c", "three"], "a: one\nb: 2\n");
+    assert_eq!(stdout, "a: one\nb: 2\nc: three\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_output_option_writes_formatted_file() {
+    let mut input = NamedTempFile::new().unwrap();
+    writeln!(input, "{{a: 1}}").unwrap();
+    input.flush().unwrap();
+    let output = NamedTempFile::new().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--set", "b", "hello", "--output"])
+        .arg(output.path())
+        .arg(input.path())
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(output.path()).unwrap();
+    assert_eq!(content, "{\n  a: 1\n  b: hello\n}\n");
+}
+
+#[test]
+fn cli_edit_formats_comments_with_the_container() {
+    let stdout = edit_stdout(&["edit", "--comment-set", "a", "note"], "{\n  a: 1\n}\n");
+    assert_eq!(stdout, "{\n  /* note */\n  a: 1\n}\n");
+    assert_parses(&stdout);
+}
+
 #[test]
 fn cli_strips_bom_from_file() {
     use std::io::Write;
