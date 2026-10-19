@@ -108,7 +108,7 @@ pub fn canonicalize(value: &HjsonValue) -> String {
     }
 }
 
-/// 解析結果を「状態<TAB>値またはメッセージ」で返す。
+/// 解析結果を「`状態<TAB>値またはメッセージ`」で返す。
 ///
 /// 状態は `OK`（値）、`ERR`（解析エラー）、`ERRV`（解析後の値変換エラー）。
 pub fn evaluate(text: &str) -> String {

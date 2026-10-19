@@ -52,7 +52,7 @@ pub fn run() -> anyhow::Result<()> {
 
 pub fn build_cli() -> Command {
     Command::new("hjson-edit")
-        .version("0.1.0")
+        .version(env!("CARGO_PKG_VERSION"))
         .about("HJSON editor preserving comments and formatting")
         .subcommand_required(true)
         .subcommand(parse_command())
