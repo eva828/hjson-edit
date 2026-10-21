@@ -34,7 +34,12 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
 
     let ast = doc.ast().context("Failed to build semantic AST")?;
     let formatted = ast.format(&config);
-    let result = RedNode::new_root(formatted).text().to_string();
+    let mut result = RedNode::new_root(formatted).text().to_string();
+
+    // 出力は改行で終える（末尾に改行の無い入力でも 1 行として扱えるようにする）
+    if !result.is_empty() && !result.ends_with('\n') {
+        result.push('\n');
+    }
 
     print!("{}", result);
     Ok(())

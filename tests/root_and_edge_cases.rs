@@ -1,4 +1,4 @@
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath};
+use hjson_edit::{HjsonDocument, HjsonDocumentEdit, HjsonObjectPath};
 
 #[test]
 fn parse_completely_empty_file_roundtrips() {

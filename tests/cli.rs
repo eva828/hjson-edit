@@ -489,3 +489,46 @@ fn cli_strips_bom_from_file() {
         "BOM を除去してオブジェクトとして読む: {stdout}"
     );
 }
+
+#[test]
+fn cli_edit_rejects_comments_in_the_value_text() {
+    let (_, stderr) = edit_failure(&["edit", "--set", "b", "{a: 1} // note"], "{\n  a: 1\n}\n");
+
+    assert!(
+        stderr.contains("comments are not allowed"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn cli_format_ends_the_output_with_a_newline() {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{{}}").unwrap();
+    file.flush().unwrap();
+
+    let output = Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("format")
+        .arg(file.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "{}\n");
+}
+
+#[test]
+fn cli_reports_the_os_error_for_missing_files() {
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args([
+            "edit",
+            "/nonexistent/hjson-edit-input.hjson",
+            "--set",
+            "a",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No such file or directory"));
+}

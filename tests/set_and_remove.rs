@@ -1,5 +1,5 @@
 use hjson_edit::high_level::{
-    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
+    ops::object::HjsonDocumentEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 use pretty_assertions::assert_eq;
 
@@ -51,7 +51,7 @@ fn set_array_insert_at_len_appends() {
 #[test]
 fn set_array_insert_at_inserts_in_middle() {
     let input = "{\n  items: [1, 3]\n}\n";
-    let expected = "{\n  items: [1,2, 3]\n}\n";
+    let expected = "{\n  items: [1, 2, 3]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -87,8 +87,8 @@ fn set_nested_object_path_creates_member() {
 #[test]
 fn set_missing_nested_path_creates_parents() {
     let input = "{\n  root: {\n  }\n}\n";
-    // 追加した要素の字下げは整形層が整える（ここでは構造だけを確認する）
-    let expected = "{\n  root: {\n  new: {nested:value\n}\n}\n}\n";
+    // 追加した要素は、閉じ区切りと同じ字下げに 1 段足した位置へ入る
+    let expected = "{\n  root: {\n    new: {nested:value\n}\n  }\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -100,7 +100,7 @@ fn set_missing_nested_path_creates_parents() {
 #[test]
 fn set_into_empty_object_inserts_member() {
     let input = "{\n}\n";
-    let expected = "{\nname: app\n}\n";
+    let expected = "{\n  name: app\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -112,7 +112,7 @@ fn set_into_empty_object_inserts_member() {
 #[test]
 fn set_into_empty_array_inserts_item() {
     let input = "[\n]\n";
-    let expected = "[\n1\n]\n";
+    let expected = "[\n  1\n]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 1).unwrap();
@@ -134,7 +134,7 @@ fn set_existing_key_preserves_leading_comments() {
 #[test]
 fn set_preserves_crlf_line_endings() {
     let input = "{\n  items: [\r\n    1\r\n    2\r\n  ]\n}\n";
-    let expected = "{\n  items: [\r\n    1\r\n    2\r\n3\r\n  ]\n}\n";
+    let expected = "{\n  items: [\r\n    1\r\n    2\r\n    3\r\n  ]\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc
@@ -146,7 +146,7 @@ fn set_preserves_crlf_line_endings() {
 #[test]
 fn append_to_multiline_object() {
     let input = "{\n  a: 1\n}\n";
-    let expected = "{\n  a: 1\nb: 2\n}\n";
+    let expected = "{\n  a: 1\n  b: 2\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
@@ -156,7 +156,7 @@ fn append_to_multiline_object() {
 #[test]
 fn append_to_multiline_array() {
     let input = "[\n  1\n]\n";
-    let expected = "[\n  1\n2\n]\n";
+    let expected = "[\n  1\n  2\n]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 2).unwrap();
@@ -167,7 +167,7 @@ fn append_to_multiline_array() {
 fn append_to_object_with_trailing_comment_preserves_comment() {
     // 末尾コメント（閉じ区切りの直前のコメント）は末尾に残し、新しいメンバーはその手前に入る
     let input = "{\n  a: 1\n  // trailing\n}\n";
-    let expected = "{\n  a: 1\nb: 2\n  // trailing\n}\n";
+    let expected = "{\n  a: 1\n  b: 2\n  // trailing\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
@@ -177,7 +177,7 @@ fn append_to_object_with_trailing_comment_preserves_comment() {
 #[test]
 fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
     let input = "{\n  a: 1 // inline\n  // trailing\n}\n";
-    let expected = "{\n  a: 1 // inline\nb: 2\n  // trailing\n}\n";
+    let expected = "{\n  a: 1 // inline\n  b: 2\n  // trailing\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("b").unwrap(), 2).unwrap();
@@ -187,7 +187,7 @@ fn append_to_object_with_inline_and_trailing_comments_preserves_both() {
 #[test]
 fn append_to_array_with_trailing_comment_preserves_comment() {
     let input = "[\n  1\n  // trailing\n]\n";
-    let expected = "[\n  1\n2\n  // trailing\n]\n";
+    let expected = "[\n  1\n  2\n  // trailing\n]\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc.set(HjsonObjectPath::parse("[-]").unwrap(), 2).unwrap();

@@ -1,8 +1,6 @@
 use hjson_edit::{
     ast::QuoteStyle,
-    high_level::{
-        ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, HjsonDocument, Prefer,
-    },
+    high_level::{ops::object::HjsonDocumentEdit, path::HjsonObjectPath, HjsonDocument, Prefer},
 };
 use pretty_assertions::assert_eq;
 

@@ -1,6 +1,9 @@
+/// インデントの書き方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndentStyle {
+    /// 空白 `n` 個。
     Spaces(u8),
+    /// タブ。
     Tabs,
 }
 
@@ -19,6 +22,7 @@ impl IndentStyle {
     }
 }
 
+/// 整形の設定。
 #[derive(Clone, Debug)]
 pub struct FormatConfig {
     pub(crate) newline: String,
@@ -35,11 +39,13 @@ impl Default for FormatConfig {
 }
 
 impl FormatConfig {
+    /// 改行コードを指定する。
     pub fn with_newline(mut self, newline: impl Into<String>) -> Self {
         self.newline = newline.into();
         self
     }
 
+    /// インデントを指定する。
     pub fn with_indent(mut self, indent: IndentStyle) -> Self {
         self.indent = indent;
         self

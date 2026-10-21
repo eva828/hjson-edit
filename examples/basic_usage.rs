@@ -1,8 +1,9 @@
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath};
+//! 値の読み書きと配列への追加の基本。
+
+use hjson_edit::{HjsonDocument, HjsonDocumentEdit, HjsonObjectPath};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Parse an HJSON string
     let input = r#"{
   name: example
   dependencies: {
@@ -13,23 +14,21 @@ fn main() -> Result<(), Box<dyn Error>> {
   ]
 }"#;
 
-    let doc = HjsonDocument::parse(input).map_err(|e| format!("Parse errors: {:?}", e))?;
+    let document = HjsonDocument::parse(input)?;
 
-    // Read values using dot notation or array indexing
-    match doc.get(HjsonObjectPath::parse("dependencies.clap").unwrap()) {
-        Ok(val) => println!("clap version: {:?}", val),
-        Err(e) => println!("Error getting value: {:?}", e),
-    }
+    // ドット記法と配列の index で値を読む
+    let clap = document.get(HjsonObjectPath::parse("dependencies.clap")?)?;
+    println!("clap version: {clap:?}");
 
-    // Modify the document - each operation returns a Result
-    let updated = doc
-        .set(HjsonObjectPath::parse("version").unwrap(), "0.1.0")? // Adds a new key
-        .set(HjsonObjectPath::parse("dependencies.clap").unwrap(), "4.6")? // Updates an existing key
-        .set(HjsonObjectPath::parse("features[-]").unwrap(), "extra")? // Adds to an array using push syntax
-        .remove(HjsonObjectPath::parse("name").unwrap())?; // Removes a key
+    // 編集はどれも新しい文書を返す（元の文書は変わらない）
+    let updated = document
+        .set(HjsonObjectPath::parse("version")?, "0.1.0")? // 無いキーは追加
+        .set(HjsonObjectPath::parse("dependencies.clap")?, "4.6")? // 既存の値は差し替え
+        .set(HjsonObjectPath::parse("features[-]")?, "extra")? // 配列の末尾へ追加
+        .remove(HjsonObjectPath::parse("name")?)?; // キーを削除
 
     println!("\n=== Modified ===");
-    println!("{}", updated);
+    println!("{updated}");
 
     Ok(())
 }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use hjson_edit::{
     ast::{CommentKind, QuoteStyle},
     high_level::{
-        ops::{comment::HjsonDocumentCommentEdit, object::HjsonDocumentObjectEdit},
+        ops::{comment::HjsonDocumentCommentEdit, object::HjsonDocumentEdit},
         path::{HjsonCommentPath, HjsonObjectPath},
         style::detect_indent_from_ast,
         value::HjsonValue,
@@ -42,7 +42,8 @@ pub fn edit_command() -> Command {
         .arg(
             Arg::new("file")
                 .required(true)
-                .value_parser(clap::value_parser!(std::path::PathBuf)),
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .help("HJSON file to read"),
         )
         .arg(
             Arg::new("set")
@@ -111,13 +112,15 @@ pub fn edit_command() -> Command {
             Arg::new("in-place")
                 .long("in-place")
                 .conflicts_with("output")
-                .action(ArgAction::SetTrue),
+                .action(ArgAction::SetTrue)
+                .help("Write the result back to the input file"),
         )
         .arg(
             Arg::new("output")
                 .long("output")
                 .conflicts_with("in-place")
-                .value_parser(clap::value_parser!(std::path::PathBuf)),
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .help("Write the result to this file instead of stdout"),
         )
         .arg(
             Arg::new("indent-style")
@@ -202,11 +205,27 @@ fn parse_value(raw: &str) -> Result<HjsonValue> {
     }
 
     let document = HjsonDocument::parse(raw).with_context(|| format!("Invalid value: {raw}"))?;
+    if contains_comment(document.syntax_root()) {
+        anyhow::bail!(
+            "Invalid value: comments are not allowed in the value text (they are dropped)"
+        );
+    }
+
     let path = HjsonObjectPath::parse(String::new()).expect("the empty path is always valid");
 
     document
         .get(path)
         .with_context(|| format!("Invalid value: {raw}"))
+}
+
+/// 構文木にコメントを含むか。
+fn contains_comment(root: &hjson_edit::RedNode) -> bool {
+    use rowan::NodeOrToken;
+
+    root.descendants_with_tokens().any(|element| match element {
+        NodeOrToken::Token(token) => token.kind().is_comment(),
+        NodeOrToken::Node(node) => node.kind().is_comment(),
+    })
 }
 
 /// 値テキストの引用スタイル（`"..."` / `'''...'''`）。指定があればその値だけに使う。

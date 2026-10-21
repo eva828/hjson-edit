@@ -23,10 +23,13 @@ impl LexError {
     }
 
     pub fn format_with_line_index(&self, line_index: &LineIndex) -> String {
+        // 表示は 1 始まり（エディタやコンパイラの慣習に合わせる）
         let lc = line_index.line_col(TextSize::from(self.offset as u32));
         format!(
             "Error at line {}, column {}: {}",
-            lc.line, lc.col, self.message
+            lc.line + 1,
+            lc.col + 1,
+            self.message
         )
     }
 }

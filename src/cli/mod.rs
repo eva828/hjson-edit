@@ -66,7 +66,8 @@ fn parse_command() -> Command {
         .arg(
             Arg::new("file")
                 .required(true)
-                .value_parser(clap::value_parser!(std::path::PathBuf)),
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .help("HJSON file to read"),
         )
         .arg(
             Arg::new("ast")
@@ -101,7 +102,8 @@ fn format_command() -> Command {
         .arg(
             Arg::new("file")
                 .required(true)
-                .value_parser(clap::value_parser!(std::path::PathBuf)),
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .help("HJSON file to read"),
         )
         .arg(
             Arg::new("indent-style")

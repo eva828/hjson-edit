@@ -2,12 +2,18 @@
 //!
 //! 低レベルAPI（Green/Red Tree操作）をラップし、より使いやすいドットパスベースのAPIを提供する。
 
+/// 編集APIのエラー型。
 pub mod error;
 mod format;
+pub(crate) mod indent;
+/// 文書を編集する操作（値・コメント・マージ）。
 pub mod ops;
+/// 値とコメントの位置を指すパス。
 pub mod path;
 pub(crate) mod resolve;
+/// 文書の体裁とスタイルの推定。
 pub mod style;
+/// 値の型と描画。
 pub mod value;
 mod value_ops;
 mod verify;
@@ -28,8 +34,10 @@ use rowan::GreenNode;
 /// 値の維持（Preserve）または明示的な指定（Explicit）を表す型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Prefer<T> {
+    /// 元のスタイルを保つ。
     #[default]
     Preserve,
+    /// 指定したスタイルを使う。
     Explicit(T),
 }
 
@@ -116,11 +124,13 @@ impl HjsonDocument {
         &self.warnings
     }
 
+    /// 文字列のスタイルを指定する（既定は `Prefer::Preserve`）。
     pub fn string_style(mut self, style: Prefer<QuoteStyle>) -> Self {
         self.string_style = style;
         self
     }
 
+    /// コメントのスタイルを指定する（既定は `Prefer::Preserve`）。
     pub fn comment_style(mut self, style: Prefer<CommentKind>) -> Self {
         self.comment_style = style;
         self
@@ -188,14 +198,17 @@ impl HjsonDocument {
         self
     }
 
+    /// この文書で検出した改行コード。
     pub fn current_newline(&self) -> &str {
         &self.newline
     }
 
+    /// lossless な構文木のルート。
     pub fn syntax_root(&self) -> &RedNode {
         &self.root
     }
 
+    /// 意味ASTの文書を組み立てる。
     pub fn ast(&self) -> Result<semantic_ast::Document, HjsonEditError> {
         semantic_ast::Document::cast(self.root.clone())
     }

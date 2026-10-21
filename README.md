@@ -84,7 +84,7 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 ### ライブラリ
 
 ```rust
-use hjson_edit::{HjsonDocument, HjsonDocumentObjectEdit, HjsonObjectPath};
+use hjson_edit::{HjsonDocument, HjsonDocumentEdit, HjsonObjectPath};
 
 let input = r#"{
     // Configuration
@@ -92,11 +92,13 @@ let input = r#"{
     port: 8080
 }"#;
 
-let document = HjsonDocument::parse(input)?;
+let document = HjsonDocument::parse(input).unwrap();
 
 // 編集はテキストを最小限だけ変更する（既存の引用スタイルを保つ）。
 // 編集結果は毎回、再パースと値の一致、コメントの保存が検査される。
-let edited = document.set(HjsonObjectPath::parse("name")?, "api")?;
+let edited = document
+    .set(HjsonObjectPath::parse("name").unwrap(), "api")
+    .unwrap();
 assert!(edited.to_string().contains("name: \"api\""));
 
 // 変更したコンテナは `touched_containers` で分かる。
@@ -104,7 +106,7 @@ assert!(edited.to_string().contains("name: \"api\""));
 let config = edited.current_format_config();
 let mut formatted = edited.clone();
 for container in edited.touched_containers().to_vec() {
-    formatted = formatted.format_container(&container, &config)?;
+    formatted = formatted.format_container(&container, &config).unwrap();
 }
 assert_eq!(
     formatted.to_string(),
@@ -112,9 +114,11 @@ assert_eq!(
 );
 
 // スタイルと検証は文書ごとに設定できる
-let document = HjsonDocument::parse(input)?
+let document = HjsonDocument::parse(input)
+    .unwrap()
     .string_style(hjson_edit::Prefer::Explicit(hjson_edit::ast::QuoteStyle::DoubleQuoted))
     .verify_edits(false);
+assert!(document.to_string().contains("port: 8080"));
 ```
 
 ## 制限と挙動
@@ -123,13 +127,16 @@ let document = HjsonDocument::parse(input)?
 |---|---|
 | 入力長 | `MAX_INPUT_BYTES`（`u32::MAX` バイト）まで。超過は `HjsonEditError::InputTooLong` |
 | ネスト | `MAX_NESTING_DEPTH`（128）まで。パース時も編集時も `NestingTooDeep` を返す |
-| 不正な入力 | 暗黙に補正せず、行・列付きのエラーとして返す |
+| 不正な入力 | 暗黙に補正せず、行・列付きのエラーとして返す（行・列は 1 始まり。列は UTF-8 のバイト位置） |
 | 未終端のブロックコメント `/*` | 基準実装と同じく読み飛ばし、`warnings()` に記録する（CLI は stderr に警告を出す） |
 | 重複キー | 値の層では後勝ち。lossless な木と `to_string()` は元のテキストを保持する |
 | BOM | パーサーは通常の文字として扱い、CLI がファイル読み込み時に除去する |
 | 編集結果の妥当性 | 行末でしか終端できない値（引用符なし文字列など）を挿入する場合は改行を補い、常に再パースできるテキストを返す |
 | 編集の検証 | 各編集の後に再パース・値の一致（`HjsonValue` を基準にする）・対象外コメントの保存を検査し、崩れた結果は `HjsonEditError::InvalidEdit` として返す（`verify_edits(false)` で無効化） |
-| 挿入位置 | 新しい要素は末尾の要素の後ろ、閉じ区切りの直前にあるコメント（footer）の手前に入る |
+| 挿入位置 | 新しい要素は末尾の要素の後ろ、閉じ区切りの直前にあるコメント（footer）の手前に入る。字下げは既存の要素に揃える（空のコンテナではコンテナの行の字下げ＋1 段） |
+| 書けない値 | HJSON で表現できない値（NaN・無限大、指定スタイルで書けない文字列）は `HjsonEditError::ValueNotRepresentable`。`Prefer::Preserve` で書けない文字列は二重引用符へ切り替える |
+| 配列の作成 | 途中のコンテナを作るとき、`[n]` / `[+n]` は `n = 0` だけを受け付ける（それ以外は `ArrayIndexOutOfBounds`） |
+| `--set` の値のコメント | 値テキストにコメントを書くと、値に含まれないためエラーにする（引用符なし文字列は行末までを値として飲み込むので、コメントにはならない） |
 | 引用符なし文字列への `:inline` | 値が行末までを飲み込むため付けられない。`HjsonEditError::InvalidTarget` を返す（`:before` か引用符付きの値を使う） |
 | `merge_from` のコメント | 新規メンバーは先頭コメント行と行末コメントごとコピーする。文書全体のヘッダー/フッターは対象外 |
 | `merge_from` の置き換え | 後勝ちで値だけを差し替え、キーとコメントはホスト側を保つ |
@@ -175,6 +182,19 @@ tools/diff_fuzz.sh
 | `comment_only` / `ws_only` | 空文書を空オブジェクトとして受理する（基準は `Incomplete input` でエラー） | 許容 |
 | `ml_root_indent` | 文書がカラム 0 の `'''` で始まる場合、基準は根の解釈やり直しの経路で 3 文字分のインデントを除去する。HJSON の仕様と hjson-js は `'''` のカラム（= 0）に従うため除去しない | 許容 |
 | `fuzz0132` | 上記と同じ（カラム 0 の複数行文字列） | 許容 |
+
+## 開発
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+cargo test --features net-conformance --test conformance_assets -- --ignored
+```
+
+`tools/` には hjson-cs との突き合わせ用のスクリプトがある（`src/bin/canon.rs` は
+`--features dev-tools --bin canon` でビルドする）。CI はネットワーク必須のテストを除いて
+同じコマンドを実行する。
 
 ## ライセンス
 

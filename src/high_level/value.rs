@@ -5,19 +5,29 @@ use crate::high_level::error::HjsonEditError;
 use crate::syntax::{GreenElement, NewlineKind, SyntaxKind};
 use crate::{RedNode, RedToken};
 
+/// HJSON の値。
 #[derive(Debug, Clone, PartialEq)]
 pub enum HjsonValue {
+    /// 文字列。
     String(String),
+    /// 整数。
     Integer(i64),
+    /// 浮動小数。
     Float(f64),
+    /// 真偽値。
     Bool(bool),
+    /// null。
     Null,
+    /// 配列。
     Array(Vec<HjsonValue>),
+    /// オブジェクト（キーと値の並び。順序を保つ）。
     Object(Vec<(String, HjsonValue)>),
 }
 
+/// 値の描画設定。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderConfig {
+    /// 文字列のスタイル。`None` なら書ける範囲で引用符なしを選ぶ。
     pub string_style: Option<QuoteStyle>,
     /// 入れ子の値を1行で描けないときに使う改行コード。
     pub newline: NewlineKind,
@@ -78,6 +88,60 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
+    /// 値に含まれる文字列を順に呼び出す。
+    pub(crate) fn for_each_string(&self, visit: &mut impl FnMut(&str)) {
+        match self {
+            HjsonValue::String(text) => visit(text),
+            HjsonValue::Array(items) => {
+                for item in items {
+                    item.for_each_string(visit);
+                }
+            }
+            HjsonValue::Object(entries) => {
+                for (_, value) in entries {
+                    value.for_each_string(visit);
+                }
+            }
+            HjsonValue::Integer(_)
+            | HjsonValue::Float(_)
+            | HjsonValue::Bool(_)
+            | HjsonValue::Null => {}
+        }
+    }
+
+    /// 値の全文字列を `style` で書けるか。
+    pub(crate) fn is_representable_with(&self, style: QuoteStyle) -> bool {
+        let mut ok = true;
+        self.for_each_string(&mut |text| ok &= style.can_render(text));
+        ok
+    }
+
+    /// HJSON で表現できない数値（NaN と無限大）を含むか。
+    pub(crate) fn has_unrepresentable_number(&self) -> bool {
+        match self {
+            HjsonValue::Float(number) => !number.is_finite(),
+            HjsonValue::Array(items) => items.iter().any(Self::has_unrepresentable_number),
+            HjsonValue::Object(entries) => entries
+                .iter()
+                .any(|(_, value)| value.has_unrepresentable_number()),
+            HjsonValue::String(_)
+            | HjsonValue::Integer(_)
+            | HjsonValue::Bool(_)
+            | HjsonValue::Null => false,
+        }
+    }
+
+    /// 数値が HJSON で表現できるか（NaN・無限大は不可）。
+    pub(crate) fn ensure_representable(&self) -> Result<(), HjsonEditError> {
+        if self.has_unrepresentable_number() {
+            return Err(HjsonEditError::ValueNotRepresentable {
+                reason: "NaN and infinity have no HJSON representation".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn render_value_node(&self, config: &RenderConfig) -> GreenNode {
         GreenNode::new(SyntaxKind::Value.into(), self.render_body(config))
     }
@@ -108,7 +172,7 @@ impl HjsonValue {
         match self {
             HjsonValue::String(s) => {
                 let style = config.string_style.unwrap_or_else(|| {
-                    if QuoteStyle::Unquoted.is_valid_for_text(s) {
+                    if QuoteStyle::Unquoted.can_render(s) {
                         QuoteStyle::Unquoted
                     } else {
                         QuoteStyle::DoubleQuoted
@@ -352,7 +416,7 @@ fn render_key_node(key: &str, key_style: Option<QuoteStyle>) -> GreenNode {
     let (key_kind, key_text) = render_string(
         key,
         key_style.unwrap_or_else(|| {
-            if QuoteStyle::Unquoted.is_valid_for_text(key) {
+            if QuoteStyle::Unquoted.can_be_key(key) {
                 QuoteStyle::Unquoted
             } else {
                 QuoteStyle::DoubleQuoted
@@ -374,30 +438,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_simple_unquoted_text_accepts_alphanumeric_underscore_dash_dot() {
-        assert!(QuoteStyle::Unquoted.is_valid_for_text("hello_world"));
-        assert!(QuoteStyle::Unquoted.is_valid_for_text("foo"));
-        assert!(QuoteStyle::Unquoted.is_valid_for_text("a-b.c_d-e0"));
+    fn test_can_be_key_accepts_alphanumeric_underscore_dash_dot() {
+        assert!(QuoteStyle::Unquoted.can_be_key("hello_world"));
+        assert!(QuoteStyle::Unquoted.can_be_key("foo"));
+        assert!(QuoteStyle::Unquoted.can_be_key("a-b.c_d-e0"));
     }
 
     #[test]
-    fn test_is_simple_unquoted_text_rejects_space_and_punctuation() {
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("hello world"));
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("foo!"));
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text(""));
+    fn test_can_be_key_rejects_space_and_punctuation() {
+        assert!(!QuoteStyle::Unquoted.can_be_key("hello world"));
+        assert!(!QuoteStyle::Unquoted.can_be_key("foo!"));
+        assert!(!QuoteStyle::Unquoted.can_be_key(""));
     }
 
     #[test]
-    fn test_is_simple_unquoted_text_rejects_reserved_words() {
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("true"));
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("false"));
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("null"));
+    fn test_can_be_key_rejects_reserved_words() {
+        assert!(!QuoteStyle::Unquoted.can_be_key("true"));
+        assert!(!QuoteStyle::Unquoted.can_be_key("false"));
+        assert!(!QuoteStyle::Unquoted.can_be_key("null"));
     }
 
     #[test]
-    fn test_is_simple_unquoted_text_rejects_numeric_tokens() {
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("123"));
-        assert!(!QuoteStyle::Unquoted.is_valid_for_text("1.23"));
+    fn test_can_be_key_rejects_numeric_tokens() {
+        assert!(!QuoteStyle::Unquoted.can_be_key("123"));
+        assert!(!QuoteStyle::Unquoted.can_be_key("1.23"));
     }
 
     #[test]

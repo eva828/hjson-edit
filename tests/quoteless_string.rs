@@ -1,5 +1,5 @@
 use hjson_edit::high_level::{
-    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
+    ops::object::HjsonDocumentEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 
 // quoteless 値の中に現れる `"` / `'''` は値の一部であり、文字列の開始ではない。

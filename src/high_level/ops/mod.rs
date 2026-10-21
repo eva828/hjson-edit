@@ -1,6 +1,9 @@
+/// 値・要素のパスに対するコメント操作。
 pub mod comment;
 pub(crate) mod insert;
+/// 文書のマージ。
 pub mod merge;
+/// 値の取得・設定・削除。
 pub mod object;
 
 use crate::high_level::error::HjsonEditError;

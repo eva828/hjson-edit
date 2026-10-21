@@ -2,19 +2,37 @@ use std::fmt::Debug;
 
 use crate::high_level::error::HjsonEditError;
 
+/// 配列を指すセグメント。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArrayPathSegment {
-    Index(usize),    // [n]
+    /// 位置 `n` の要素。
+    Index(usize), // [n]
+    /// 位置 `n` へ挿入。
     InsertAt(usize), // [+n]
-    Push,            // [-]
+    /// 末尾の要素（書き込みは末尾への追加）。
+    Push, // [-]
 }
 
+impl ArrayPathSegment {
+    /// 位置を指定するセグメントの index。末尾を指す `[-]` は `None`。
+    pub fn position(&self) -> Option<usize> {
+        match self {
+            ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => Some(*index),
+            ArrayPathSegment::Push => None,
+        }
+    }
+}
+
+/// パスの 1 セグメント。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathSegment {
+    /// オブジェクトのキー。
     Key(String),
+    /// 配列の要素。
     Array(ArrayPathSegment),
 }
 
+/// 値の位置を指すパス（ドットで区切ったキーと `[n]` の並び）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HjsonObjectPath {
     segments: Vec<PathSegment>,
@@ -143,18 +161,22 @@ impl std::fmt::Display for HjsonCommentPath {
 }
 
 impl HjsonObjectPath {
+    /// セグメントの並びからパスを作る。
     pub fn from_segments(segments: Vec<PathSegment>) -> Self {
         Self { segments }
     }
 
+    /// セグメントの並び。
     pub fn segments(&self) -> &[PathSegment] {
         &self.segments
     }
 
+    /// `index` 番目のセグメント。
     pub fn segment(&self, index: usize) -> Option<&PathSegment> {
         self.segments.get(index)
     }
 
+    /// パスの文字列を解釈する。
     pub fn parse(path: impl Into<String>) -> Result<Self, HjsonEditError> {
         let path = path.into();
 
@@ -241,12 +263,14 @@ impl HjsonObjectPath {
         Ok(HjsonObjectPath { segments })
     }
 
+    /// 先頭のセグメントと残りのパスに分ける。
     pub fn split_first(&self) -> Option<(PathSegment, Self)> {
         let (left, right) = self.split_at(1)?;
         let first = left.segments.into_iter().next()?;
         Some((first, right))
     }
 
+    /// 末尾のセグメントと残りのパスに分ける。
     pub fn split_last(&self) -> Option<(Self, PathSegment)> {
         if self.segments.is_empty() {
             return None;
@@ -256,6 +280,7 @@ impl HjsonObjectPath {
         Some((left, last))
     }
 
+    /// `index` で 2 つに分ける。
     pub fn split_at(&self, index: usize) -> Option<(Self, Self)> {
         if index > self.segments.len() {
             return None;
@@ -267,6 +292,7 @@ impl HjsonObjectPath {
         ))
     }
 
+    /// セグメント数。
     pub fn depth(&self) -> usize {
         self.segments.len()
     }

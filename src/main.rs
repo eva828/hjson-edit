@@ -4,7 +4,8 @@ mod cli;
 
 fn main() {
     if let Err(error) = cli::run() {
-        eprintln!("{error}");
+        // anyhow の連鎖（原因）まで表示する
+        eprintln!("{error:#}");
         std::process::exit(1);
     }
 }

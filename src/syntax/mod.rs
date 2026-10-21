@@ -49,51 +49,78 @@ impl NewlineKind {
 pub enum SyntaxKind {
     // ===== 字句トークン =====
     // 構文記号
-    LBrace,   // {
-    RBrace,   // }
-    LBracket, // [
-    RBracket, // ]
-    Colon,    // :
-    Comma,    // ,
+    /// `{`。
+    LBrace,
+    /// `}`。
+    RBrace,
+    /// `[`。
+    LBracket,
+    /// `]`。
+    RBracket,
+    /// `:`。
+    Colon,
+    /// `,`。
+    Comma,
 
     // リテラル値
-    True,  // true
-    False, // false
-    Null,  // null
+    /// `true`。
+    True,
+    /// `false`。
+    False,
+    /// `null`。
+    Null,
 
     // 数値
-    Integer, // 整数（123）
-    Float,   // 浮動小数点（1.23）
+    /// 整数。
+    Integer,
+    /// 浮動小数。
+    Float,
 
     // 文字列
-    String,         // "..."
-    BlockString,    // '''...'''
-    UnquotedString, // 引用符なし文字列
+    /// 引用符付きの文字列。
+    String,
+    /// 複数行文字列。
+    BlockString,
+    /// 引用符なし文字列。
+    UnquotedString,
 
     // コメント
-    LineComment,  // // 行コメント
-    HashComment,  // # 行コメント
-    BlockComment, // /* ブロックコメント */
+    /// `//` の行コメント。
+    LineComment,
+    /// `#` の行コメント。
+    HashComment,
+    /// ブロックコメント。
+    BlockComment,
 
     // 空白・改行
-    Whitespace, // 空白・タブ
-    Newline,    // 改行
+    /// 空白・タブ。
+    Whitespace,
+    /// 改行。
+    Newline,
 
     // ===== 構文木ノード =====
     // ルート
+    /// 文書のルート。
     Root,
 
     // 値
+    /// オブジェクト。
     Object,
+    /// 配列。
     Array,
-    Member, // キー: 値
+    /// メンバー（キー・区切り・値）。
+    Member,
+    /// キー。
     Key,
+    /// 値。
     Value,
 
     // コメントノード
+    /// コメント。
     Comment,
 
     // エラー回復用
+    /// エラーを表すトークン。
     Error,
 }
 

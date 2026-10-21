@@ -1,11 +1,5 @@
-//! HJSON Parser and Editor
-//!
-//! 位置情報とコメントを保持したままHJSONを編集するためのライブラリ
-//!
-//! # Features
-//! - HJSONフル対応（コメント、引用符なしキー/値、複数行文字列など）
-//! - ロスレス編集（空白・改行・コメントを保持）
-//! - Green/Red Tree方式による効率的な編集
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 
 pub mod ast;
 #[doc(hidden)]
@@ -20,7 +14,7 @@ pub use format::{Format, FormatConfig, IndentStyle};
 pub use high_level::{
     error::HjsonEditError,
     ops::merge::HjsonDocumentMerge,
-    ops::object::HjsonDocumentObjectEdit,
+    ops::object::HjsonDocumentEdit,
     path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
     value::HjsonValue,
     HjsonDocument, Prefer,

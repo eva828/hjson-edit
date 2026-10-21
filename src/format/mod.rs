@@ -12,10 +12,13 @@ mod value;
 
 pub use config::{FormatConfig, IndentStyle};
 
+/// 意味ASTを整形して構文木に戻す。
 pub trait Format {
+    /// 文書全体を整形する。
     fn format(&self, config: &FormatConfig) -> GreenNode {
         self.format_at(config, 0)
     }
+    /// 指定した深さを基準に整形する。
     fn format_at(&self, config: &FormatConfig, depth: usize) -> GreenNode;
 }
 

@@ -38,7 +38,7 @@ use crate::{
 /// 設定で中間のコンテナが無い場合は作成し、途中がスカラーなら
 /// [`HjsonEditError::InvalidTarget`] を返す。同じキーのメンバーが複数ある場合は、
 /// 値の層（後勝ち）に合わせてすべてを同じ値にする。
-pub trait HjsonDocumentObjectEdit {
+pub trait HjsonDocumentEdit {
     /// パスが指す値を返す。
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError>;
 
@@ -57,7 +57,7 @@ pub trait HjsonDocumentObjectEdit {
         Self: Sized;
 }
 
-impl HjsonDocumentObjectEdit for HjsonDocument {
+impl HjsonDocumentEdit for HjsonDocument {
     fn get(&self, path: HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
         let resolved = PathResolver::new(self.syntax_root().clone()).resolve_node(&path)?;
         HjsonValue::from_node(&resolved)
@@ -132,7 +132,7 @@ pub(crate) fn replace_root_value(
         string_style: None,
         newline: detect_document_newline(&child),
     };
-    let updated_child = render_value_like_node(&child, value, string_style, &config);
+    let updated_child = render_value_like_node(&child, value, string_style, &config)?;
 
     Ok(root
         .green()
@@ -173,7 +173,7 @@ pub(crate) fn rebuild_tree_with_set(
             let carried = container_depth_of_value(value);
             ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
 
-            let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone());
+            let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone())?;
             let new_parent = apply_set_to_node(&ancestor, missing, &nested_value, string_style)?;
 
             if ancestor.kind() == SyntaxKind::Root {
@@ -263,6 +263,7 @@ fn set_object_child(
 
     let object_ast = AstObject::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, object_ast.detected_string_style());
+    let insert_style = checked_style(value, insert_style, string_style)?;
     let newline = detect_document_newline(parent);
     let config = RenderConfig {
         string_style: insert_style,
@@ -297,7 +298,7 @@ fn set_object_child(
                     string_style: None,
                     newline,
                 },
-            );
+            )?;
             // 値はメンバーの子なので、メンバー → オブジェクトの順に差し替える
             let value_index = value_child.syntax().index();
             let updated_member = member
@@ -334,7 +335,7 @@ fn set_object_child(
         .into();
     let element = RenderedElement::single(member_node);
 
-    let (at, elements) = plan_insert(parent, InsertPosition::End, element, newline)
+    let (at, elements) = plan_insert(parent, InsertPosition::End, element, newline, None)
         .map_err(|error| with_segment(error, last))?;
     Ok(parent.green().splice_children(at..at, elements))
 }
@@ -357,6 +358,7 @@ fn set_array_child(
 
     let array_ast = AstArray::cast(parent.clone())?;
     let insert_style = resolve_insert_style(string_style, array_ast.detected_string_style());
+    let insert_style = checked_style(value, insert_style, string_style)?;
     let newline = detect_document_newline(parent);
     let len = array_ast.slots().len();
 
@@ -374,7 +376,7 @@ fn set_array_child(
                     string_style: insert_style,
                     newline,
                 },
-            );
+            )?;
             let rendered = RenderedElement::single(updated.into());
             let (at, elements) = plan_replace(parent, *index, rendered)
                 .map_err(|error| with_segment(error, last))?;
@@ -418,7 +420,7 @@ fn insert_array_element(
         .into();
     let element = RenderedElement::single(value_node);
 
-    let (at, elements) = plan_insert(parent, position, element, newline)
+    let (at, elements) = plan_insert(parent, position, element, newline, None)
         .map_err(|error| with_segment(error, last))?;
     Ok(parent.green().splice_children(at..at, elements))
 }
@@ -508,13 +510,37 @@ fn render_value_like_node(
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
     config: &RenderConfig,
-) -> GreenNode {
+) -> Result<GreenNode, HjsonEditError> {
     let detected = detected_string_style_of_node(node);
     let quote_style = resolve_quote_style(string_style, detected);
-    value.render_value_node(&RenderConfig {
-        string_style: Some(quote_style),
+    let quote_style = checked_style(value, Some(quote_style), string_style)?;
+
+    Ok(value.render_value_node(&RenderConfig {
+        string_style: quote_style,
         newline: config.newline,
-    })
+    }))
+}
+
+/// 値が指定スタイルで書けるかを確認し、必要なら降格する。
+///
+/// `Prefer::Preserve` は希望なので、書けない場合は二重引用符へ降格する。
+/// `Prefer::Explicit` は指定なので、書けない場合はエラーを返す。
+fn checked_style(
+    value: &HjsonValue,
+    style: Option<QuoteStyle>,
+    preference: Prefer<QuoteStyle>,
+) -> Result<Option<QuoteStyle>, HjsonEditError> {
+    value.ensure_representable()?;
+
+    match style {
+        Some(style) if !value.is_representable_with(style) => match preference {
+            Prefer::Preserve => Ok(Some(QuoteStyle::DoubleQuoted)),
+            Prefer::Explicit(_) => Err(HjsonEditError::ValueNotRepresentable {
+                reason: format!("the requested string style {style:?} cannot represent this value"),
+            }),
+        },
+        other => Ok(other),
+    }
 }
 
 fn resolve_quote_style(preference: Prefer<QuoteStyle>, detected: Option<QuoteStyle>) -> QuoteStyle {
@@ -579,7 +605,7 @@ mod tests {
     #[test]
     fn test_build_nested_value_single_key_wraps_in_object() {
         let path = vec![PathSegment::Key("a".to_string())];
-        let result = build_nested_value(&path, HjsonValue::Integer(1));
+        let result = build_nested_value(&path, HjsonValue::Integer(1)).unwrap();
         assert_eq!(
             result,
             HjsonValue::Object(vec![("a".into(), HjsonValue::Integer(1))])
@@ -592,7 +618,7 @@ mod tests {
             PathSegment::Key("a".to_string()),
             PathSegment::Key("b".to_string()),
         ];
-        let result = build_nested_value(&path, HjsonValue::Integer(1));
+        let result = build_nested_value(&path, HjsonValue::Integer(1)).unwrap();
         assert_eq!(
             result,
             HjsonValue::Object(vec![(
@@ -605,7 +631,7 @@ mod tests {
     #[test]
     fn test_build_nested_value_array_segment() {
         let path = vec![PathSegment::Array(ArrayPathSegment::Index(0))];
-        let result = build_nested_value(&path, HjsonValue::Integer(1));
+        let result = build_nested_value(&path, HjsonValue::Integer(1)).unwrap();
         assert_eq!(result, HjsonValue::Array(vec![HjsonValue::Integer(1)]));
     }
 }

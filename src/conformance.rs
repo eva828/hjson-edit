@@ -5,9 +5,7 @@
 //! 利用者向けの API ではないため `#[doc(hidden)]` として公開している。
 
 use crate::high_level::value::HjsonValue;
-use crate::high_level::{
-    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, HjsonDocument,
-};
+use crate::high_level::{ops::object::HjsonDocumentEdit, path::HjsonObjectPath, HjsonDocument};
 
 /// 文字列を TSV の 1 フィールドに収まるようエスケープする。
 pub fn escape(text: &str) -> String {

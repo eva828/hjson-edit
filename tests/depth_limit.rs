@@ -1,5 +1,5 @@
 use hjson_edit::high_level::{
-    ops::merge::HjsonDocumentMerge, ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath,
+    ops::merge::HjsonDocumentMerge, ops::object::HjsonDocumentEdit, path::HjsonObjectPath,
     HjsonDocument,
 };
 use hjson_edit::MAX_NESTING_DEPTH;

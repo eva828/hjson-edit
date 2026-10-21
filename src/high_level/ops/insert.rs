@@ -23,6 +23,9 @@ use crate::ast::{
     Array as AstArray, AstNode, BodyInsertion, DelimiterStyle, Object as AstObject, SlotSpan,
 };
 use crate::high_level::error::HjsonEditError;
+use crate::high_level::indent::{
+    container_indent, indent_before, indent_lines, line_indent, root_of,
+};
 use crate::high_level::path::HjsonObjectPath;
 use crate::syntax::{GreenElement, NewlineKind, RedNode, SyntaxKind};
 
@@ -69,22 +72,38 @@ pub(crate) enum InsertPosition {
 /// 要素を挿入する位置と要素列を返す。
 ///
 /// `newline` はコンテナに改行が 1 つも無い場合に使う既定の改行コード。
+///
+/// `base_indent` はコンテナの行の字下げ。文書に繋がっていないコンテナ
+/// （マージの途中など）では呼び出し側が渡す。
 pub(crate) fn plan_insert(
     container: &RedNode,
     position: InsertPosition,
     element: RenderedElement,
     newline: NewlineKind,
+    base_indent: Option<&str>,
 ) -> Result<(usize, Vec<GreenElement>), HjsonEditError> {
     let slots = container_slots(container)?;
     let braceless = is_braceless(container)?;
+    let base_indent = base_indent.map_or_else(
+        || line_indent(&root_of(container), container.text_range().start().into()),
+        str::to_string,
+    );
     // 混在した改行コードの文書でも、コンテナ内で使われている改行に合わせる
     let newline = container_newline(container).unwrap_or(newline);
 
     match position {
-        InsertPosition::End => plan_append(container, &slots, element, newline, braceless),
-        InsertPosition::Before(index) => {
-            plan_before(container, &slots, index, element, newline, braceless)
+        InsertPosition::End => {
+            plan_append(container, &slots, element, newline, braceless, &base_indent)
         }
+        InsertPosition::Before(index) => plan_before(
+            container,
+            &slots,
+            index,
+            element,
+            newline,
+            braceless,
+            &base_indent,
+        ),
     }
 }
 
@@ -163,6 +182,7 @@ fn plan_append(
     element: RenderedElement,
     newline: NewlineKind,
     braceless: bool,
+    base_indent: &str,
 ) -> Result<(usize, Vec<GreenElement>), HjsonEditError> {
     let RenderedElement {
         elements,
@@ -180,6 +200,7 @@ fn plan_append(
             },
             newline,
             braceless,
+            base_indent,
         );
     };
 
@@ -187,16 +208,21 @@ fn plan_append(
     // 既存の改行が挿入要素の行を終端するため、足すのは要素の後ろの改行だけ。
     if let Some(line_break) = last.line_break() {
         let kind = newline_at(container, line_break).unwrap_or(newline);
+        let indent = indent_before(
+            &root_of(container),
+            child_start(container, last.elem().start),
+        );
         let mut inserted = elements;
         inserted.push(newline_element(kind));
-        return Ok((line_break + 1, inserted));
+        return Ok((line_break + 1, indent_lines(inserted, &indent)));
     }
 
     let insert_index = last.trail().end;
 
     // 先頭にコメント行を持つ要素は行の途中に置けないため、前後を改行で囲む。
     if has_leading_comments {
-        return Ok((insert_index, surrounded_by_newlines(elements, newline)));
+        let indent = inline_insertion_indent(container, insert_index, base_indent);
+        return Ok((insert_index, start_line(elements, newline, &indent)));
     }
 
     if braceless {
@@ -209,7 +235,7 @@ fn plan_append(
     // 直前の要素と同じ行に入れる。
     let mut inserted = Vec::new();
     if !has_separator_between(container, last.elem().end, insert_index) {
-        inserted.extend(separator_elements());
+        inserted.extend(separator_elements_of(&separator_gap(container)));
     }
     inserted.extend(elements);
     if line_terminated {
@@ -225,6 +251,7 @@ fn plan_append_to_empty_body(
     element: RenderedElement,
     newline: NewlineKind,
     braceless: bool,
+    base_indent: &str,
 ) -> Result<(usize, Vec<GreenElement>), HjsonEditError> {
     let RenderedElement {
         elements,
@@ -233,16 +260,25 @@ fn plan_append_to_empty_body(
     } = element;
 
     let insertion = body_insertion(container)?;
-    let index = insertion.index();
+    let (index, at_line_start) = empty_body_insertion(container, insertion.index());
+
+    let mut body = elements;
+    if !braceless && (insertion.terminate_line() || line_terminated || has_leading_comments) {
+        body.push(newline_element(newline));
+    }
 
     let mut inserted = Vec::new();
-    if insertion.start_new_line() {
+    if insertion.start_new_line() && !at_line_start {
         inserted.push(newline_element(newline));
     }
-    inserted.extend(elements);
-
-    if !braceless && (insertion.terminate_line() || line_terminated || has_leading_comments) {
-        inserted.push(newline_element(newline));
+    if at_line_start {
+        // 閉じ区切りが独立した行にある場合は、その 1 段上に字下げして置く
+        inserted.extend(indent_lines(
+            body,
+            &container_indent(container, base_indent),
+        ));
+    } else {
+        inserted.extend(body);
     }
 
     Ok((index, inserted))
@@ -256,6 +292,7 @@ fn plan_before(
     element: RenderedElement,
     newline: NewlineKind,
     braceless: bool,
+    base_indent: &str,
 ) -> Result<(usize, Vec<GreenElement>), HjsonEditError> {
     let target = slots
         .get(index)
@@ -278,43 +315,114 @@ fn plan_before(
 
     if braceless || target.at_line_start() {
         // 対象は行頭から始まる。挿入要素をその 1 行前に入れ、対象を次の行に残す。
+        let indent = if braceless {
+            String::new()
+        } else {
+            indent_before(
+                &root_of(container),
+                child_start(container, target.elem().start),
+            )
+        };
         let mut inserted = elements;
         inserted.push(newline_element(newline));
-        return Ok((insert_index, inserted));
+        return Ok((insert_index, indent_lines(inserted, &indent)));
     }
 
     if has_leading_comments {
         // 先頭にコメント行を持つ要素は行の途中に置けないため、前後を改行で囲む。
-        return Ok((insert_index, surrounded_by_newlines(elements, newline)));
+        let indent = inline_insertion_indent(container, insert_index, base_indent);
+        return Ok((insert_index, start_line(elements, newline, &indent)));
     }
 
-    // 同一行への挿入。直前の要素と区切られていなければカンマを補う。
-    let mut inserted = Vec::new();
+    // 同一行への挿入。直前の要素との区切り（カンマ）は既にあるものを使い回す。
     if index > 0 {
         let previous = &slots[index - 1];
+        if !line_terminated && has_separator_between(container, previous.elem().end, insert_index) {
+            // 既存のカンマの直後へ入れて、区切りの並びを崩さない
+            let gap = separator_whitespace(container, previous.elem().end, insert_index);
+            let mut inserted = separator_elements_of(&gap);
+            inserted.extend(elements);
+            return Ok((previous.elem().end, inserted));
+        }
+
         if !has_separator_between(container, previous.elem().end, insert_index) {
-            inserted.extend(separator_elements());
+            let gap = separator_gap(container);
+            let mut inserted = separator_elements_of(&gap);
+            inserted.extend(elements);
+            if line_terminated {
+                inserted.push(newline_element(newline));
+            } else {
+                inserted.extend(separator_elements_of(&gap));
+            }
+            return Ok((insert_index, inserted));
         }
     }
+
+    let gap = separator_gap(container);
+    let mut inserted = Vec::new();
     inserted.extend(elements);
     if line_terminated {
         inserted.push(newline_element(newline));
     } else {
-        inserted.push(comma_element());
+        inserted.extend(separator_elements_of(&gap));
     }
 
     Ok((insert_index, inserted))
 }
 
-/// 要素列の前後を改行で囲む。
-fn surrounded_by_newlines(
+/// 子要素の開始テキスト位置。
+fn child_start(container: &RedNode, index: usize) -> usize {
+    container.children_with_tokens().nth(index).map_or_else(
+        || container.text_range().end().into(),
+        |child| child.text_range().start().into(),
+    )
+}
+
+/// 空の本文への挿入位置。閉じ区切りが独立した行にある場合は、行頭（字下げの手前）へ入れる。
+fn empty_body_insertion(container: &RedNode, closing_index: usize) -> (usize, bool) {
+    let children = container.children_with_tokens().collect::<Vec<_>>();
+    let mut at = closing_index;
+    while at > 0 && is_whitespace_element(&children[at - 1]) {
+        at -= 1;
+    }
+
+    let at_line_start = at > 0 && is_newline_element(&children[at - 1]);
+    (
+        if at_line_start { at } else { closing_index },
+        at_line_start,
+    )
+}
+
+fn is_whitespace_element(element: &NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    matches!(element, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace)
+}
+
+fn is_newline_element(element: &NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    matches!(element, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline)
+}
+
+/// 行の途中に置けない要素を入れる行の字下げ。
+///
+/// すでに字下げのある行ならそれを使い、単一行のコンテナなら
+/// コンテナの行の字下げに 1 段を足したものを使う。
+fn inline_insertion_indent(container: &RedNode, insert_index: usize, base_indent: &str) -> String {
+    if !container.text().to_string().contains('\n') {
+        return container_indent(container, base_indent);
+    }
+
+    line_indent(&root_of(container), child_start(container, insert_index))
+}
+
+/// 行の途中に置けない要素を、独立した行（字下げ付き）に置く。
+fn start_line(
     mut elements: Vec<GreenElement>,
     newline: NewlineKind,
+    indent: &str,
 ) -> Vec<GreenElement> {
-    let mut surrounded = vec![newline_element(newline)];
-    surrounded.append(&mut elements);
-    surrounded.push(newline_element(newline));
-    surrounded
+    elements.push(newline_element(newline));
+    let mut inserted = vec![newline_element(newline)];
+    inserted.extend(indent_lines(elements, indent));
+    inserted
 }
 
 /// コンテナが閉じ区切りを持たない（ブレースレス）か。
@@ -383,14 +491,62 @@ pub(crate) fn newline_element(kind: NewlineKind) -> GreenElement {
     SyntaxKind::Newline.create_token(kind.as_str()).into()
 }
 
-/// 要素の区切り（カンマと空白）。
-fn separator_elements() -> Vec<GreenElement> {
-    vec![
-        comma_element(),
-        SyntaxKind::Whitespace
-            .create_token(SyntaxKind::Whitespace.canonical_text())
-            .into(),
-    ]
+/// カンマと、その直後の空白。
+///
+/// 空白はコンテナで使われている区切りの体裁に合わせる（`[1, 2]` と `[1,2]` の両方）。
+fn separator_elements_of(gap: &str) -> Vec<GreenElement> {
+    let mut elements = vec![comma_element()];
+    if !gap.is_empty() {
+        elements.push(crate::high_level::indent::whitespace_element(gap));
+    }
+
+    elements
+}
+
+/// コンテナの区切りの直後にある空白。最初のカンマを手掛かりにする。
+fn separator_gap(container: &RedNode) -> String {
+    let children = container.children_with_tokens().collect::<Vec<_>>();
+    let Some(position) = children.iter().position(
+        |child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma),
+    ) else {
+        return " ".to_string();
+    };
+
+    let mut gap = String::new();
+    for child in &children[position + 1..] {
+        match child {
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {
+                gap.push_str(token.text());
+            }
+            _ => break,
+        }
+    }
+
+    gap
+}
+
+/// 指定した子要素の範囲にあるカンマの直後の空白。
+///
+/// 空白は挿入位置そのもの（範囲の外）にあるため、範囲の終端では打ち切らない。
+fn separator_whitespace(container: &RedNode, from: usize, to: usize) -> String {
+    let children = container.children_with_tokens().collect::<Vec<_>>();
+    let Some(position) = children[from..to].iter().position(
+        |child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::Comma),
+    ) else {
+        return String::new();
+    };
+
+    let mut gap = String::new();
+    for child in &children[from + position + 1..] {
+        match child {
+            NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace => {
+                gap.push_str(token.text());
+            }
+            _ => break,
+        }
+    }
+
+    gap
 }
 
 fn comma_element() -> GreenElement {

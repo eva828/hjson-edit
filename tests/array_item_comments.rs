@@ -4,7 +4,7 @@
 
 use hjson_edit::{
     high_level::{
-        ops::{comment::HjsonDocumentCommentEdit, object::HjsonDocumentObjectEdit},
+        ops::{comment::HjsonDocumentCommentEdit, object::HjsonDocumentEdit},
         path::{HjsonCommentPath, HjsonObjectPath},
     },
     HjsonDocument, HjsonEditError,

@@ -29,6 +29,7 @@ use crate::{
 pub trait HjsonDocumentCommentEdit {
     /// パスが指す位置のコメント。複数行は `\n` で連結して返す。
     fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;
+    /// コメントを差し替える（既存のスタイルは保つ）。
     fn set_comment(
         self,
         path: HjsonCommentPath,
@@ -36,6 +37,7 @@ pub trait HjsonDocumentCommentEdit {
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
+    /// コメントを追記する。
     fn append_comment(
         self,
         path: HjsonCommentPath,
@@ -43,6 +45,7 @@ pub trait HjsonDocumentCommentEdit {
     ) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
+    /// コメントを削除する（無ければ何もしない）。
     fn remove_comment(self, path: HjsonCommentPath) -> Result<Self, HjsonEditError>
     where
         Self: Sized;
@@ -843,7 +846,10 @@ fn closing_indent_of(
     if at_line_start {
         text
     } else {
-        line_indent(&root_of(container), container.text_range().start().into())
+        crate::high_level::indent::line_indent(
+            &crate::high_level::indent::root_of(container),
+            container.text_range().start().into(),
+        )
     }
 }
 
@@ -868,33 +874,9 @@ fn element_indent(
         }
     }
 
-    // 要素が無い場合は、コンテナ自身の行の字下げに 1 段を足す
-    let root = root_of(container);
-    let unit = match crate::high_level::style::detect_indent_from_ast(&root) {
-        crate::format::IndentStyle::Spaces(width) => " ".repeat(width as usize),
-        crate::format::IndentStyle::Tabs => "\t".to_string(),
-    };
-    let base = line_indent(&root, container.text_range().start().into());
+    let indent = crate::high_level::indent::empty_container_indent(container);
 
-    Ok(SyntaxKind::Whitespace
-        .create_token(format!("{base}{unit}").as_str())
-        .into())
-}
-
-/// ノードを含む文書のルート。
-fn root_of(node: &RedNode) -> RedNode {
-    node.ancestors().last().unwrap_or_else(|| node.clone())
-}
-
-/// 指定位置の行の字下げ（直前の改行から位置までの先頭の空白）。
-fn line_indent(root: &RedNode, offset: usize) -> String {
-    let text = root.text().to_string();
-    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
-
-    text[line_start..offset]
-        .chars()
-        .take_while(|ch| *ch == ' ' || *ch == '\t')
-        .collect()
+    Ok(SyntaxKind::Whitespace.create_token(indent.as_str()).into())
 }
 
 fn is_newline(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {

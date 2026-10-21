@@ -45,7 +45,7 @@ fn set_in(
                     let created = if rest.is_empty() {
                         value
                     } else {
-                        build_nested_value(rest, value)
+                        build_nested_value(rest, value)?
                     };
                     entries.push((key.clone(), created));
                 }
@@ -75,7 +75,7 @@ fn set_in(
                     } else if *index < len {
                         items[*index] = set_in(&items[*index], rest, value)?;
                     } else {
-                        items.push(build_nested_value(rest, value));
+                        items.push(build_nested_value(rest, value)?);
                     }
                 }
                 ArrayPathSegment::Push => {
@@ -84,7 +84,7 @@ fn set_in(
                     } else if len > 0 {
                         items[len - 1] = set_in(&items[len - 1], rest, value)?;
                     } else {
-                        items.push(build_nested_value(rest, value));
+                        items.push(build_nested_value(rest, value)?);
                     }
                 }
             }
@@ -246,18 +246,29 @@ fn merge_objects_in_value(
 }
 
 /// 値の並びから、ネストした値を作る（中間コンテナの作成）。
-pub(crate) fn build_nested_value(path: &[PathSegment], value: HjsonValue) -> HjsonValue {
+///
+/// 新しく作る配列は長さ 1 なので、位置を指定するセグメントは先頭（`0`）だけを受け付ける。
+/// `[1]` のような指定を黙って先頭に丸めず、エラーとして返す。
+pub(crate) fn build_nested_value(
+    path: &[PathSegment],
+    value: HjsonValue,
+) -> Result<HjsonValue, HjsonEditError> {
     let mut current = value;
     for segment in path.iter().rev() {
         current = match segment {
             PathSegment::Key(key) => HjsonValue::Object(vec![(key.clone(), current)]),
-            PathSegment::Array(ArrayPathSegment::Index(_))
-            | PathSegment::Array(ArrayPathSegment::InsertAt(_))
-            | PathSegment::Array(ArrayPathSegment::Push) => HjsonValue::Array(vec![current]),
+            PathSegment::Array(segment) => {
+                if let Some(index) = segment.position() {
+                    if index != 0 {
+                        return Err(HjsonEditError::ArrayIndexOutOfBounds { index, len: 0 });
+                    }
+                }
+                HjsonValue::Array(vec![current])
+            }
         };
     }
 
-    current
+    Ok(current)
 }
 
 /// 値の等価判定。整数と浮動小数は数値として比較する。

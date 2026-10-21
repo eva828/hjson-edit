@@ -9,7 +9,9 @@ use line_index::{LineIndex, TextSize};
 /// 構文解析エラー（エラーメッセージと発生したバイトオフセットを保持）
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
+    /// エラーの説明。
     pub message: String,
+    /// 入力内のバイト位置。
     pub offset: usize,
 }
 
@@ -21,11 +23,15 @@ impl ParseError {
         }
     }
 
+    /// 行・列（1 始まり）付きの表示にする。
     pub fn format_with_line_index(&self, line_index: &LineIndex) -> String {
+        // 表示は 1 始まり（エディタやコンパイラの慣習に合わせる）
         let lc = line_index.line_col(TextSize::from(self.offset as u32));
         format!(
             "Error at line {}, column {}: {}",
-            lc.line, lc.col, self.message
+            lc.line + 1,
+            lc.col + 1,
+            self.message
         )
     }
 }

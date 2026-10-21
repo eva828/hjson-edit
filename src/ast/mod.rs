@@ -1,25 +1,94 @@
+//! 意味AST（lossless な構文木の射影）。
+//!
+//! 構文木は空白・改行・コメントをすべて保持する。このモジュールは
+//! その木を読み取り専用で包み、メンバー・要素・トリビア・スロット位置を扱いやすくする。
+//! 編集は高レベルAPI（[`crate::high_level`]）を使う。
+
 use rowan::NodeOrToken;
 use std::ops::Range;
 
 use crate::syntax::{GreenElement, NewlineKind};
 use crate::{HjsonEditError, RedNode, RedToken, SyntaxKind};
 
+/// 文字列の書き方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuoteStyle {
+    /// 二重引用符（`"..."`）。
     DoubleQuoted,
+    /// 単一引用符（`'...'`）。
     SingleQuoted,
+    /// 複数行文字列（`'''...'''`）。
     Block,
+    /// 引用符なし（行末まで）。
     Unquoted,
 }
 
+/// 引用符なしの値として書けるか。
+///
+/// 行頭で別のトークンになる文字を除外し、値の走査で行末まで 1 個の文字列として
+/// 読み取れることを確認する。数値・キーワードは文字列として読み戻せない。
+fn can_be_quoteless_value(text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    // 行頭でトークンに分かれる文字（`{ } [ ] , :`）や、文字列・コメントの開始は
+    // 引用符なしの値として読めない
+    if text.starts_with(['{', '}', '[', ']', ',', ':', '"', '\'', '#']) {
+        return false;
+    }
+    if text.starts_with("//") || text.starts_with("/*") || text.starts_with("'''") {
+        return false;
+    }
+    // 行頭・行末の空白は値に含まれない
+    if text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace) {
+        return false;
+    }
+    if text.contains('\n') || text.contains('\r') {
+        return false;
+    }
+    // 区切り文字の手前が数値・キーワードだと、そこで値が終端する
+    let scanned = crate::syntax::scan::scan_quoteless_value(text, 0);
+    if scanned.end != text.len() || scanned.consumed_end != text.len() {
+        return false;
+    }
+
+    crate::syntax::scan::classify_value(text) == crate::syntax::SyntaxKind::UnquotedString
+}
+
+/// 複数行文字列（`'''`）として書けるか。
+///
+/// 本文はエスケープしないため、`'''` を含む場合や、本文の端に `'` がある場合は
+/// 書けない。読み戻しでは行頭の字下げが `'''` のカラム分だけ取り除かれるので、
+/// 行頭に空白のある本文も書けない。
+fn can_be_block_value(text: &str) -> bool {
+    if text.is_empty() || text.contains("'''") || text.contains('\r') {
+        return false;
+    }
+    if text.starts_with('\n') || text.ends_with('\n') {
+        return false;
+    }
+    // 本文の端の `'` は区切りの `'''` と繋がって別のトークンになる
+    if text.starts_with('\'') || text.ends_with('\'') {
+        return false;
+    }
+
+    text.split('\n')
+        .all(|line| !line.starts_with(char::is_whitespace))
+}
+
+/// コメントの書き方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentKind {
+    /// `//` の行コメント。
     Line,
+    /// `#` の行コメント。
     Hash,
+    /// `/* ... */` のブロックコメント。
     Block,
 }
 
 impl CommentKind {
+    /// コメントの生テキストから本文を取り出す（記号と前後の空白を除く）。
     pub fn decode_body(&self, raw: &str) -> String {
         match self {
             CommentKind::Line => raw
@@ -124,7 +193,7 @@ fn decode_escapes(inner: &str) -> String {
     out
 }
 
-/// トークンの行内カラム（複数行文字列のインデント基準）を求める。
+/// トークンの行頭からの桁位置（複数行文字列のインデント除去に使う）。
 pub fn token_column(token: &RedToken) -> usize {
     let mut node = match token.parent() {
         Some(parent) => parent,
@@ -151,6 +220,7 @@ pub fn token_column(token: &RedToken) -> usize {
 }
 
 impl QuoteStyle {
+    /// 生テキストから本文を取り出す。複数行文字列は `indent` 桁分の字下げを除く。
     pub fn decode_body(&self, raw: &str, indent: usize) -> String {
         match self {
             QuoteStyle::DoubleQuoted | QuoteStyle::SingleQuoted => {
@@ -208,6 +278,7 @@ impl QuoteStyle {
         }
     }
 
+    /// 本文をこのスタイルで書ける形に変換する（引用符の中身だけ）。
     pub fn encode_body(&self, body: &str) -> String {
         match self {
             QuoteStyle::SingleQuoted => {
@@ -252,7 +323,10 @@ impl QuoteStyle {
         }
     }
 
-    pub fn is_valid_for_text(&self, text: &str) -> bool {
+    /// キーを引用符なしで書けるか。
+    ///
+    /// キーは `:` で終端するため値より制限が強い。迷う場合は引用符を付ける側に倒す。
+    pub fn can_be_key(&self, text: &str) -> bool {
         match self {
             QuoteStyle::Unquoted => {
                 !text.is_empty()
@@ -266,6 +340,19 @@ impl QuoteStyle {
         }
     }
 
+    /// 文字列をこのスタイルで書いて、元の文字列として読み戻せるか。
+    ///
+    /// 書けない組み合わせ（引用符なしの複数行など）で描画すると文書が壊れるため、
+    /// 描画前に必ずこの関数で確認する。
+    pub fn can_render(&self, text: &str) -> bool {
+        match self {
+            QuoteStyle::DoubleQuoted | QuoteStyle::SingleQuoted => true,
+            QuoteStyle::Unquoted => can_be_quoteless_value(text),
+            QuoteStyle::Block => can_be_block_value(text),
+        }
+    }
+
+    /// 本文をこのスタイルの文字列として組み立てる（引用符を含む）。
     pub fn render(&self, body: &str) -> String {
         let encoded = self.encode_body(body);
         match self {
@@ -276,6 +363,7 @@ impl QuoteStyle {
         }
     }
 
+    /// このスタイルが使うトークン種別。
     pub fn syntax_kind(&self) -> SyntaxKind {
         match self {
             QuoteStyle::DoubleQuoted | QuoteStyle::SingleQuoted => SyntaxKind::String,
@@ -285,26 +373,42 @@ impl QuoteStyle {
     }
 }
 
+/// 1 個のコメントの生テキストと本文。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTrivia {
+    /// コメントの書き方。
     pub kind: CommentKind,
+    /// 記号を含む生テキスト。
     pub text: String,
+    /// 記号と前後の空白を除いた本文。
     pub body: String,
 }
 
+/// 要素の前後にある意味を持たないテキスト。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trivia {
+    /// 空白・タブ。
     Whitespace(String),
-    Newline { kind: NewlineKind, text: String },
+    /// 改行。
+    Newline {
+        /// 改行コードの種類。
+        kind: NewlineKind,
+        /// 実際の改行テキスト。
+        text: String,
+    },
+    /// コメント。
     Comment(CommentTrivia),
+    /// 区切りのカンマ。
     Comma(String),
 }
 
 impl Trivia {
+    /// コメントか。
     pub fn is_comment(&self) -> bool {
         matches!(self, Self::Comment(_))
     }
 
+    /// 改行ならその種類。
     pub fn newline_kind(&self) -> Option<NewlineKind> {
         match self {
             Self::Newline { kind, .. } => Some(*kind),
@@ -312,6 +416,7 @@ impl Trivia {
         }
     }
 
+    /// 構文木へ戻すための green 要素。
     pub fn to_green_element(&self) -> GreenElement {
         match self {
             Trivia::Whitespace(text) => SyntaxKind::Whitespace.create_token(text.as_str()).into(),
@@ -331,13 +436,18 @@ impl Trivia {
     }
 }
 
+/// 要素の配置（深さ・末尾か・トリビアを持つか）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Layout {
+    /// ネストの深さ。
     pub depth: usize,
+    /// 兄弟の中で最後の要素か。
     pub is_last: bool,
+    /// 前後のトリビアをこの要素が持つか。
     pub owns_trivia: bool,
 }
 
+/// 文字列の値（生テキスト・本文・スタイル）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringValue {
     raw: String,
@@ -346,29 +456,49 @@ pub struct StringValue {
 }
 
 impl StringValue {
+    /// 引用符を含む生テキスト。
     pub fn raw_text(&self) -> &str {
         &self.raw
     }
 
+    /// 引用符を外した本文。
     pub fn body_text(&self) -> &str {
         &self.body
     }
 
+    /// この値の文字列スタイル。
     pub fn quote_style(&self) -> QuoteStyle {
         self.quote_style
     }
 }
 
+/// スカラー値（文字列・整数・浮動小数・真偽値・null）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
+    /// 文字列。
     String(StringValue),
-    Integer { raw: String, parsed: Option<i64> },
-    Float { raw: String, parsed: Option<f64> },
+    /// 整数。
+    Integer {
+        /// 元のテキスト。
+        raw: String,
+        /// 解釈した値（i64 の範囲外なら `None`）。
+        parsed: Option<i64>,
+    },
+    /// 浮動小数。
+    Float {
+        /// 元のテキスト。
+        raw: String,
+        /// 解釈した値（数値でなければ `None`）。
+        parsed: Option<f64>,
+    },
+    /// 真偽値。
     Bool(bool),
+    /// null。
     Null,
 }
 
 impl ScalarValue {
+    /// 生テキスト（文字列は引用符を含む）。
     pub fn raw_text(&self) -> Option<&str> {
         match self {
             Self::String(s) => Some(s.raw_text()),
@@ -379,6 +509,7 @@ impl ScalarValue {
         }
     }
 
+    /// 文字列ならスタイル。
     pub fn quote_style(&self) -> Option<QuoteStyle> {
         match self {
             Self::String(s) => Some(s.quote_style()),
@@ -387,14 +518,19 @@ impl ScalarValue {
     }
 }
 
+/// `Value` の中身（コンテナまたはスカラー）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueContent {
+    /// オブジェクト。
     Object(Object),
+    /// 配列。
     Array(Array),
+    /// スカラー。
     Scalar(ScalarValue),
 }
 
 impl ValueContent {
+    /// スカラーなら生テキスト。
     pub fn raw_text(&self) -> Option<&str> {
         match self {
             Self::Scalar(s) => s.raw_text(),
@@ -402,6 +538,7 @@ impl ValueContent {
         }
     }
 
+    /// スカラー文字列ならスタイル。
     pub fn quote_style(&self) -> Option<QuoteStyle> {
         match self {
             Self::Scalar(s) => s.quote_style(),
@@ -410,39 +547,57 @@ impl ValueContent {
     }
 }
 
+/// 構文木のノードを意味ASTの型へ射影する。
 pub trait AstNode: Sized {
+    /// この種別をその型として扱えるか。
     fn can_cast(kind: SyntaxKind) -> bool;
+    /// ノードをその型として読む。
     fn cast(node: RedNode) -> Result<Self, HjsonEditError>;
+    /// 元の構文ノード。
     fn syntax(&self) -> &RedNode;
 
+    /// 元の構文ノード。
     fn node(&self) -> &RedNode {
         self.syntax()
     }
 }
 
+/// 文書のルート。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     syntax: RedNode,
+    /// 要素の直前のトリビア。
     pub leading_trivia: Vec<Trivia>,
+    /// 要素の直後のトリビア。
     pub trailing_trivia: Vec<Trivia>,
+    /// 配置情報。
     pub layout: Layout,
+    /// 本文が空のときの挿入位置。
     pub body_insert_index: usize,
 }
 
+/// オブジェクト（`{ ... }` またはブレースレス）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Object {
     syntax: RedNode,
+    /// 要素の直前のトリビア。
     pub leading_trivia: Vec<Trivia>,
+    /// 要素の直後のトリビア。
     pub trailing_trivia: Vec<Trivia>,
+    /// 区切りの書き方。
     pub delimiter_style: DelimiterStyle,
+    /// 配置情報。
     pub layout: Layout,
     empty_body_insert_index: usize,
     body_end_index: usize,
 }
 
+/// コンテナの区切りの書き方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelimiterStyle {
+    /// `{ ... }` のオブジェクト。
     Braced,
+    /// ブレースレス（文書直下のキー行）。
     Braceless,
 }
 
@@ -499,7 +654,7 @@ impl SlotSpan {
     }
 }
 
-/// 本文が空のコンテナへ最初の要素を挿入する位置。
+/// 本文が空のコンテナへ最初の要素を挿入する位置と、前後の改行の要否。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BodyInsertion {
     index: usize,
@@ -524,60 +679,85 @@ impl BodyInsertion {
     }
 }
 
+/// 配列（`[ ... ]`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Array {
     syntax: RedNode,
+    /// 要素の直前のトリビア。
     pub leading_trivia: Vec<Trivia>,
+    /// 要素の直後のトリビア。
     pub trailing_trivia: Vec<Trivia>,
+    /// 区切りの書き方。
     pub delimiter_style: DelimiterStyle,
+    /// 配置情報。
     pub layout: Layout,
     empty_body_insert_index: usize,
     body_end_index: usize,
 }
 
+/// オブジェクトのメンバー（キー・区切り・値とその前後のトリビア）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
     syntax: RedNode,
+    /// 要素の直前のトリビア。
     pub leading_trivia: Vec<Trivia>,
+    /// キーと `:` の間のトリビア。
     pub before_colon_trivia: Vec<Trivia>,
+    /// `:` と値の間のトリビア。
     pub after_colon_trivia: Vec<Trivia>,
+    /// 要素の直後のトリビア。
     pub trailing_trivia: Vec<Trivia>,
+    /// 配置情報。
     pub layout: Layout,
 }
 
+/// コメントのノード。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Comment {
     syntax: RedNode,
+    /// コメントの内容。
     pub trivia: CommentTrivia,
 }
 
+/// メンバーのキー。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Key {
     syntax: RedNode,
 }
 
+/// 値（コンテナまたはスカラーを包む）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Value {
     syntax: RedNode,
+    /// 配置情報。
     pub layout: Layout,
 }
 
+/// 配列の要素。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayItem {
     syntax: RedNode,
+    /// 要素の直前のトリビア。
     pub leading_trivia: Vec<Trivia>,
+    /// 要素の直後のトリビア。
     pub trailing_trivia: Vec<Trivia>,
+    /// 配置情報。
     pub layout: Layout,
 }
 
+/// 文書直下の項目。
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocumentItem {
+    /// オブジェクト。
     Object(Object),
+    /// 配列。
     Array(Array),
+    /// 値。
     Value(Value),
 }
 
 impl DocumentItem {
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         match self {
             Self::Object(object) => object.detected_string_style(),
@@ -618,6 +798,7 @@ impl AstNode for Document {
 }
 
 impl Document {
+    /// 文書直下の項目（空の文書なら `None`）。
     pub fn item(&self) -> Option<DocumentItem> {
         match self.syntax.kind() {
             SyntaxKind::Root => {
@@ -644,10 +825,12 @@ impl Document {
         }
     }
 
+    /// 本文が空のときの挿入位置。
     pub fn body_insert_index(&self) -> usize {
         self.body_insert_index
     }
 
+    /// 中身がオブジェクトならその射影。
     pub fn object(&self) -> Option<Object> {
         match self.item()? {
             DocumentItem::Object(object) => Some(object),
@@ -659,6 +842,7 @@ impl Document {
         }
     }
 
+    /// 中身が配列ならその射影。
     pub fn array(&self) -> Option<Array> {
         match self.item()? {
             DocumentItem::Array(array) => Some(array),
@@ -670,6 +854,7 @@ impl Document {
         }
     }
 
+    /// 中身がスカラーならその射影。
     pub fn value(&self) -> Option<Value> {
         match self.item()? {
             DocumentItem::Value(value) => Some(value),
@@ -677,6 +862,7 @@ impl Document {
         }
     }
 
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.item().and_then(|item| item.detected_string_style())
     }
@@ -748,6 +934,7 @@ impl AstNode for Object {
 }
 
 impl Object {
+    /// メンバーの一覧。
     pub fn members(&self) -> Vec<Member> {
         self.syntax
             .children()
@@ -766,6 +953,7 @@ impl Object {
         body_insertion(&self.syntax, self.delimiter_style, SyntaxKind::RBrace)
     }
 
+    /// 末尾コメントの手前へ追加するときの挿入位置。
     pub fn append_member_index_before_footer(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
@@ -779,6 +967,7 @@ impl Object {
         self.body_end_index
     }
 
+    /// コメントも含めた本文の末尾へ追加するときの挿入位置。
     pub fn append_member_index_after_comments(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             return self.syntax.children_with_tokens().count();
@@ -787,12 +976,14 @@ impl Object {
         self.body_end_index
     }
 
+    /// キーが一致する最初のメンバー。
     pub fn member_by_key(&self, key: &str) -> Option<Member> {
         self.members()
             .into_iter()
             .find(|member| member.member_key().as_deref() == Some(key))
     }
 
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.members()
             .into_iter()
@@ -866,6 +1057,7 @@ impl AstNode for Array {
 }
 
 impl Array {
+    /// 要素の一覧。
     pub fn items(&self) -> Vec<ArrayItem> {
         self.syntax
             .children()
@@ -874,6 +1066,7 @@ impl Array {
             .collect()
     }
 
+    /// 要素の値の一覧。
     pub fn values(&self) -> Vec<Value> {
         self.items()
             .into_iter()
@@ -891,6 +1084,7 @@ impl Array {
         body_insertion(&self.syntax, self.delimiter_style, SyntaxKind::RBracket)
     }
 
+    /// 末尾コメントの手前へ追加するときの挿入位置。
     pub fn append_value_index_before_footer(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             let children = self.syntax.children_with_tokens().collect::<Vec<_>>();
@@ -904,6 +1098,7 @@ impl Array {
         self.body_end_index
     }
 
+    /// コメントも含めた本文の末尾へ追加するときの挿入位置。
     pub fn append_value_index_after_comments(&self) -> usize {
         if self.delimiter_style == DelimiterStyle::Braceless {
             return self.syntax.children_with_tokens().count();
@@ -912,6 +1107,7 @@ impl Array {
         self.body_end_index
     }
 
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.values()
             .into_iter()
@@ -953,6 +1149,7 @@ impl AstNode for Member {
 }
 
 impl Member {
+    /// キー。
     pub fn key(&self) -> Option<Key> {
         self.syntax
             .children()
@@ -960,6 +1157,7 @@ impl Member {
             .and_then(|child| Key::cast(child).ok())
     }
 
+    /// 値。
     pub fn value(&self) -> Option<Value> {
         self.syntax
             .children()
@@ -967,14 +1165,17 @@ impl Member {
             .and_then(|child| Value::cast(child).ok())
     }
 
+    /// キーの文字列（引用符を外した本文）。
     pub fn member_key(&self) -> Option<String> {
         self.key().and_then(|key| key.body_text())
     }
 
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.value().and_then(|value| value.detected_string_style())
     }
 
+    /// 要素全体（前後のトリビアを含む）の範囲。
     pub fn span_range(&self) -> Range<usize> {
         let start = self
             .syntax
@@ -984,6 +1185,7 @@ impl Member {
         start..end
     }
 
+    /// この要素の直前へ挿入する位置。
     pub fn insert_before_index(&self) -> usize {
         self.span_range().start
     }
@@ -1019,14 +1221,17 @@ impl AstNode for Comment {
 }
 
 impl Comment {
+    /// コメントの書き方。
     pub fn kind(&self) -> CommentKind {
         self.trivia.kind
     }
 
+    /// 記号を含む生テキスト。
     pub fn raw_text(&self) -> &str {
         &self.trivia.text
     }
 
+    /// 記号を除いた本文。
     pub fn body_text(&self) -> &str {
         &self.trivia.body
     }
@@ -1054,6 +1259,7 @@ impl AstNode for Key {
 }
 
 impl Key {
+    /// 文字列トークンの種別とテキスト。
     pub fn token_text_and_kind(&self) -> Option<(SyntaxKind, String)> {
         self.syntax
             .children_with_tokens()
@@ -1070,10 +1276,12 @@ impl Key {
             })
     }
 
+    /// 文字列の生テキスト（引用符を含む）。
     pub fn raw_text(&self) -> Option<String> {
         self.token_text_and_kind().map(|(_, text)| text)
     }
 
+    /// 引用符を外した本文。
     pub fn body_text(&self) -> Option<String> {
         self.syntax
             .children_with_tokens()
@@ -1137,6 +1345,7 @@ impl AstNode for Value {
 }
 
 impl Value {
+    /// 中身（コンテナまたはスカラー）。
     pub fn content(&self) -> Result<ValueContent, HjsonEditError> {
         let child = self
             .syntax
@@ -1214,10 +1423,12 @@ impl Value {
         })
     }
 
+    /// 文字列ならそのスタイル。
     pub fn quote_style(&self) -> Option<QuoteStyle> {
         self.content().ok()?.quote_style()
     }
 
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         match self.content().ok()? {
             ValueContent::Scalar(ScalarValue::String(string)) => Some(string.quote_style()),
@@ -1267,14 +1478,17 @@ impl AstNode for ArrayItem {
 }
 
 impl ArrayItem {
+    /// 値。
     pub fn value(&self) -> Result<Value, HjsonEditError> {
         Value::cast(self.syntax.clone())
     }
 
+    /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
         self.value().ok()?.detected_string_style()
     }
 
+    /// 要素全体（前後のトリビアを含む）の範囲。
     pub fn span_range(&self) -> Range<usize> {
         let start = self
             .syntax
@@ -1284,6 +1498,7 @@ impl ArrayItem {
         start..end
     }
 
+    /// この要素の直前へ挿入する位置。
     pub fn insert_before_index(&self) -> usize {
         self.span_range().start
     }
@@ -1749,6 +1964,7 @@ pub(crate) fn trivia_from_element(element: &NodeOrToken<RedNode, RedToken>) -> O
     }
 }
 
+/// ノードの値から文字列スタイルを推定する。
 pub fn detected_string_style_of_node(node: &RedNode) -> Option<QuoteStyle> {
     match node.kind() {
         SyntaxKind::Root => Document::cast(node.clone())

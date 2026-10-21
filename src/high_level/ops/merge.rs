@@ -150,7 +150,12 @@ fn merge_from_root(
     let target_object = object_body(&target).ok_or_else(|| {
         HjsonEditError::MergeConflict(format!("cannot merge: {path:?} is not an object"))
     })?;
-    let merged = merge_objects(&target_object, source_object)?;
+    // 対象のコンテナは行の途中から始まることもあるため、字下げをここで求めて渡す
+    let base_indent = crate::high_level::indent::line_indent(
+        &crate::high_level::indent::root_of(&target),
+        target_object.text_range().start().into(),
+    );
+    let merged = merge_objects(&target_object, source_object, &base_indent)?;
 
     Ok(target_object.replace_with(merged))
 }
@@ -161,6 +166,7 @@ fn merge_from_root(
 fn merge_objects(
     target_object: &RedNode,
     source_object: &RedNode,
+    base_indent: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let mut current: GreenNode = target_object.green().clone().into();
 
@@ -177,9 +183,9 @@ fn merge_objects(
         current = match member_index(&target, &key) {
             Some(index) => {
                 let existing = &AstObject::cast(target.clone())?.members()[index];
-                merge_existing_member(&current, existing, &source)?
+                merge_existing_member(&current, existing, &source, base_indent)?
             }
-            None => insert_member(&target, &current, &source)?,
+            None => insert_member(&target, &current, &source, base_indent)?,
         };
     }
 
@@ -191,10 +197,17 @@ fn insert_member(
     target_object: &RedNode,
     current: &GreenNode,
     source: &Member,
+    base_indent: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let newline = detect_document_newline(target_object);
     let element = copy_member_with_comments(source, newline);
-    let (at, elements) = plan_insert(target_object, InsertPosition::End, element, newline)?;
+    let (at, elements) = plan_insert(
+        target_object,
+        InsertPosition::End,
+        element,
+        newline,
+        Some(base_indent),
+    )?;
 
     Ok(current.splice_children(at..at, elements))
 }
@@ -204,6 +217,7 @@ fn merge_existing_member(
     object_green: &GreenNode,
     existing: &Member,
     source: &Member,
+    base_indent: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let existing_value = existing
         .value()
@@ -229,7 +243,11 @@ fn merge_existing_member(
             ValueContent::Object(object) => object,
             _ => unreachable!("guarded by both_objects"),
         };
-        let merged = merge_objects(existing_object.syntax(), source_object.syntax())?;
+        let merged = merge_objects(
+            existing_object.syntax(),
+            source_object.syntax(),
+            base_indent,
+        )?;
         GreenNode::new(SyntaxKind::Value.into(), vec![merged.into()])
     } else {
         // 後勝ち。キーとコメントはホスト側のものを保ち、値だけを差し替える。
@@ -289,8 +307,7 @@ fn copy_member_with_comments(source: &Member, newline: NewlineKind) -> RenderedE
 mod tests {
     use super::*;
     use crate::high_level::{
-        ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue,
-        HjsonDocument,
+        ops::object::HjsonDocumentEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
     };
     use crate::{Format, FormatConfig, RedNode};
 

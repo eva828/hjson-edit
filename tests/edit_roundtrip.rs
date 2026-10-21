@@ -5,7 +5,7 @@
 //! ことを、コンテナの形と値の種類の組み合わせごとに確認する。
 
 use hjson_edit::high_level::{
-    ops::object::HjsonDocumentObjectEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
+    ops::object::HjsonDocumentEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
 };
 use hjson_edit::HjsonDocumentMerge;
 
@@ -35,7 +35,7 @@ fn set(input: &str, path: &str, value: impl Into<HjsonValue>) -> HjsonDocument {
 fn append_unquoted_string_to_multiline_object() {
     assert_eq!(
         set("{\n  a: 1\n}\n", "b", "hello").to_string(),
-        "{\n  a: 1\nb: hello\n}\n"
+        "{\n  a: 1\n  b: hello\n}\n"
     );
 }
 
@@ -58,7 +58,7 @@ fn append_number_keeps_single_line_object() {
 fn append_to_empty_object() {
     // 行末でしか終端できない値なので、閉じ区切りの前で改行する
     assert_eq!(set("{}", "name", "app").to_string(), "{name: app\n}");
-    assert_eq!(set("{\n}", "name", "app").to_string(), "{\nname: app\n}");
+    assert_eq!(set("{\n}", "name", "app").to_string(), "{\n  name: app\n}");
     assert_eq!(set("{}", "count", 1).to_string(), "{count: 1}");
 }
 
@@ -66,7 +66,7 @@ fn append_to_empty_object() {
 fn push_unquoted_string_into_multiline_array() {
     assert_eq!(
         set("[\n  a\n]\n", "[-]", "nv").to_string(),
-        "[\n  a\nnv\n]\n"
+        "[\n  a\n  nv\n]\n"
     );
 }
 
@@ -79,7 +79,7 @@ fn push_into_single_line_array() {
 #[test]
 fn push_into_empty_array() {
     assert_eq!(set("[]", "[-]", "a").to_string(), "[a\n]");
-    assert_eq!(set("[\n]", "[-]", 1).to_string(), "[\n1\n]");
+    assert_eq!(set("[\n]", "[-]", 1).to_string(), "[\n  1\n]");
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn append_unquoted_string_keeps_crlf_document_parseable() {
         .set(HjsonObjectPath::parse("b").unwrap(), "hello")
         .unwrap();
     assert_roundtrip(&updated);
-    assert_eq!(updated.to_string(), "{\r\n  a: 1\r\nb: hello\r\n}\r\n");
+    assert_eq!(updated.to_string(), "{\r\n  a: 1\r\n  b: hello\r\n}\r\n");
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn set_container_value_ending_with_unquoted_string() {
         HjsonValue::String("hello".to_string()),
     )]);
     let doc = set("{\n  a: 1\n}\n", "b", value.clone());
-    assert_eq!(doc.to_string(), "{\n  a: 1\nb: {x:hello\n}\n}\n");
+    assert_eq!(doc.to_string(), "{\n  a: 1\n  b: {x:hello\n}\n}\n");
     let doc = set("{a: 1}", "b", value);
     assert_eq!(doc.to_string(), "{a: 1, b: {x:hello\n}}");
 }
@@ -186,7 +186,7 @@ fn merge_unquoted_string_member_is_parseable() {
         .merge_from(&HjsonObjectPath::parse("").unwrap(), &source)
         .unwrap();
     assert_roundtrip(&merged);
-    assert_eq!(merged.to_string(), "{\n  a: 1\nb: two\n}\n");
+    assert_eq!(merged.to_string(), "{\n  a: 1\n  b: two\n}\n");
 
     let host = HjsonDocument::parse("{}").unwrap();
     let source = HjsonDocument::parse("{\n  unq: plain\n}\n").unwrap();

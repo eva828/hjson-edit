@@ -9,8 +9,7 @@
 use hjson_edit::{
     high_level::{
         ops::{
-            comment::HjsonDocumentCommentEdit, merge::HjsonDocumentMerge,
-            object::HjsonDocumentObjectEdit,
+            comment::HjsonDocumentCommentEdit, merge::HjsonDocumentMerge, object::HjsonDocumentEdit,
         },
         path::{HjsonCommentPath, HjsonObjectPath},
     },
@@ -89,7 +88,7 @@ fn merge_copies_source_comments() {
     assert_eq!(value(&merged, "keep"), HjsonValue::Integer(1));
     assert_eq!(
         merged.to_string(),
-        "{\n  keep: 1\n// lead\na: 1 // inline\n}\n"
+        "{\n  keep: 1\n  // lead\n  a: 1 // inline\n}\n"
     );
 }
 
@@ -141,7 +140,7 @@ fn append_goes_before_footer_comment() {
     let doc = HjsonDocument::parse("{\n  a: 1\n  // footer\n}\n").unwrap();
     let updated = doc.set(path("b"), 2).unwrap();
 
-    assert_eq!(updated.to_string(), "{\n  a: 1\nb: 2\n  // footer\n}\n");
+    assert_eq!(updated.to_string(), "{\n  a: 1\n  b: 2\n  // footer\n}\n");
 }
 
 #[test]
@@ -149,7 +148,7 @@ fn append_to_array_goes_before_footer_comment() {
     let doc = HjsonDocument::parse("[\n  1\n  // footer\n]\n").unwrap();
     let updated = doc.set(path("[+]"), 2).unwrap();
 
-    assert_eq!(updated.to_string(), "[\n  1\n2\n  // footer\n]\n");
+    assert_eq!(updated.to_string(), "[\n  1\n  2\n  // footer\n]\n");
 }
 
 // ------------------------------------------------------------------
