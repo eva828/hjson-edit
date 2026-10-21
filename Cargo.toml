@@ -16,6 +16,8 @@ cli = ["dep:clap", "dep:anyhow"]
 net-corpus = ["dep:reqwest", "dep:serde_json"]
 # hjson-cs 公式テスト資産との適合テスト専用。既定では reqwest をビルドしない
 net-conformance = ["dep:reqwest"]
+# 準拠検証用の開発ツール（canon など）。既定ではビルドしない
+dev-tools = []
 
 [dependencies]
 rowan = "0.15"
@@ -36,6 +38,11 @@ tempfile = "3.27.0"
 name = "hjson-edit"
 path = "src/main.rs"
 required-features = ["cli"]
+
+[[bin]]
+name = "canon"
+path = "src/bin/canon.rs"
+required-features = ["dev-tools"]
 
 [lib]
 name = "hjson_edit"

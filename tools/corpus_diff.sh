@@ -21,7 +21,7 @@ echo "== 基準の実行（hjson-cs）"
 tools/cs-oracle/run.sh dir "$DIR" > /tmp/corpus-cs.tsv
 
 echo "== 実装の実行"
-cargo run --release --quiet --example canon -- dir "$DIR" > /tmp/corpus-ours.tsv
+cargo run --release --quiet --features dev-tools --bin canon -- dir "$DIR" > /tmp/corpus-ours.tsv
 
 echo "== 比較"
 python3 tools/compare_canon.py /tmp/corpus-cs.tsv /tmp/corpus-ours.tsv \
