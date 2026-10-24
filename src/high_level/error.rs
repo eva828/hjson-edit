@@ -1,4 +1,5 @@
 use line_index::LineIndex;
+use std::sync::Arc;
 
 use crate::{high_level::path::HjsonObjectPath, syntax::lexer::LexError, ParseError, SyntaxKind};
 
@@ -41,20 +42,24 @@ pub enum HjsonEditError {
         detail: String,
     },
     /// パースエラー。
-    #[error("Parse errors:\n{}", format_parse_errors(errors, line_index))]
+    #[error("Parse errors:\n{}", format_parse_errors(errors, line_index, input))]
     ParseError {
         /// 検出したエラー。
         errors: Vec<ParseError>,
         /// 行・列の計算に使う索引。
         line_index: LineIndex,
+        /// 行・列の計算に使う入力（列は文字数で数える）。
+        input: Arc<str>,
     },
     /// 字句エラー。
-    #[error("Lex errors:\n{}", format_lex_errors(errors, line_index))]
+    #[error("Lex errors:\n{}", format_lex_errors(errors, line_index, input))]
     LexError {
         /// 検出したエラー。
         errors: Vec<LexError>,
         /// 行・列の計算に使う索引。
         line_index: LineIndex,
+        /// 行・列の計算に使う入力（列は文字数で数える）。
+        input: Arc<str>,
     },
     /// 配列の index が範囲外。
     #[error("Array index out of bounds: index {index}, length {len}")]
@@ -115,18 +120,18 @@ fn format_text(text: &str) -> String {
     format!("{head:?} … ({total} chars)")
 }
 
-fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex) -> String {
+fn format_parse_errors(errors: &[ParseError], line_index: &LineIndex, input: &str) -> String {
     errors
         .iter()
-        .map(|e| e.format_with_line_index(line_index))
+        .map(|e| e.format_with_source(line_index, input))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_lex_errors(errors: &[LexError], line_index: &LineIndex) -> String {
+fn format_lex_errors(errors: &[LexError], line_index: &LineIndex, input: &str) -> String {
     errors
         .iter()
-        .map(|e| e.format_with_line_index(line_index))
+        .map(|e| e.format_with_source(line_index, input))
         .collect::<Vec<_>>()
         .join("\n")
 }

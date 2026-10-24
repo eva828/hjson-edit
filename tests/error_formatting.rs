@@ -60,3 +60,53 @@ fn skipped_input_warnings_are_one_based() {
         warnings[0]
     );
 }
+
+#[test]
+fn columns_count_characters_not_bytes() {
+    // "  名前 1" は 2 スペース + 名前（2 文字）+ スペース + 1
+    let error = HjsonDocument::parse("{\n  名前 1\n}\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("line 2, column 5"),
+        "列は文字数（バイトなら 9）: {error}"
+    );
+
+    // 絵文字（4 バイト）も 1 文字として数える
+    let error = HjsonDocument::parse("{\n  絵文字😀 1\n}\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("line 2, column 7"), "列は文字数: {error}");
+}
+
+#[test]
+fn a_tab_counts_as_one_column() {
+    let error = HjsonDocument::parse("{\n\tabc 1\n}\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("line 2, column 5"), "タブは 1 文字: {error}");
+}
+
+#[test]
+fn character_columns_do_not_change_the_line_numbers() {
+    let error = HjsonDocument::parse("{\n  a: 1\n  名前 2\n}\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("line 3, column 5"),
+        "行は 1 始まりのまま、列は文字数: {error}"
+    );
+}
+
+#[test]
+fn warnings_count_characters_too() {
+    let document = HjsonDocument::parse("{\n  名前: 1\n}\n/* x\n").unwrap();
+    let warnings = document.warnings();
+
+    assert_eq!(warnings.len(), 1, "warnings: {warnings:?}");
+    assert!(
+        warnings[0].contains("line 4, column 1"),
+        "警告の位置: {}",
+        warnings[0]
+    );
+}

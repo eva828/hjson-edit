@@ -86,12 +86,13 @@ impl HjsonDocument {
             return Err(HjsonEditError::LexError {
                 errors: fatal.into_iter().cloned().collect(),
                 line_index: LineIndex::new(input),
+                input: std::sync::Arc::from(input),
             });
         }
 
         let warnings: Vec<String> = warnings
             .iter()
-            .map(|error| error.format_with_line_index(&LineIndex::new(input)))
+            .map(|error| error.format_with_source(&LineIndex::new(input), input))
             .collect();
 
         let parser = Parser::new(input, lex_result.tokens);
@@ -101,6 +102,7 @@ impl HjsonDocument {
             return Err(HjsonEditError::ParseError {
                 errors: result.errors,
                 line_index: LineIndex::new(input),
+                input: std::sync::Arc::from(input),
             });
         }
 

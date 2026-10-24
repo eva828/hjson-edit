@@ -1,5 +1,4 @@
 use line_index::LineIndex;
-use rowan::TextSize;
 
 use super::SyntaxKind;
 /// HJSON字句解析器
@@ -10,7 +9,9 @@ use crate::number::{HjsonNumber, NumberKind};
 /// 字句解析エラー（エラーメッセージと発生したバイトオフセットを記録）
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexError {
+    /// エラーの説明。
     pub message: String,
+    /// 入力内のバイト位置。表示する列は文字数に変換する。
     pub offset: usize,
 }
 
@@ -22,13 +23,17 @@ impl LexError {
         }
     }
 
-    pub fn format_with_line_index(&self, line_index: &LineIndex) -> String {
-        // 表示は 1 始まり（エディタやコンパイラの慣習に合わせる）
-        let lc = line_index.line_col(TextSize::from(self.offset as u32));
+    /// 行・列（1 始まり）付きの表示にする。
+    ///
+    /// 列は行頭からの**文字数**（Unicode スカラー値）で数える。位置を求められない
+    /// 場合はバイト位置をそのまま使う。
+    pub fn format_with_source(&self, line_index: &LineIndex, source: &str) -> String {
+        let (line, column) =
+            super::char_line_col(line_index, source, self.offset).unwrap_or((0, self.offset));
         format!(
             "Error at line {}, column {}: {}",
-            lc.line + 1,
-            lc.col + 1,
+            line + 1,
+            column + 1,
             self.message
         )
     }

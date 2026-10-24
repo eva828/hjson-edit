@@ -7,6 +7,7 @@ pub mod lexer;
 pub mod parser;
 pub mod scan;
 
+use line_index::{LineCol, LineIndex, TextSize};
 use rowan::Language;
 use rowan::{SyntaxNode, SyntaxToken};
 use std::fmt;
@@ -38,6 +39,25 @@ impl NewlineKind {
             _ => None,
         }
     }
+}
+
+/// エラー位置の行番号（0 始まり）と列番号（文字数、0 始まり）。
+///
+/// 列は行頭からの**文字数**（Unicode スカラー値）で数える。`line-index` の
+/// `LineCol` はバイト数なので、そのままでは日本語の行で表示桁とずれる。
+pub(crate) fn char_line_col(
+    line_index: &LineIndex,
+    source: &str,
+    offset: usize,
+) -> Option<(usize, usize)> {
+    let line_col = line_index.try_line_col(TextSize::from(u32::try_from(offset).ok()?))?;
+    let line_start = line_index.offset(LineCol {
+        line: line_col.line,
+        col: 0,
+    })?;
+    let head = source.get(usize::from(line_start)..offset)?;
+
+    Some((line_col.line as usize, head.chars().count()))
 }
 
 /// HJSON構文要素の種別

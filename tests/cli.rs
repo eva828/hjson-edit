@@ -667,3 +667,23 @@ fn cli_edit_keeps_multiline_blocks_inline_when_the_element_is_inline() {
     assert_eq!(stdout, "{a: '''x\ny'''}\n");
     assert_parses(&stdout);
 }
+
+#[test]
+fn cli_parse_reports_character_columns() {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{{\n  名前 1\n}}\n").unwrap();
+    file.flush().unwrap();
+
+    let output = Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["parse", file.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("line 2, column 5"),
+        "列は文字数（バイトなら 9）: {stderr}"
+    );
+}
