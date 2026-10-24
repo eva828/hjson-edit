@@ -109,21 +109,18 @@ fn format_command() -> Command {
             Arg::new("indent-style")
                 .long("indent-style")
                 .value_parser(["spaces", "tabs"])
-                .default_value("spaces")
-                .help("Indent style: spaces or tabs (default: spaces)"),
+                .help("Indent style: spaces or tabs (default: detected from the document)"),
         )
         .arg(
             Arg::new("indent-width")
                 .long("indent-width")
                 .value_parser(clap::value_parser!(u8).range(1..=8))
-                .default_value("2")
-                .help("Indent width in spaces (default: 2, only used with --indent-style spaces)"),
+                .help("Indent width in spaces (default: detected from the document)"),
         )
         .arg(
             Arg::new("newline")
                 .long("newline")
                 .value_parser(["lf", "crlf"])
-                .default_value("lf")
-                .help("Newline style: lf or crlf (default: lf)"),
+                .help("Newline style: lf or crlf (default: detected from the document)"),
         )
 }

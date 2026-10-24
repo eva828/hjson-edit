@@ -341,7 +341,11 @@ line'''
         let text = render(&merged);
         assert!(text.contains("unq: plain"), "unquoted lost:\n{text}");
         assert!(text.contains("q: \"quoted\""), "quoted lost:\n{text}");
-        assert!(text.contains("b: '''block\nline'''"), "block lost:\n{text}");
+        // 複数行の Block 文字列は整形で字下げ付きの形に書き直される（値は変わらない）
+        assert!(
+            text.contains("b: '''\n    block\n    line\n  '''"),
+            "block lost:\n{text}"
+        );
     }
 
     #[test]

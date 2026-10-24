@@ -1,7 +1,7 @@
 use rowan::GreenNode;
 
 use super::{Format, FormatConfig};
-use crate::ast::{DelimiterStyle, Document, DocumentItem};
+use crate::ast::{DelimiterStyle, Document, DocumentItem, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
 
 impl Format for Document {
@@ -9,7 +9,7 @@ impl Format for Document {
         let mut children: Vec<GreenElement> = Vec::new();
 
         for triv in &self.leading_trivia {
-            children.push(triv.to_green_element());
+            children.push(trivia_element(triv, config));
         }
 
         if let Some(item) = self.item() {
@@ -32,9 +32,19 @@ impl Format for Document {
         }
 
         for triv in &self.trailing_trivia {
-            children.push(triv.to_green_element());
+            children.push(trivia_element(triv, config));
         }
 
         GreenNode::new(SyntaxKind::Root.into(), children)
+    }
+}
+
+/// 文書の前後にあるトリビア。改行は整形後の改行コードで出力する。
+fn trivia_element(trivia: &Trivia, config: &FormatConfig) -> GreenElement {
+    match trivia {
+        Trivia::Newline { .. } => SyntaxKind::Newline
+            .create_token(config.newline.as_str())
+            .into(),
+        other => other.to_green_element(),
     }
 }

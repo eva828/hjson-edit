@@ -21,7 +21,7 @@ pub(crate) fn set_path(
     set_in(root, path.segments(), value)
 }
 
-fn set_in(
+pub(crate) fn set_in(
     current: &HjsonValue,
     segments: &[PathSegment],
     value: HjsonValue,

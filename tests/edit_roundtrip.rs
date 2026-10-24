@@ -128,18 +128,18 @@ fn set_container_value_ending_with_unquoted_string() {
         HjsonValue::String("hello".to_string()),
     )]);
     let doc = set("{\n  a: 1\n}\n", "b", value.clone());
-    assert_eq!(doc.to_string(), "{\n  a: 1\n  b: {x:hello\n}\n}\n");
+    assert_eq!(doc.to_string(), "{\n  a: 1\n  b: {x: hello\n}\n}\n");
     let doc = set("{a: 1}", "b", value);
-    assert_eq!(doc.to_string(), "{a: 1, b: {x:hello\n}}");
+    assert_eq!(doc.to_string(), "{a: 1, b: {x: hello\n}}");
 }
 
 #[test]
 fn set_nested_path_creates_all_parents() {
     // 先頭のキーが無い場合でも、途中のコンテナをまとめて作成する
-    assert_eq!(set("{}\n", "a.b", 1).to_string(), "{a: {b:1}}\n");
+    assert_eq!(set("{}\n", "a.b", 1).to_string(), "{a: {b: 1}}\n");
     assert_eq!(
         set("{x: 1}\n", "a.b.c", "hello").to_string(),
-        "{x: 1, a: {b:{c:hello\n}}}\n"
+        "{x: 1, a: {b: {c: hello\n}}}\n"
     );
 }
 
@@ -152,7 +152,7 @@ fn set_container_value_with_unquoted_string_before_another_element() {
     ]);
     assert_eq!(
         set("{a: 1}", "b", object).to_string(),
-        "{a: 1, b: {x:hello\ny:1}}"
+        "{a: 1, b: {x: hello\ny: 1}}"
     );
 
     let array = HjsonValue::Array(vec![

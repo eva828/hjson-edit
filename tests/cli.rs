@@ -135,6 +135,27 @@ fn edit_stdout(args: &[&str], input: &str) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+/// サブコマンドの出力（`format` など、編集結果を標準出力に書くもの）。
+fn format_stdout(args: &[&str], input: &str) -> String {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{input}").unwrap();
+    file.flush().unwrap();
+
+    let output = Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(args)
+        .arg(file.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
 /// テキストが `parse` で読めること。
 fn assert_parses(text: &str) {
     let mut file = NamedTempFile::new().unwrap();
@@ -191,8 +212,7 @@ fn cli_edit_parses_value_as_hjson() {
 
     assert!(stdout.contains("name: \"true\""), "{stdout}");
     assert!(stdout.contains("flag: true"), "{stdout}");
-    assert!(stdout.contains("items: ["), "{stdout}");
-    assert!(stdout.contains("1\n    2"), "{stdout}");
+    assert!(stdout.contains("items: [1,2]"), "{stdout}");
     assert!(stdout.contains("msg: \"a\\nb\""), "{stdout}");
     assert_parses(&stdout);
 }
@@ -302,10 +322,34 @@ fn cli_edit_reports_edit_errors_without_writing() {
 }
 
 #[test]
-fn cli_edit_appends_string_and_formats_changed_container() {
+fn cli_edit_appends_string_keeping_the_container_inline() {
+    // 既定は保存重視。1 行で書かれたコンテナは展開しない
     let stdout = edit_stdout(&["edit", "--set", "b", "hello"], "{a: 1}\n");
+    assert_eq!(stdout, "{a: 1, b: hello\n}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_format_expands_the_changed_container() {
+    let stdout = edit_stdout(&["edit", "--format", "--set", "b", "hello"], "{a: 1}\n");
     assert_eq!(stdout, "{\n  a: 1\n  b: hello\n}\n");
     assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_keeps_blank_lines_and_inline_containers() {
+    let input = "{\n  a: 1\n\n  b: {x: 1}\n}\n";
+    let stdout = edit_stdout(&["edit", "--set", "a", "2"], input);
+
+    assert_eq!(stdout, "{\n  a: 2\n\n  b: {x: 1}\n}\n");
+}
+
+#[test]
+fn cli_edit_does_not_expand_inline_containers_of_the_edited_container() {
+    let input = "{\n  a: 1\n  b: {x: 1}\n}\n";
+    let stdout = edit_stdout(&["edit", "--set", "a", "2"], input);
+
+    assert_eq!(stdout, "{\n  a: 2\n  b: {x: 1}\n}\n");
 }
 
 #[test]
@@ -360,13 +404,18 @@ fn cli_edit_in_place_writes_formatted_output() {
         .success();
 
     let content = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(content, "{\n  a: 1\n  b: hello\n}\n");
+    assert_eq!(content, "{a: 1, b: hello\n}\n");
     assert_parses(&content);
 }
 
 #[test]
 fn cli_edit_creates_missing_nested_path() {
+    // 1 行の文書は 1 行のまま（既定は保存重視）
     let stdout = edit_stdout(&["edit", "--set", "a.b", "1"], "{}\n");
+    assert_eq!(stdout, "{a: {b: 1}}\n");
+    assert_parses(&stdout);
+
+    let stdout = edit_stdout(&["edit", "--format", "--set", "a.b", "1"], "{}\n");
     assert_eq!(stdout, "{\n  a: {\n    b: 1\n  }\n}\n");
     assert_parses(&stdout);
 }
@@ -374,7 +423,10 @@ fn cli_edit_creates_missing_nested_path() {
 #[test]
 fn cli_edit_formats_the_container_that_received_the_insertion() {
     // 中間コンテナを生成する場合は、実在する最深の祖先（ここでは a）を整形する
-    let stdout = edit_stdout(&["edit", "--set", "a.b.c", "hello"], "{\n  a: {\n  }\n}\n");
+    let stdout = edit_stdout(
+        &["edit", "--format", "--set", "a.b.c", "hello"],
+        "{\n  a: {\n  }\n}\n",
+    );
     assert_eq!(
         stdout,
         "{\n  a: {\n    b: {\n      c: hello\n    }\n  }\n}\n"
@@ -388,7 +440,7 @@ fn cli_edit_string_style_applies_to_subsequent_sets() {
         &["edit", "--string-style", "double", "--set", "b", "hello"],
         "{a: 1}\n",
     );
-    assert_eq!(stdout, "{\n  a: 1\n  b: \"hello\"\n}\n");
+    assert_eq!(stdout, "{a: 1, b: \"hello\"}\n");
 
     let stdout = edit_stdout(
         &[
@@ -401,7 +453,7 @@ fn cli_edit_string_style_applies_to_subsequent_sets() {
         ],
         "{a: 1}\n",
     );
-    assert_eq!(stdout, "{\n  a: 1\n  b: hello world\n}\n");
+    assert_eq!(stdout, "{a: 1, b: hello world\n}\n");
 }
 
 #[test]
@@ -410,7 +462,7 @@ fn cli_edit_inline_string_style_overrides_string_style() {
         &["edit", "--string-style", "unquoted", "--set", "b", "\"x\""],
         "{a: 1}\n",
     );
-    assert_eq!(stdout, "{\n  a: 1\n  b: \"x\"\n}\n");
+    assert_eq!(stdout, "{a: 1, b: \"x\"}\n");
 }
 
 #[test]
@@ -455,7 +507,7 @@ fn cli_edit_output_option_writes_formatted_file() {
         .success();
 
     let content = std::fs::read_to_string(output.path()).unwrap();
-    assert_eq!(content, "{\n  a: 1\n  b: hello\n}\n");
+    assert_eq!(content, "{a: 1, b: hello\n}\n");
 }
 
 #[test]
@@ -531,4 +583,87 @@ fn cli_reports_the_os_error_for_missing_files() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("No such file or directory"));
+}
+
+#[test]
+fn cli_format_keeps_the_document_style_by_default() {
+    // CRLF + 4 スペースの文書は、指定が無ければその体裁で整形する
+    let stdout = format_stdout(
+        &["format"],
+        "{\r\n    a: 1\r\n    o: {\r\n        b: 2\r\n    }\r\n}\r\n",
+    );
+
+    assert_eq!(
+        stdout,
+        "{\r\n    a: 1\r\n    o: {\r\n        b: 2\r\n    }\r\n}\r\n"
+    );
+}
+
+#[test]
+fn cli_format_newline_option_does_not_mix_line_endings() {
+    let stdout = format_stdout(
+        &["format", "--newline", "lf"],
+        "{\r\n  a: 1\r\n  o: {\r\n    b: 2\r\n  }\r\n}\r\n",
+    );
+
+    assert!(!stdout.contains('\r'), "CR が残っている: {stdout:?}");
+    assert_eq!(stdout, "{\n  a: 1\n  o: {\n    b: 2\n  }\n}\n");
+}
+
+#[test]
+fn cli_edit_with_indent_width_preserves_multiline_strings() {
+    let input = "{\n  s: '''\n        deep\n  '''\n  a: 1\n}\n";
+    let stdout = edit_stdout(&["edit", "--set", "a", "2", "--indent-width", "4"], input);
+
+    // 値 "   deep" が保たれるように、本文の字下げも一緒に動く
+    assert_eq!(
+        stdout,
+        "{\n    s: '''\n          deep\n    '''\n    a: 2\n}\n"
+    );
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_replacing_a_block_value_formats_the_multiline_block() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "s", "'''line1\nline2'''"],
+        "{\n  s: '''x'''\n}\n",
+    );
+
+    assert_eq!(stdout, "{\n  s: '''\n    line1\n    line2\n  '''\n}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_keeps_an_inline_document_inline_when_creating_a_container() {
+    // 1 行の文書に行頭でないコンテナを作っても、文書全体を展開しない
+    let stdout = edit_stdout(&["edit", "--set", "b", "{x: 1}"], "{a: 1}\n");
+
+    assert_eq!(stdout, "{a: 1, b: {x: 1}}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_does_not_expand_the_parent_of_a_new_container() {
+    let stdout = edit_stdout(&["edit", "--set", "x.y", "{z: 1}"], "{a: 1, x: {b: 2}}\n");
+
+    assert_eq!(stdout, "{a: 1, x: {b: 2, y: {z: 1}}}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_writes_block_strings_at_the_element_indent() {
+    // 字下げの浅い文書でも、本文の字下げを要素に合わせて値を保つ
+    let stdout = edit_stdout(&["edit", "--set", "a", "'''x\ny'''"], "{\na: 1\n}\n");
+
+    assert_eq!(stdout, "{\na: '''\n  x\n  y\n'''\n}\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_keeps_multiline_blocks_inline_when_the_element_is_inline() {
+    let stdout = edit_stdout(&["edit", "--set", "a", "'''x\ny'''"], "{a: 1}\n");
+
+    assert_eq!(stdout, "{a: '''x\ny'''}\n");
+    assert_parses(&stdout);
 }

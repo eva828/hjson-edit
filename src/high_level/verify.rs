@@ -66,6 +66,25 @@ pub(crate) fn value_edit(
     Ok(())
 }
 
+/// 2 つの木の文書全体の値が同じか。整形は値を変えてはならない。
+pub(crate) fn values_unchanged(
+    previous: &RedNode,
+    updated: &RedNode,
+) -> Result<(), HjsonEditError> {
+    let empty = HjsonObjectPath::from_segments(Vec::new());
+    let expected = value_of(previous, &empty)?;
+    let actual = reparsed_value(updated, &empty)?;
+
+    if !crate::high_level::value_ops::values_equal(&expected, &actual) {
+        return Err(HjsonEditError::InvalidEdit {
+            target: "(document)".to_string(),
+            detail: "values changed".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 /// 編集で変化してよい範囲。解決できない場合は `None`（コメントは一切変わってはならない）。
 fn edited_range(root: &RedNode, path: &HjsonObjectPath, region: EditedRegion) -> Option<TextRange> {
     match region {
@@ -300,7 +319,10 @@ fn slots_by_key(root: &RedNode) -> Result<Vec<(String, Vec<String>)>, HjsonEditE
         .collect())
 }
 
-/// 文書の値。取り出せない場合は編集結果として不正。
+/// 文書全体の値。取り出せない場合は編集結果として不正。
+///
+/// `path` はエラー表示にだけ使う。比較は常に文書全体で行うため、
+/// 編集したパス以外の値が変わった場合も [`HjsonEditError::InvalidEdit`] になる。
 fn value_of(root: &RedNode, path: &HjsonObjectPath) -> Result<HjsonValue, HjsonEditError> {
     HjsonValue::from_node(root).map_err(|error| HjsonEditError::InvalidEdit {
         target: path.to_string(),
@@ -322,6 +344,10 @@ fn reparsed_value(root: &RedNode, path: &HjsonObjectPath) -> Result<HjsonValue, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn path(raw: &str) -> HjsonObjectPath {
+        HjsonObjectPath::parse(raw).unwrap()
+    }
 
     fn slots_of(text: &str) -> Vec<(String, Vec<String>)> {
         let document = HjsonDocument::parse(text).unwrap();
@@ -360,6 +386,36 @@ mod tests {
 
     fn object_path(raw: &str) -> HjsonObjectPath {
         HjsonObjectPath::parse(raw.to_string()).unwrap()
+    }
+
+    #[test]
+    fn value_edit_detects_changes_outside_the_edited_path() {
+        use crate::high_level::ops::object::HjsonDocumentEdit;
+        use crate::high_level::value_ops::set_in;
+
+        let previous = HjsonDocument::parse("{\n  a: 1\n  b: 2\n}\n").unwrap();
+        // 編集対象（a）は正しいが、無関係な b も変わる編集を注入する
+        let updated = previous
+            .clone()
+            .set(path("a"), 9)
+            .unwrap()
+            .set(path("b"), 99)
+            .unwrap();
+
+        // 期待値は「a だけを 9 にする」だが、編集結果は b も変わっている
+        let error = value_edit(
+            previous.syntax_root(),
+            updated.syntax_root(),
+            &path("a"),
+            |document| set_in(document, &[PathSegment::Key("a".to_string())], 9.into()),
+            EditedRegion::Slot,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::InvalidEdit { .. }),
+            "unexpected error: {error:?}"
+        );
     }
 
     #[test]

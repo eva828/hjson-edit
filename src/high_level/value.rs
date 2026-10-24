@@ -214,7 +214,17 @@ impl HjsonValue {
             HjsonValue::Object(entries) => {
                 let mut children = vec![SyntaxKind::LBrace.create_token("{").into()];
                 for (idx, (key, value)) in entries.iter().enumerate() {
-                    children.push(value.render_member_node(key, None, config, &[], &[]).into());
+                    children.push(
+                        value
+                            .render_member_node(
+                                key,
+                                None,
+                                config,
+                                &[],
+                                &[Trivia::Whitespace(" ".to_string())],
+                            )
+                            .into(),
+                    );
                     if idx + 1 != entries.len() {
                         let separator = render_separator(children.last().unwrap(), config);
                         children.push(separator);

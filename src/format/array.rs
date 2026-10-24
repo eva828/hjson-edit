@@ -1,5 +1,6 @@
 use rowan::GreenNode;
 
+use super::value::multiline_block_node;
 use super::{make_comment_node, Format, FormatConfig};
 use crate::ast::{Array as AstArray, DelimiterStyle, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
@@ -64,7 +65,15 @@ impl Format for AstArray {
             }
 
             if let Ok(val) = item.value() {
-                children.push(val.format_at(config, depth).into());
+                let formatted = multiline_block_node(
+                    &val,
+                    &format!("{indent_str}{}", config.indent.unit()),
+                    indent_str.chars().count(),
+                    &indent_str,
+                    nl,
+                )
+                .unwrap_or_else(|| val.format_at(config, depth));
+                children.push(formatted.into());
             }
 
             for triv in &item.trailing_trivia {

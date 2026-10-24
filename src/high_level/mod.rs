@@ -198,6 +198,24 @@ impl HjsonDocument {
         self
     }
 
+    /// パスが指す要素が行頭から始まるか。
+    ///
+    /// 行の途中にある要素を複数行にすると、親のレイアウトと混ざる。整形の可否を
+    /// 判断するために使う。
+    ///
+    /// # エラー
+    ///
+    /// - パスが存在しない場合は [`HjsonEditError::PathNotFound`]
+    pub fn starts_at_line(&self, path: &HjsonObjectPath) -> Result<bool, HjsonEditError> {
+        let resolved = crate::high_level::resolve::PathResolver::new(self.syntax_root().clone())
+            .resolve_node(path)?;
+
+        Ok(crate::high_level::indent::is_at_line_start(
+            self.syntax_root(),
+            resolved.text_range().start().into(),
+        ))
+    }
+
     /// この文書で検出した改行コード。
     pub fn current_newline(&self) -> &str {
         &self.newline

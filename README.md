@@ -4,8 +4,9 @@
 
 - **編集**: `set` / `remove` / コメント操作 / `merge_from` は最小限のテキスト変更だけを行う
 - **検証**: 編集結果は毎回、再パース・値の一致・コメントの保存を検査する（崩れた結果はエラー）
-- **整形**: 全体整形（`format`）と、指定したコンテナだけの部分整形（`format_container`）
-- **CLI**: `edit` は編集後、変更したコンテナだけを文書の体裁に合わせて整形して出力する
+- **整形**: 全体整形（`format`）と、指定したコンテナだけの部分整形（`format_container`）、
+  1 要素だけの整形（`format_slot`）。`format` のインデントと改行は文書から推定する
+- **CLI**: `edit` は既定で最小限の変更だけを行い、`--format` で変更したコンテナを整形する
 
 ## インストール
 
@@ -27,18 +28,26 @@ hjson-edit parse --ast config.hjson
 # ドキュメント全体を整形して出力
 hjson-edit format config.hjson
 
-# 編集後、変更したコンテナだけ整形して出力
+# 編集して出力（体裁はそのまま）
 hjson-edit edit config.hjson --set server.host localhost --set items[-] newValue
+
+# 変更したコンテナを整形して出力
+hjson-edit edit config.hjson --format --set server.host localhost
 ```
 
-`edit` は変更したコンテナだけを整形する。インデントと改行は文書から推定し、
-`--indent-style` / `--indent-width` / `--newline` で上書きできる。
-これらのオプションは整形対象（変更したコンテナ）にだけ作用する。文書全体を整形する場合は
-`format` を使う。ルート直下のキーを編集した場合は文書全体が整形対象になる。
+`edit` は既定で**最小限のテキスト変更**だけを行う。変更した行と挿入した行の字下げを揃え、
+空行・インラインの `{...}` / `[...]`・既存の体裁はそのまま残す。
+`--format` を付けると、変更したコンテナ（複数行に整形する）を文書の体裁に合わせて整形する。
+`--indent-style` / `--indent-width` / `--newline` を指定した場合も整形を行う
+（指定は整形対象にだけ作用する）。文書全体を整形する場合は `format` を使う。
 
 ```bash
 # 入力 in.hjson が {a: 1} のとき
 hjson-edit edit in.hjson --set b hello
+# {a: 1, b: hello
+# }
+
+hjson-edit edit in.hjson --format --set b hello
 # {
 #   a: 1
 #   b: hello
@@ -59,8 +68,8 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 | コマンド | 主なオプション |
 |---|---|
 | `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
-| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>` |
-| `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
+| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定） |
+| `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
 
 `PATH` は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（配列の末尾）、
 `items[+2]`（0 始まりの index 2 へ挿入）の形式。`--set` は中間のコンテナが無ければ作成する
@@ -132,8 +141,11 @@ assert!(document.to_string().contains("port: 8080"));
 | 重複キー | 値の層では後勝ち。lossless な木と `to_string()` は元のテキストを保持する |
 | BOM | パーサーは通常の文字として扱い、CLI がファイル読み込み時に除去する |
 | 編集結果の妥当性 | 行末でしか終端できない値（引用符なし文字列など）を挿入する場合は改行を補い、常に再パースできるテキストを返す |
-| 編集の検証 | 各編集の後に再パース・値の一致（`HjsonValue` を基準にする）・対象外コメントの保存を検査し、崩れた結果は `HjsonEditError::InvalidEdit` として返す（`verify_edits(false)` で無効化） |
+| 編集の検証 | 各編集の後に再パース・編集した値と**文書全体の値**の一致（`HjsonValue` を基準にする）・対象外コメントの保存を検査し、崩れた結果は `HjsonEditError::InvalidEdit` として返す。整形（`format` / `format_container` / `format_slot`）も値を変えないことを検査する（`verify_edits(false)` で無効化） |
 | 挿入位置 | 新しい要素は末尾の要素の後ろ、閉じ区切りの直前にあるコメント（footer）の手前に入る。字下げは既存の要素に揃える（空のコンテナではコンテナの行の字下げ＋1 段） |
+| 複数行文字列の整形 | `'''` の桁が変わるときは本文の字下げも同じだけ動かし、値を変えない。1 行の `'''...'''` は複数行になるときだけ整形する |
+| `edit` の既定 | 変更した行と挿入した行だけを整える。空行・インラインの `{...}` / `[...]`・既存の体裁はそのまま残す。`--format`（または整形オプションの指定）で変更したコンテナを整形する |
+| インライン位置のコンテナ | `--format` で整形するとき、対象が行頭になければ行頭になる祖先コンテナまで遡って整形する（親のレイアウトと混ざらないようにする） |
 | 書けない値 | HJSON で表現できない値（NaN・無限大、指定スタイルで書けない文字列）は `HjsonEditError::ValueNotRepresentable`。`Prefer::Preserve` で書けない文字列は二重引用符へ切り替える |
 | 配列の作成 | 途中のコンテナを作るとき、`[n]` / `[+n]` は `n = 0` だけを受け付ける（それ以外は `ArrayIndexOutOfBounds`） |
 | `--set` の値のコメント | 値テキストにコメントを書くと、値に含まれないためエラーにする（引用符なし文字列は行末までを値として飲み込むので、コメントにはならない） |

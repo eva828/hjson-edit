@@ -14,6 +14,14 @@ impl Default for IndentStyle {
 }
 
 impl IndentStyle {
+    /// 1 段分の字下げ。
+    pub(crate) fn unit(&self) -> String {
+        match self {
+            IndentStyle::Spaces(n) => " ".repeat(*n as usize),
+            IndentStyle::Tabs => "\t".to_string(),
+        }
+    }
+
     pub(crate) fn render(&self, depth: usize) -> String {
         match self {
             IndentStyle::Spaces(n) => " ".repeat(*n as usize * depth),
@@ -39,6 +47,16 @@ impl Default for FormatConfig {
 }
 
 impl FormatConfig {
+    /// 現在のインデント。
+    pub fn indent(&self) -> IndentStyle {
+        self.indent
+    }
+
+    /// 現在の改行コード。
+    pub fn newline(&self) -> &str {
+        &self.newline
+    }
+
     /// 改行コードを指定する。
     pub fn with_newline(mut self, newline: impl Into<String>) -> Self {
         self.newline = newline.into();

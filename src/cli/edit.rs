@@ -38,7 +38,7 @@ enum EditOp {
 
 pub fn edit_command() -> Command {
     Command::new("edit")
-        .about("Edit HJSON, then format only changed containers")
+        .about("Edit HJSON, keeping the existing layout unless --format is given")
         .arg(
             Arg::new("file")
                 .required(true)
@@ -109,6 +109,12 @@ pub fn edit_command() -> Command {
                 .help("Skip validating the result of each edit (faster, less safe)"),
         )
         .arg(
+            Arg::new("format")
+                .long("format")
+                .action(ArgAction::SetTrue)
+                .help("Format the containers changed by the edit (default: keep the existing layout)"),
+        )
+        .arg(
             Arg::new("in-place")
                 .long("in-place")
                 .conflicts_with("output")
@@ -150,6 +156,32 @@ fn newline_override(matches: &ArgMatches) -> Option<&'static str> {
             "crlf" => "\r\n",
             _ => "\n",
         })
+}
+
+/// 編集で新しく作られた最も外側のコンテナ。
+///
+/// パスの先頭から見て、元の文書に無かった最初のセグメントまでを指す。
+fn created_container(original: &HjsonDocument, path: &HjsonObjectPath) -> Option<HjsonObjectPath> {
+    let segments = path.segments();
+    for depth in 1..=segments.len() {
+        let prefix = HjsonObjectPath::from_segments(segments[..depth].to_vec());
+        if matches!(
+            original.get(prefix.clone()),
+            Err(HjsonEditError::PathNotFound(_))
+        ) {
+            return Some(prefix);
+        }
+    }
+
+    None
+}
+
+/// コンテナの整形を行うか。`--format` か、整形オプションの明示指定で有効になる。
+fn format_requested(matches: &ArgMatches) -> bool {
+    matches.get_flag("format")
+        || matches.value_source("indent-style") == Some(clap::parser::ValueSource::CommandLine)
+        || matches.value_source("indent-width") == Some(clap::parser::ValueSource::CommandLine)
+        || matches.value_source("newline") == Some(clap::parser::ValueSource::CommandLine)
 }
 
 /// 文書から検出したインデント幅（タブの場合は既定の 2）。
@@ -442,6 +474,8 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         return write_output(matches, path, &doc.to_string(), &content);
     }
 
+    let original = doc.clone();
+    let mut edited_slots: Vec<HjsonObjectPath> = Vec::new();
     for op in ops {
         match op {
             EditOp::Set {
@@ -455,8 +489,9 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                     Some(style) => doc.string_style(style),
                     None => doc,
                 };
-                doc = styled.set(parsed, value)?;
+                doc = styled.set(parsed.clone(), value)?;
                 doc = doc.string_style(string_style);
+                edited_slots.push(parsed);
             }
             EditOp::Remove { path } => {
                 doc = doc.remove(parse_object_path(&path)?)?;
@@ -473,13 +508,46 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         }
     }
 
-    // 変更したコンテナだけを整形する。編集で消えた・コンテナでなくなった対象は対象外。
+    // 既定は保存重視: 複数行になった要素だけを整える。--format（または整形オプションの
+    // 明示指定）があるときは、変更したコンテナを整形する。
     let config = doc.current_format_config();
-    for container in doc.touched_containers().to_vec() {
-        match doc.format_container(&container, &config) {
-            Ok(updated) => doc = updated,
-            Err(HjsonEditError::PathNotFound(_) | HjsonEditError::UnexpectedStructure { .. }) => {}
-            Err(error) => return Err(error.into()),
+    if format_requested(matches) {
+        for container in doc.touched_containers().to_vec() {
+            match doc.format_container(&container, &config) {
+                Ok(updated) => doc = updated,
+                Err(
+                    HjsonEditError::PathNotFound(_) | HjsonEditError::UnexpectedStructure { .. },
+                ) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    } else {
+        // 編集で新しく作られたコンテナは既存の体裁が無いので整形する。
+        // 行の途中に作られた場合は、インラインの配置を保つため触らない。
+        for slot in &edited_slots {
+            if let Some(created) = created_container(&original, slot) {
+                if !doc.starts_at_line(&created)? {
+                    continue;
+                }
+                match doc.format_container(&created, &config) {
+                    Ok(updated) => doc = updated,
+                    Err(
+                        HjsonEditError::PathNotFound(_)
+                        | HjsonEditError::UnexpectedStructure { .. },
+                    ) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+
+        for slot in edited_slots {
+            match doc.format_slot(&slot, &config) {
+                Ok(updated) => doc = updated,
+                Err(
+                    HjsonEditError::PathNotFound(_) | HjsonEditError::UnexpectedStructure { .. },
+                ) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
     }
 

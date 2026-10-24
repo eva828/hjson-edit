@@ -49,6 +49,16 @@ pub(crate) fn container_indent(container: &RedNode, base: &str) -> String {
     format!("{base}{}", indent_unit(&root_of(container)))
 }
 
+/// 指定位置が行頭（行の先頭から空白だけ）か。
+pub(crate) fn is_at_line_start(root: &RedNode, offset: usize) -> bool {
+    let text = root.text().to_string();
+    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+
+    text[line_start..offset]
+        .chars()
+        .all(|ch| ch == ' ' || ch == '\t')
+}
+
 /// 空のコンテナへ最初の要素を入れるときの字下げ。
 ///
 /// コンテナが文書に繋がっている場合は、その行の字下げに 1 段を足す。

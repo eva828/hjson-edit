@@ -88,7 +88,7 @@ fn set_nested_object_path_creates_member() {
 fn set_missing_nested_path_creates_parents() {
     let input = "{\n  root: {\n  }\n}\n";
     // 追加した要素は、閉じ区切りと同じ字下げに 1 段足した位置へ入る
-    let expected = "{\n  root: {\n    new: {nested:value\n}\n  }\n}\n";
+    let expected = "{\n  root: {\n    new: {nested: value\n}\n  }\n}\n";
 
     let doc = HjsonDocument::parse(input).unwrap();
     let updated = doc

@@ -8,7 +8,7 @@ mod config;
 mod document;
 mod member;
 mod object;
-mod value;
+pub(crate) mod value;
 
 pub use config::{FormatConfig, IndentStyle};
 

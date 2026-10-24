@@ -3,13 +3,16 @@
 //! 編集の核心（`set`/`remove` など）は最小限のテキスト変更に留め、インデントなどの
 //! 体裁はこの層で整える。これにより「構造編集と整形を分離する」という設計を保つ。
 
-use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Object as AstObject};
+use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Object as AstObject, Value};
+use crate::format::value::multiline_block_node;
 use crate::format::{Format, FormatConfig};
 use crate::high_level::error::HjsonEditError;
+use crate::high_level::indent::{is_at_line_start, line_indent};
 use crate::high_level::ops::receiving_container_depth;
-use crate::high_level::path::HjsonObjectPath;
-use crate::high_level::resolve::{resolve_body, PathResolver};
+use crate::high_level::path::{HjsonObjectPath, PathSegment};
+use crate::high_level::resolve::{array_slot_index, member_index, resolve_body, PathResolver};
 use crate::high_level::style::{detect_indent_from_ast, detect_newline_from_ast};
+use crate::high_level::verify;
 use crate::high_level::HjsonDocument;
 use crate::syntax::{RedNode, SyntaxKind};
 
@@ -39,6 +42,17 @@ impl HjsonDocument {
         path: &HjsonObjectPath,
         config: &FormatConfig,
     ) -> Result<Self, HjsonEditError> {
+        // 文書全体は文書のトリビア（前後の改行）も含めて整形する
+        if path.depth() == 0 {
+            let ast = self.ast()?;
+            let document = self.clone().root(ast.format(config));
+            if self.current_verify() {
+                verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
+            }
+
+            return Ok(document);
+        }
+
         let resolved = PathResolver::new(self.syntax_root().clone()).resolve_node(path)?;
         let container = match resolved.kind() {
             SyntaxKind::Object | SyntaxKind::Array => resolved,
@@ -47,6 +61,9 @@ impl HjsonDocument {
                 found,
             })?,
         };
+        // 行の途中にあるコンテナを単独で整形すると、親のインライン配置と混ざって崩れる。
+        // 行頭になる祖先コンテナまで遡って整形する。
+        let container = line_aligned_container(self.syntax_root(), &container);
 
         let depth = format_depth(&container)?;
         let formatted = match container.kind() {
@@ -60,8 +77,151 @@ impl HjsonDocument {
             }
         };
 
-        Ok(self.clone().root(container.replace_with(formatted)))
+        let document = self.clone().root(container.replace_with(formatted));
+        if self.current_verify() {
+            verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
+        }
+
+        Ok(document)
     }
+
+    /// 指定したパスの要素（メンバーまたは配列要素）の中で、複数行の Block 文字列を
+    /// その位置の字下げに合わせて書き直した文書を返す。
+    ///
+    /// 値は変えない。行頭にない要素と、複数行の Block 文字列を持たない要素は
+    /// そのまま返す（インラインの配置を崩さない）。
+    ///
+    /// # エラー
+    ///
+    /// - パスが存在しない場合は [`HjsonEditError::PathNotFound`]
+    /// - パスが空の場合は [`HjsonEditError::InvalidPath`]
+    pub fn format_slot(
+        &self,
+        path: &HjsonObjectPath,
+        config: &FormatConfig,
+    ) -> Result<Self, HjsonEditError> {
+        let (parent_path, last) = path.split_last().ok_or_else(|| {
+            HjsonEditError::InvalidPath("format_slot needs an element path".to_string())
+        })?;
+        let parent = PathResolver::new(self.syntax_root().clone()).resolve_node(&parent_path)?;
+        let container = resolve_body(&parent)?;
+        let element = match (container.kind(), &last) {
+            (SyntaxKind::Object, PathSegment::Key(key)) => {
+                let index = member_index(&container, key)
+                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+                container
+                    .children()
+                    .filter(|child| child.kind() == SyntaxKind::Member)
+                    .nth(index)
+                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?
+            }
+            (SyntaxKind::Array, PathSegment::Array(segment)) => {
+                let index = array_slot_index(&container, segment)
+                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+                container
+                    .children()
+                    .filter(|child| child.kind() == SyntaxKind::Value)
+                    .nth(index)
+                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?
+            }
+            _ => {
+                return Err(HjsonEditError::InvalidTarget {
+                    path: path.clone(),
+                    reason: "the parent is not a container".to_string(),
+                })
+            }
+        };
+
+        let root = self.syntax_root();
+        let start: usize = element.text_range().start().into();
+        // 行頭にない要素は、複数行にすると親のレイアウトと混ざるため触らない
+        if !is_at_line_start(root, start) {
+            return Ok(self.clone());
+        }
+
+        let indent = line_indent(root, start);
+        let Some(value) = element
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Value)
+        else {
+            return Ok(self.clone());
+        };
+        let Some(formatted) = multiline_block_node(
+            &Value::cast(value.clone())?,
+            &format!("{indent}{}", crate::high_level::indent::indent_unit(root)),
+            start + prefix_width(&element, &value),
+            &indent,
+            config.newline(),
+        ) else {
+            return Ok(self.clone());
+        };
+
+        let value_index = value.index();
+        let updated = element
+            .green()
+            .splice_children(value_index..value_index + 1, vec![formatted.into()]);
+        let document = self.clone().root(element.replace_with(updated));
+        if self.current_verify() {
+            verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
+        }
+
+        Ok(document)
+    }
+}
+
+/// 要素の中で、`value` より前にある子要素の幅（`value` の開始桁を求めるのに使う）。
+fn prefix_width(element: &RedNode, value: &RedNode) -> usize {
+    element
+        .children_with_tokens()
+        .take_while(|child| child.text_range().start() < value.text_range().start())
+        .map(|child| match child {
+            rowan::NodeOrToken::Node(node) => node.text().to_string().chars().count(),
+            rowan::NodeOrToken::Token(token) => token.text().to_string().chars().count(),
+        })
+        .sum()
+}
+
+/// 行頭から始まる要素に属する、最も内側のコンテナ。
+///
+/// インラインの配列・オブジェクトの中にあるコンテナは、それだけを整形すると
+/// 親のレイアウトと混ざるため、行頭の要素に属する祖先まで遡る。
+fn line_aligned_container(root: &RedNode, container: &RedNode) -> RedNode {
+    let mut target = container.clone();
+    while let Some(element) = containing_element(&target) {
+        if is_at_line_start(root, element.text_range().start().into()) {
+            break;
+        }
+
+        let Some(parent) = target
+            .ancestors()
+            .skip(1)
+            .find(|node| matches!(node.kind(), SyntaxKind::Object | SyntaxKind::Array))
+        else {
+            break;
+        };
+        target = parent;
+    }
+
+    target
+}
+
+/// 子孫のコンテナを含む要素（メンバー、または配列の要素）。
+fn containing_element(node: &RedNode) -> Option<RedNode> {
+    for ancestor in node.ancestors().skip(1) {
+        match ancestor.kind() {
+            SyntaxKind::Member => return Some(ancestor),
+            SyntaxKind::Value
+                if ancestor
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == SyntaxKind::Array) =>
+            {
+                return Some(ancestor)
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 /// コンテナを整形する際の深さ。文書全体の整形（`Document::format_at`）と同じ値になる。

@@ -1,5 +1,6 @@
 use rowan::GreenNode;
 
+use super::value::multiline_block_node;
 use super::{Format, FormatConfig};
 use crate::ast::{AstNode, Member};
 use crate::syntax::{GreenElement, SyntaxKind};
@@ -11,7 +12,21 @@ impl Format for Member {
         };
 
         let member_green: GreenNode = self.syntax().green().clone().into();
-        let formatted_value = val.format_at(config, depth);
+        let indent = config.indent.render(depth);
+        let key_width = self
+            .key()
+            .and_then(|key| key.raw_text())
+            .map_or(0, |key| key.chars().count());
+
+        // 複数行の Block 文字列は、キーの後ろの `'''` の桁に合わせて書き直す
+        let formatted_value = multiline_block_node(
+            &val,
+            &format!("{indent}{}", config.indent.unit()),
+            indent.chars().count() + key_width + 2,
+            &indent,
+            &config.newline,
+        )
+        .unwrap_or_else(|| val.format_at(config, depth));
 
         let colon_index = self
             .syntax()
