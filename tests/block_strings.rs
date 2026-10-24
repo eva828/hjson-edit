@@ -176,3 +176,19 @@ fn writing_a_block_string_at_a_line_start_matches_the_indent() {
         "{\n  a: \'\'\'\n    line1\n    line2\n  \'\'\'\n}\n"
     );
 }
+
+#[test]
+fn the_slot_formatter_formats_every_duplicate_key() {
+    // 同じキーのメンバーが複数ある場合、値の層は後勝ちだが整形はすべてに適用する
+    let text = "{\n  a: '''\n   one\n  '''\n  a: '''\n   two\n  '''\n}\n";
+    let document = HjsonDocument::parse(text).unwrap();
+
+    let formatted = document
+        .format_slot(&path("a"), &document.current_format_config())
+        .unwrap();
+
+    assert_eq!(
+        formatted.to_string(),
+        "{\n  a: '''\n    one\n  '''\n  a: '''\n    two\n  '''\n}\n"
+    );
+}

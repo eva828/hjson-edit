@@ -3,14 +3,14 @@
 //! 編集の核心（`set`/`remove` など）は最小限のテキスト変更に留め、インデントなどの
 //! 体裁はこの層で整える。これにより「構造編集と整形を分離する」という設計を保つ。
 
-use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Object as AstObject, Value};
+use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Member, Object as AstObject, Value};
 use crate::format::value::multiline_block_node;
 use crate::format::{Format, FormatConfig};
 use crate::high_level::error::HjsonEditError;
 use crate::high_level::indent::{is_at_line_start, line_indent};
 use crate::high_level::ops::receiving_container_depth;
 use crate::high_level::path::{HjsonObjectPath, PathSegment};
-use crate::high_level::resolve::{array_slot_index, member_index, resolve_body, PathResolver};
+use crate::high_level::resolve::{array_slot_index, resolve_body, PathResolver};
 use crate::high_level::style::{detect_indent_from_ast, detect_newline_from_ast};
 use crate::high_level::verify;
 use crate::high_level::HjsonDocument;
@@ -105,24 +105,36 @@ impl HjsonDocument {
         })?;
         let parent = PathResolver::new(self.syntax_root().clone()).resolve_node(&parent_path)?;
         let container = resolve_body(&parent)?;
-        let element = match (container.kind(), &last) {
+        // 同じキーのメンバーが複数ある場合は、すべてを同じように整える
+        let elements: Vec<RedNode> = match (container.kind(), &last) {
             (SyntaxKind::Object, PathSegment::Key(key)) => {
-                let index = member_index(&container, key)
-                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
-                container
+                let members: Vec<RedNode> = container
                     .children()
                     .filter(|child| child.kind() == SyntaxKind::Member)
-                    .nth(index)
-                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?
+                    .collect();
+                let matched: Vec<RedNode> = members
+                    .into_iter()
+                    .filter(|member| {
+                        Member::cast(member.clone())
+                            .ok()
+                            .and_then(|member: Member| member.member_key())
+                            .as_deref()
+                            == Some(key.as_str())
+                    })
+                    .collect();
+                if matched.is_empty() {
+                    return Err(HjsonEditError::PathNotFound(path.clone()));
+                }
+                matched
             }
             (SyntaxKind::Array, PathSegment::Array(segment)) => {
                 let index = array_slot_index(&container, segment)
                     .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
-                container
+                vec![container
                     .children()
                     .filter(|child| child.kind() == SyntaxKind::Value)
                     .nth(index)
-                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?
+                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?]
             }
             _ => {
                 return Err(HjsonEditError::InvalidTarget {
@@ -133,40 +145,71 @@ impl HjsonDocument {
         };
 
         let root = self.syntax_root();
-        let start: usize = element.text_range().start().into();
-        // 行頭にない要素は、複数行にすると親のレイアウトと混ざるため触らない
-        if !is_at_line_start(root, start) {
+        let mut green: rowan::GreenNode = container.green().clone().into_owned();
+        let mut changed = false;
+        for element in elements {
+            let Some(formatted) = formatted_block_element(root, &element, config)? else {
+                continue;
+            };
+
+            let value_index = element
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Value)
+                .map(|value| value.index())
+                .ok_or_else(|| HjsonEditError::InvalidTarget {
+                    path: path.clone(),
+                    reason: "the element has no value".to_string(),
+                })?;
+            let updated = element
+                .green()
+                .splice_children(value_index..value_index + 1, vec![formatted.into()]);
+            let at = element.index();
+            green = green.splice_children(at..at + 1, vec![updated.into()]);
+            changed = true;
+        }
+
+        if !changed {
             return Ok(self.clone());
         }
 
-        let indent = line_indent(root, start);
-        let Some(value) = element
-            .children()
-            .find(|child| child.kind() == SyntaxKind::Value)
-        else {
-            return Ok(self.clone());
-        };
-        let Some(formatted) = multiline_block_node(
-            &Value::cast(value.clone())?,
-            &format!("{indent}{}", crate::high_level::indent::indent_unit(root)),
-            start + prefix_width(&element, &value),
-            &indent,
-            config.newline(),
-        ) else {
-            return Ok(self.clone());
-        };
-
-        let value_index = value.index();
-        let updated = element
-            .green()
-            .splice_children(value_index..value_index + 1, vec![formatted.into()]);
-        let document = self.clone().root(element.replace_with(updated));
+        let document = self.clone().root(container.replace_with(green));
         if self.current_verify() {
             verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
         }
 
         Ok(document)
     }
+}
+
+/// 行頭にある要素の複数行 Block 文字列を、その位置の字下げに合わせて書き直す。
+///
+/// 対象でなければ `None`（インラインの要素と、Block 文字列を持たない要素）。
+fn formatted_block_element(
+    root: &RedNode,
+    element: &RedNode,
+    config: &FormatConfig,
+) -> Result<Option<rowan::GreenNode>, HjsonEditError> {
+    let start: usize = element.text_range().start().into();
+    // 行の途中の要素は、複数行にすると親のレイアウトと混ざるため触らない
+    if !is_at_line_start(root, start) {
+        return Ok(None);
+    }
+
+    let Some(value) = element
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Value)
+    else {
+        return Ok(None);
+    };
+
+    let indent = line_indent(root, start);
+    Ok(multiline_block_node(
+        &Value::cast(value.clone())?,
+        &format!("{indent}{}", crate::high_level::indent::indent_unit(root)),
+        start + prefix_width(element, &value),
+        &indent,
+        config.newline(),
+    ))
 }
 
 /// 要素の中で、`value` より前にある子要素の幅（`value` の開始桁を求めるのに使う）。

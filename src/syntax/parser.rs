@@ -283,6 +283,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 生テキスト片をトリビアとして木に追加する。
+    ///
+    /// 字句解析器が読み飛ばした空白を、位置を保ったまま木に戻すために使う。
+    fn push_raw_trivia(&mut self, text: &str, offset: usize) {
+        if text.is_empty() {
+            return;
+        }
+
+        for mut token in Lexer::new(text).lex().tokens {
+            token.offset += offset;
+            self.builder.token(token.kind.into(), &token.text);
+        }
+    }
+
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
@@ -702,6 +716,8 @@ impl<'a> Parser<'a> {
 
         self.builder.start_node(SyntaxKind::Key.into());
 
+        // キーと `:` の間の空白（トリビア）。キーのノードの外に置く。
+        let mut key_gap: Option<(usize, usize)> = None;
         let token = self.current();
         match token.map(|t| t.kind) {
             Some(
@@ -722,6 +738,7 @@ impl<'a> Parser<'a> {
                         } else {
                             SyntaxKind::UnquotedString
                         };
+                        key_gap = Some((key.name_end, key.end));
                         self.consume_raw_until(key.end);
                         self.builder.token(kind.into(), text);
                     }
@@ -747,6 +764,11 @@ impl<'a> Parser<'a> {
         }
 
         self.builder.finish_node();
+
+        // キーと `:` の間の空白は、読み飛ばさずトリビアとして木に残す（lossless）
+        if let Some((start, end)) = key_gap {
+            self.push_raw_trivia(&self.source[start..end], start);
+        }
 
         if !self.at(SyntaxKind::Colon) {
             let offset = if let Some(t) = self.current() {
