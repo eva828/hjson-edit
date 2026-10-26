@@ -244,9 +244,10 @@ impl QuoteStyle {
                     .replace("\r\n", "\n")
                     .replace('\r', "\n");
 
-                // 先頭は `'''` の後ろの空白と改行 1 つを読み飛ばす（基準実装と同じ）
+                // 先頭は `'''` の後ろの空白と改行 1 つを読み飛ばす（基準実装と同じ）。
+                // 改行が続かない（1 行の）場合も、先頭の空白は値に含めない。
                 let after_spaces = inner.trim_start_matches([' ', '\t']);
-                let mut body = after_spaces.strip_prefix('\n').unwrap_or(inner.as_str());
+                let mut body = after_spaces.strip_prefix('\n').unwrap_or(after_spaces);
                 if let Some(stripped) = body.strip_suffix('\n') {
                     body = stripped;
                 }

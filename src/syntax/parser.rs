@@ -52,6 +52,8 @@ impl std::error::Error for ParseError {}
 pub struct ParseResult {
     pub green: rowan::GreenNode,
     pub errors: Vec<ParseError>,
+    /// 再字句解析で見つかった字句エラー（キーが `//` を含む場合など）。
+    pub lex_errors: Vec<super::lexer::LexError>,
 }
 
 /// コンテナ（オブジェクト・配列）のネスト上限。
@@ -74,6 +76,7 @@ pub struct Parser<'a> {
     position: usize,
     builder: rowan::GreenNodeBuilder<'static>,
     errors: Vec<ParseError>,
+    lex_errors: Vec<super::lexer::LexError>,
     depth: usize,
 }
 
@@ -100,12 +103,27 @@ impl<'a> Parser<'a> {
             position: 0,
             builder: rowan::GreenNodeBuilder::new(),
             errors: Vec::new(),
+            lex_errors: Vec::new(),
             depth: 0,
         }
     }
 
     fn error(&mut self, offset: usize, message: impl Into<String>) {
         self.errors.push(ParseError::new(offset, message));
+    }
+
+    /// 再字句解析で見つかった字句エラーを、元の入力の位置に直して記録する。
+    fn push_lex_errors(&mut self, errors: Vec<super::lexer::LexError>, offset: usize) {
+        for mut error in errors {
+            error.offset += offset;
+            let duplicate = self
+                .lex_errors
+                .iter()
+                .any(|other| other.offset == error.offset && other.message == error.message);
+            if !duplicate {
+                self.lex_errors.push(error);
+            }
+        }
     }
 
     /// ネスト上限の範囲内なら深さを進めて true を返す。
@@ -248,6 +266,7 @@ impl<'a> Parser<'a> {
             result: ParseResult {
                 green: self.builder.finish(),
                 errors: self.errors,
+                lex_errors: self.lex_errors,
             },
             braceless,
         }
@@ -272,8 +291,11 @@ impl<'a> Parser<'a> {
             // 残り全体を再字句解析する。単位がトークンをまたぐ場合（例: キーの途中から
             // 始まる複数行文字列）に、分割後のトークン列が不整合にならないようにする。
             let tail = &self.source[end..];
-            let replacement: Vec<Token> = Lexer::new(tail)
-                .lex()
+            let lexed = Lexer::new(tail).lex();
+            // 再字句解析のエラーを捨てない（`//` を含むキーの後ろの不正な
+            // エスケープなどは、初回の字句解析では見つからない）
+            self.push_lex_errors(lexed.errors, end);
+            let replacement: Vec<Token> = lexed
                 .tokens
                 .into_iter()
                 .map(|mut token| {

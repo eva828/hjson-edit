@@ -1,4 +1,4 @@
-use hjson_edit::HjsonDocument;
+use hjson_edit::{HjsonDocument, HjsonEditError};
 
 // ------------------------------------------------------------------
 // レクサーが正しくエラー/成功を返すことを確認するテスト。
@@ -101,4 +101,53 @@ fn lexer_line_comment_only_input_parses_successfully() {
 fn lexer_hash_comment_only_input_parses_successfully() {
     let result = HjsonDocument::parse("# hello");
     assert!(result.is_ok());
+}
+
+#[test]
+fn invalid_escape_after_a_comment_like_key_is_reported() {
+    // キーの `//` は正当。その後ろの再字句解析で見つかった不正エスケープを捨てない
+    for text in ["{ a//b: \"\\z\", }", "a//b: \"\\z\""] {
+        let error = HjsonDocument::parse(text).unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::LexError { .. }),
+            "text: {text:?}, error: {error:?}"
+        );
+        assert!(
+            error.to_string().contains("Invalid escape sequence"),
+            "text: {text:?}, error: {error}"
+        );
+    }
+}
+
+#[test]
+fn unterminated_string_after_a_comment_like_key_is_reported() {
+    let error = HjsonDocument::parse("{ a//b: \"x }").unwrap_err();
+
+    assert!(
+        error.to_string().contains("Unterminated string"),
+        "error: {error}"
+    );
+}
+
+#[test]
+fn comment_like_keys_still_parse() {
+    for text in ["{ a//b: 1 }", "{ a/*b*/c: 1 }", "a//b: 1"] {
+        let document = HjsonDocument::parse(text).unwrap();
+
+        assert_eq!(document.to_string(), text);
+    }
+}
+
+#[test]
+fn retry_lex_errors_are_not_reported_twice() {
+    let error = HjsonDocument::parse("{ a//b: \"\\z\", c//d: \"\\q\" }")
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        error.matches("Invalid escape sequence").count(),
+        2,
+        "error: {error}"
+    );
 }

@@ -90,13 +90,32 @@ impl HjsonDocument {
             });
         }
 
-        let warnings: Vec<String> = warnings
+        let mut warnings: Vec<String> = warnings
             .iter()
             .map(|error| error.format_with_source(&LineIndex::new(input), input))
             .collect();
 
         let parser = Parser::new(input, lex_result.tokens);
         let result = parser.parse();
+
+        // キーが `//` を含む場合の再字句解析で見つかったエラーも、初回と同じ扱いにする
+        // （未終端のブロックコメントは警告、それ以外は字句エラー）
+        let (retry_warnings, retry_fatal): (Vec<_>, Vec<_>) = result
+            .lex_errors
+            .iter()
+            .partition(|error| error.message == "Unterminated block comment");
+        if !retry_fatal.is_empty() {
+            return Err(HjsonEditError::LexError {
+                errors: retry_fatal.into_iter().cloned().collect(),
+                line_index: LineIndex::new(input),
+                input: std::sync::Arc::from(input),
+            });
+        }
+        warnings.extend(
+            retry_warnings
+                .iter()
+                .map(|error| error.format_with_source(&LineIndex::new(input), input)),
+        );
 
         if !result.errors.is_empty() {
             return Err(HjsonEditError::ParseError {

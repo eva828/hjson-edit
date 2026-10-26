@@ -192,3 +192,29 @@ fn the_slot_formatter_formats_every_duplicate_key() {
         "{\n  a: '''\n    one\n  '''\n  a: '''\n    two\n  '''\n}\n"
     );
 }
+
+#[test]
+fn the_first_line_whitespace_of_a_block_string_is_ignored() {
+    // 仕様: "whitespace on the first line is ignored"。cs と hjson-js も同じ
+    for (input, expected) in [
+        ("'''  x'''", "x"),
+        ("'''  a: b'''", "a: b"),
+        ("''' x '''", "x "),
+        ("'''x '''", "x "),
+        ("  '''  a: b'''", "a: b"),
+        ("{ s: '''  a: b''' }", "a: b"),
+        ("'''x'''", "x"),
+    ] {
+        let document = HjsonDocument::parse(input).unwrap();
+        let value = document.get(path("s")).or_else(|_| {
+            // ルートがスカラーの場合は空パスで読む
+            document.get(path(""))
+        });
+
+        assert_eq!(
+            value.unwrap(),
+            HjsonValue::String(expected.to_string()),
+            "input: {input:?}"
+        );
+    }
+}
