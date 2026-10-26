@@ -135,6 +135,15 @@ fn edit_stdout(args: &[&str], input: &str) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+/// 内容を書き込んだ一時ファイル。
+fn temp_file(content: &str) -> NamedTempFile {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{content}").unwrap();
+    file.flush().unwrap();
+
+    file
+}
+
 /// サブコマンドの出力（`format` など、編集結果を標準出力に書くもの）。
 fn format_stdout(args: &[&str], input: &str) -> String {
     let mut file = NamedTempFile::new().unwrap();
@@ -686,4 +695,79 @@ fn cli_parse_reports_character_columns() {
         stderr.contains("line 2, column 5"),
         "列は文字数（バイトなら 9）: {stderr}"
     );
+}
+
+#[test]
+fn cli_check_ignores_layout_differences() {
+    let (first, second) = (
+        temp_file("{\n  a: 1\n  b: 2\n}\n"),
+        temp_file("{\n\n  a: 1\n\n  b: 2\n}\n"),
+    );
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args([
+            "check",
+            first.path().to_str().unwrap(),
+            second.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("values are equal"));
+}
+
+#[test]
+fn cli_check_reports_a_changed_value() {
+    let (first, second) = (temp_file("{\n  a: 1\n}\n"), temp_file("{\n  a: 2\n}\n"));
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args([
+            "check",
+            first.path().to_str().unwrap(),
+            second.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("a:"))
+        .stderr(predicate::str::contains("values differ"));
+}
+
+#[test]
+fn cli_check_can_require_matching_comments() {
+    let (first, second) = (
+        temp_file("{\n  // note\n  a: 1\n}\n"),
+        temp_file("{\n  // other\n  a: 1\n}\n"),
+    );
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args([
+            "check",
+            first.path().to_str().unwrap(),
+            second.path().to_str().unwrap(),
+            "--comments",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("comments differ"));
+}
+
+#[test]
+fn cli_check_validates_a_single_file() {
+    let file = temp_file("{\n  a: 1\n}\n");
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["check", file.path().to_str().unwrap()])
+        .assert()
+        .success();
+
+    let broken = temp_file("{\n  a\n}\n");
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["check", broken.path().to_str().unwrap()])
+        .assert()
+        .failure();
 }

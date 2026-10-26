@@ -28,6 +28,10 @@ hjson-edit parse --ast config.hjson
 # ドキュメント全体を整形して出力
 hjson-edit format config.hjson
 
+# 整形しただけか、値を変えたかを確認（レイアウトとコメントは無視）
+hjson-edit check before.hjson after.hjson
+# values are equal: before.hjson and after.hjson
+
 # 編集して出力（体裁はそのまま）
 hjson-edit edit config.hjson --set server.host localhost --set items[-] newValue
 
@@ -69,6 +73,7 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 |---|---|
 | `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
 | `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定） |
+| `check <file> [<file2>]` | `--comments`（コメントの一致も要求）。2 つ指定すると値を比較し、等しければ終了コード 0。1 つならパースできるかだけを確認 |
 | `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
 
 `PATH` は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（配列の末尾）、
@@ -129,6 +134,9 @@ let document = HjsonDocument::parse(input)
     .verify_edits(false);
 assert!(document.to_string().contains("port: 8080"));
 ```
+
+`check` は**値**だけを比較する（レイアウト・空行・コメントは無視）。文字列値の中の空白は
+データなので比較する。`--comments` を付けるとコメントの本文と順序も比較する。
 
 ## 制限と挙動
 

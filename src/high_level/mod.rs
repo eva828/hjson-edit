@@ -249,6 +249,11 @@ impl HjsonDocument {
         &self.newline
     }
 
+    /// 文書内のコメント（本文のみ）を出現順に返す。
+    pub fn all_comments(&self) -> Vec<String> {
+        crate::high_level::ops::comment::all_comment_bodies(self.syntax_root())
+    }
+
     /// lossless な構文木のルート。
     pub fn syntax_root(&self) -> &RedNode {
         &self.root
