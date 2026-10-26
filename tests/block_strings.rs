@@ -218,3 +218,64 @@ fn the_first_line_whitespace_of_a_block_string_is_ignored() {
         );
     }
 }
+
+#[test]
+fn a_trailing_blank_line_survives_formatting() {
+    // 閉じ `'''` がカラム 0 にあると、読み戻しで末尾の改行が 1 つ落ちる。
+    // 本文の末尾の空行を保つため、整形は改行を 1 つ余分に出す。
+    for body in ["a", "a\n", "a\n\n", "\n a", "a\n\n\n"] {
+        let input = document_with_block(body);
+        let document = HjsonDocument::parse(&input).unwrap();
+        let config = document.detected_format_config();
+
+        let formatted = document
+            .format_container(&HjsonObjectPath::parse("").unwrap(), &config)
+            .unwrap();
+
+        assert_eq!(
+            value_of(&formatted),
+            HjsonValue::String(body.to_string()),
+            "body: {body:?}"
+        );
+    }
+}
+
+#[test]
+fn a_trailing_blank_line_survives_slot_formatting() {
+    let document = HjsonDocument::parse("{\n  s: '''x'''\n}\n").unwrap();
+    let replaced = document
+        .set(path("s"), HjsonValue::String("line\n\n".to_string()))
+        .unwrap();
+
+    let formatted = replaced
+        .format_slot(&path("s"), &replaced.current_format_config())
+        .unwrap();
+
+    assert_eq!(
+        formatted.get(path("s")).unwrap(),
+        HjsonValue::String("line\n\n".to_string())
+    );
+}
+
+#[test]
+fn a_braceless_document_with_a_trailing_blank_line_formats() {
+    // 翻訳ファイルと同じ形（ルートがブレースレス、閉じ `'''` がカラム 0）
+    let input = "key:\n\t'''\n\tline1\n\tline2\n\n\n\t'''\nother: 1\n";
+    let document = HjsonDocument::parse(input).unwrap();
+
+    let formatted = document
+        .format_container(
+            &HjsonObjectPath::parse("").unwrap(),
+            &document.current_format_config(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        formatted.get(path("key")).unwrap(),
+        document.get(path("key")).unwrap()
+    );
+    assert_eq!(
+        formatted.get(path("other")).unwrap(),
+        HjsonValue::Integer(1)
+    );
+}

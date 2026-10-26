@@ -66,6 +66,12 @@ pub(crate) fn block_string_text(
         text.push_str(line);
     }
     text.push_str(newline);
+    // 閉じ `'''` の字下げが無い（カラム 0 の）場合、読み戻しでは閉じ行の直前の
+    // 改行が 1 つ落ちる。本文が改行で終わるときは、その分を余分に出力して
+    // 末尾の空行を保つ。
+    if closing_indent.is_empty() && body.ends_with('\n') {
+        text.push_str(newline);
+    }
     text.push_str(closing_indent);
     text.push_str("'''");
 
