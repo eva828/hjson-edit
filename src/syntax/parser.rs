@@ -54,6 +54,11 @@ pub struct ParseResult {
     pub errors: Vec<ParseError>,
     /// 再字句解析で見つかった字句エラー（キーが `//` を含む場合など）。
     pub lex_errors: Vec<super::lexer::LexError>,
+    /// 再字句解析を始めた位置のうち最も小さいもの。
+    ///
+    /// この位置以降の初回の字句解析結果は捨てられているため、そこで見つかった
+    /// 初回のエラーも報告しない（再字句解析側のエラーだけを報告する）。
+    pub relexed_from: Option<usize>,
 }
 
 /// コンテナ（オブジェクト・配列）のネスト上限。
@@ -77,6 +82,7 @@ pub struct Parser<'a> {
     builder: rowan::GreenNodeBuilder<'static>,
     errors: Vec<ParseError>,
     lex_errors: Vec<super::lexer::LexError>,
+    relexed_from: Option<usize>,
     depth: usize,
 }
 
@@ -104,6 +110,7 @@ impl<'a> Parser<'a> {
             builder: rowan::GreenNodeBuilder::new(),
             errors: Vec::new(),
             lex_errors: Vec::new(),
+            relexed_from: None,
             depth: 0,
         }
     }
@@ -267,6 +274,7 @@ impl<'a> Parser<'a> {
                 green: self.builder.finish(),
                 errors: self.errors,
                 lex_errors: self.lex_errors,
+                relexed_from: self.relexed_from,
             },
             braceless,
         }
@@ -291,6 +299,7 @@ impl<'a> Parser<'a> {
             // 残り全体を再字句解析する。単位がトークンをまたぐ場合（例: キーの途中から
             // 始まる複数行文字列）に、分割後のトークン列が不整合にならないようにする。
             let tail = &self.source[end..];
+            self.relexed_from = Some(self.relexed_from.map_or(end, |start| start.min(end)));
             let lexed = Lexer::new(tail).lex();
             // 再字句解析のエラーを捨てない（`//` を含むキーの後ろの不正な
             // エスケープなどは、初回の字句解析では見つからない）

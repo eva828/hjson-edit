@@ -74,12 +74,22 @@ impl HjsonDocument {
         check_input_len(input.len())?;
 
         let lex_result = Lexer::new(input).lex();
+        let parser = Parser::new(input, lex_result.tokens);
+        let result = parser.parse();
+
+        // 再字句解析を始めた位置以降は、初回の字句解析結果が捨てられている。
+        // そこで見つかった初回のエラーは報告しない（再字句解析側で検出し直す）。
+        let relexed_from = result.relexed_from.unwrap_or(usize::MAX);
 
         // 閉じないブロックコメントは基準実装（hjson-cs）と同じく読み飛ばし、
         // 警告として保持する（切断の検出は CLI の役割）。
-        let (warnings, fatal): (Vec<_>, Vec<_>) = lex_result
+        let lex_errors: Vec<_> = lex_result
             .errors
             .iter()
+            .filter(|error| error.offset < relexed_from)
+            .collect();
+        let (warnings, fatal): (Vec<_>, Vec<_>) = lex_errors
+            .into_iter()
             .partition(|error| error.message == "Unterminated block comment");
 
         if !fatal.is_empty() {
@@ -94,9 +104,6 @@ impl HjsonDocument {
             .iter()
             .map(|error| error.format_with_source(&LineIndex::new(input), input))
             .collect();
-
-        let parser = Parser::new(input, lex_result.tokens);
-        let result = parser.parse();
 
         // キーが `//` を含む場合の再字句解析で見つかったエラーも、初回と同じ扱いにする
         // （未終端のブロックコメントは警告、それ以外は字句エラー）

@@ -151,3 +151,25 @@ fn retry_lex_errors_are_not_reported_twice() {
         "error: {error}"
     );
 }
+
+#[test]
+fn text_swallowed_by_a_comment_like_key_is_not_lexed_twice() {
+    // 初回の字句解析では `//` 以降がコメントになるが、キーの走査で読み直される。
+    // 読み直した領域の文字列はブロック文字列の中身なので、不正なエスケープではない
+    let input = "{a: -3.5, key: 1e2, a//b: '''\n  \"\\z\"\n  '''}";
+    let document = HjsonDocument::parse(input).unwrap();
+
+    assert_eq!(document.to_string(), input);
+}
+
+#[test]
+fn relexed_errors_are_reported_once() {
+    let error = HjsonDocument::parse("{ a//b: \"\\z\", }").unwrap_err();
+
+    assert!(matches!(error, HjsonEditError::LexError { .. }));
+    assert_eq!(
+        error.to_string().matches("Invalid escape sequence").count(),
+        1,
+        "error: {error}"
+    );
+}
