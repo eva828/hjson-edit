@@ -1,6 +1,6 @@
 use rowan::{GreenNode, NodeOrToken};
 
-use crate::ast::{CommentKind, CommentTrivia};
+use crate::ast::{CommentKind, CommentTrivia, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
 
 mod array;
@@ -20,6 +20,57 @@ pub trait Format {
     }
     /// 指定した深さを基準に整形する。
     fn format_at(&self, config: &FormatConfig, depth: usize) -> GreenNode;
+}
+
+/// 要素の前のトリビアを「空行の数」と「コメント」の並びに分解する。
+///
+/// 戻り値の最後の要素はコメントを持たない（要素本体の行）。`base_newline` は
+/// 直前の行の改行が既に出力済みかどうか（先頭要素では `{` や `[` の後ろの改行）。
+pub(crate) fn leading_segments(
+    trivia: &[Trivia],
+    base_newline: bool,
+) -> Vec<(usize, Option<CommentTrivia>)> {
+    let mut segments: Vec<(usize, Option<CommentTrivia>)> = Vec::new();
+    let mut newlines = 0usize;
+    for trivia in trivia {
+        match trivia {
+            Trivia::Newline { .. } => newlines += 1,
+            Trivia::Comment(comment) => {
+                segments.push((newlines, Some(comment.clone())));
+                newlines = 0;
+            }
+            _ => {}
+        }
+    }
+    segments.push((newlines, None));
+
+    // 直前の行（またはコメント行）の改行は既に出力されているため差し引く
+    for (index, segment) in segments.iter_mut().enumerate() {
+        let base = usize::from(index > 0 || base_newline);
+        segment.0 = segment.0.saturating_sub(base);
+    }
+
+    segments
+}
+
+/// 要素の前の空行とコメントを出力する。最後に要素本体の字下げを出力する。
+pub(crate) fn push_leading(
+    children: &mut Vec<GreenElement>,
+    trivia: &[Trivia],
+    indent: &str,
+    nl: &str,
+    base_newline: bool,
+) {
+    for (blanks, comment) in leading_segments(trivia, base_newline) {
+        for _ in 0..blanks {
+            children.push(SyntaxKind::Newline.create_token(nl).into());
+        }
+        children.push(SyntaxKind::Whitespace.create_token(indent).into());
+        if let Some(comment) = comment {
+            children.push(make_comment_node(&comment));
+            children.push(SyntaxKind::Newline.create_token(nl).into());
+        }
+    }
 }
 
 pub(crate) fn make_comment_node(ct: &CommentTrivia) -> GreenElement {

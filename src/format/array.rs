@@ -1,7 +1,7 @@
 use rowan::GreenNode;
 
 use super::value::multiline_block_node;
-use super::{make_comment_node, Format, FormatConfig};
+use super::{leading_segments, make_comment_node, push_leading, Format, FormatConfig};
 use crate::ast::{Array as AstArray, DelimiterStyle, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
 
@@ -18,10 +18,6 @@ impl Format for AstArray {
             .leading_trivia
             .iter()
             .any(|t| matches!(t, Trivia::Comment(_)));
-        let has_trailing_comments = self
-            .trailing_trivia
-            .iter()
-            .any(|t| matches!(t, Trivia::Comment(_)));
 
         if is_braced {
             children.push(SyntaxKind::LBracket.create_token("[").into());
@@ -31,38 +27,33 @@ impl Format for AstArray {
             children.push(SyntaxKind::Newline.create_token(nl).into());
         }
 
-        for triv in &self.leading_trivia {
-            if let Trivia::Comment(ct) = triv {
-                children.push(
-                    SyntaxKind::Whitespace
-                        .create_token(indent_str.as_str())
-                        .into(),
-                );
-                children.push(make_comment_node(ct));
-                children.push(SyntaxKind::Newline.create_token(nl).into());
+        // 要素が無い（コメントだけの）コンテナは、先頭のトリビアをそのまま出す
+        if items.is_empty() {
+            for (blanks, comment) in leading_segments(&self.leading_trivia, is_braced) {
+                for _ in 0..blanks {
+                    children.push(SyntaxKind::Newline.create_token(nl).into());
+                }
+                if let Some(comment) = comment {
+                    children.push(
+                        SyntaxKind::Whitespace
+                            .create_token(indent_str.as_str())
+                            .into(),
+                    );
+                    children.push(make_comment_node(&comment));
+                    children.push(SyntaxKind::Newline.create_token(nl).into());
+                }
             }
         }
 
         for (i, item) in items.iter().enumerate() {
-            children.push(
-                SyntaxKind::Whitespace
-                    .create_token(indent_str.as_str())
-                    .into(),
-            );
-
-            if i > 0 {
-                for triv in &item.leading_trivia {
-                    if let Trivia::Comment(ct) = triv {
-                        children.push(make_comment_node(ct));
-                        children.push(SyntaxKind::Newline.create_token(nl).into());
-                        children.push(
-                            SyntaxKind::Whitespace
-                                .create_token(indent_str.as_str())
-                                .into(),
-                        );
-                    }
-                }
-            }
+            // 先頭の要素の前のトリビアはコンテナ側が持つ（要素側と重複する）
+            let (lead, base_newline) = if i == 0 {
+                (&self.leading_trivia, true)
+            } else {
+                // 直前の要素の行末の改行はその要素の trailing にあり、ここには含まれない
+                (&item.leading_trivia, false)
+            };
+            push_leading(&mut children, lead, indent_str.as_str(), nl, base_newline);
 
             if let Ok(val) = item.value() {
                 let formatted = multiline_block_node(
@@ -83,21 +74,25 @@ impl Format for AstArray {
                 }
             }
 
-            let has_more = i + 1 < items.len() || has_trailing_comments || is_braced;
+            let has_more = i + 1 < items.len() || !self.trailing_trivia.is_empty() || is_braced;
             if has_more {
                 children.push(SyntaxKind::Newline.create_token(nl).into());
             }
         }
 
-        if has_trailing_comments {
-            for triv in &self.trailing_trivia {
-                if let Trivia::Comment(ct) = triv {
+        {
+            // 末尾の空行とコメント（直前の要素の改行は出力済み）
+            for (blanks, comment) in leading_segments(&self.trailing_trivia, false) {
+                for _ in 0..blanks {
+                    children.push(SyntaxKind::Newline.create_token(nl).into());
+                }
+                if let Some(comment) = comment {
                     children.push(
                         SyntaxKind::Whitespace
                             .create_token(indent_str.as_str())
                             .into(),
                     );
-                    children.push(make_comment_node(ct));
+                    children.push(make_comment_node(&comment));
                     children.push(SyntaxKind::Newline.create_token(nl).into());
                 }
             }
