@@ -81,3 +81,45 @@ fn blank_lines_do_not_change_values() {
         );
     }
 }
+
+#[test]
+fn formatting_keeps_a_comment_between_the_colon_and_the_value() {
+    // 値が空で、行末のコメントだけがある形（翻訳データで `#` を使った本文がこれになる）
+    for input in [
+        "{\n  a: #{0} wave\n  b: 1\n}\n",
+        "{\n  a: 1 /* c */\n}\n",
+        "{\n  a: /* c */ 1\n}\n",
+    ] {
+        let document = HjsonDocument::parse(input).unwrap();
+        let formatted = document
+            .format_container(&empty(), &document.current_format_config())
+            .unwrap();
+
+        assert_eq!(
+            formatted.all_comments(),
+            document.all_comments(),
+            "input: {input:?}"
+        );
+        assert_eq!(formatted.to_string(), input);
+    }
+}
+
+#[test]
+fn formatting_keeps_a_value_on_its_own_line() {
+    let input = "{\n  name: x\n  tooltip:\n    '''\n    line1\n    line2\n    '''\n}\n";
+    let document = HjsonDocument::parse(input).unwrap();
+
+    let formatted = document
+        .format_container(&empty(), &document.current_format_config())
+        .unwrap();
+
+    assert_eq!(formatted.to_string(), input);
+    assert_eq!(
+        formatted
+            .get(HjsonObjectPath::parse("tooltip").unwrap())
+            .unwrap(),
+        document
+            .get(HjsonObjectPath::parse("tooltip").unwrap())
+            .unwrap()
+    );
+}
