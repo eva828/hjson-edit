@@ -8,6 +8,8 @@ repository = "https://github.com/eva828/hjson-edit"
 readme = "README.md"
 keywords = ["hjson", "parser", "formatter", "editor", "cli"]
 categories = ["parser-implementations", "command-line-utilities"]
+# crates.io には公開しないが、package の内容を意図どおりに保つ
+exclude = [".envrc", "flake.nix", "flake.lock", "tools/", ".github/", "PLAN.md"]
 
 [features]
 default = ["cli"]

@@ -24,6 +24,7 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+        cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [
             "rust-src"
@@ -34,7 +35,7 @@
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "hjson-edit";
-          version = "0.1.0";
+          version = cargoToml.package.version;
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
         };

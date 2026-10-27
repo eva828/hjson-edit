@@ -40,7 +40,7 @@ jobs:
           RUSTFLAGS: -W missing_docs
 
       - name: Package
-        run: cargo package --allow-dirty
+        run: cargo package
 
       - name: Examples
         run: |
