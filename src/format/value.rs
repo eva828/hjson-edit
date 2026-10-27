@@ -23,6 +23,7 @@ impl Format for AstValue {
                         &format!("{indent}{}", config.indent.unit()),
                         indent.chars().count(),
                         &indent,
+                        &indent,
                         &config.newline,
                     );
 
@@ -45,10 +46,16 @@ pub(crate) fn block_string_text(
     body: &str,
     line_indent: &str,
     delimiter_column: usize,
+    column_indent_text: &str,
     closing_indent: &str,
     newline: &str,
 ) -> String {
-    let column_indent = " ".repeat(delimiter_column);
+    // 元の字下げがタブなら、本文の字下げにもタブを使う
+    let column_indent = if column_indent_text.chars().count() == delimiter_column {
+        column_indent_text.to_string()
+    } else {
+        " ".repeat(delimiter_column)
+    };
     let has_leading_whitespace = body.split('\n').any(|line| line.starts_with([' ', '\t']));
     let body_indent = if has_leading_whitespace || line_indent.chars().count() > delimiter_column {
         column_indent.as_str()
@@ -97,6 +104,7 @@ pub(crate) fn multiline_block_node(
     value: &AstValue,
     line_indent: &str,
     delimiter_column: usize,
+    column_indent_text: &str,
     closing_indent: &str,
     newline: &str,
 ) -> Option<GreenNode> {
@@ -105,6 +113,7 @@ pub(crate) fn multiline_block_node(
         &body,
         line_indent,
         delimiter_column,
+        column_indent_text,
         closing_indent,
         newline,
     );

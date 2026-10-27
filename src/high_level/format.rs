@@ -47,7 +47,7 @@ impl HjsonDocument {
             let ast = self.ast()?;
             let document = self.clone().root(ast.format(config));
             if self.current_verify() {
-                verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
+                verify::formatting_unchanged(self.syntax_root(), document.syntax_root())?;
             }
 
             return Ok(document);
@@ -79,7 +79,7 @@ impl HjsonDocument {
 
         let document = self.clone().root(container.replace_with(formatted));
         if self.current_verify() {
-            verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
+            verify::formatting_unchanged(self.syntax_root(), document.syntax_root())?;
         }
 
         Ok(document)
@@ -174,7 +174,7 @@ impl HjsonDocument {
 
         let document = self.clone().root(container.replace_with(green));
         if self.current_verify() {
-            verify::values_unchanged(self.syntax_root(), document.syntax_root())?;
+            verify::formatting_unchanged(self.syntax_root(), document.syntax_root())?;
         }
 
         Ok(document)
@@ -207,6 +207,7 @@ fn formatted_block_element(
         &Value::cast(value.clone())?,
         &format!("{indent}{}", crate::high_level::indent::indent_unit(root)),
         start + prefix_width(element, &value),
+        &indent,
         &indent,
         config.newline(),
     ))

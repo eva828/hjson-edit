@@ -72,7 +72,7 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 | コマンド | 主なオプション |
 |---|---|
 | `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
-| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定） |
+| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定）, `--no-verify` |
 | `check <file> [<file2>]` | `--comments`（コメントの一致も要求）。2 つ指定すると値を比較し、等しければ終了コード 0。1 つならパースできるかだけを確認 |
 | `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
 
@@ -150,11 +150,12 @@ assert!(document.to_string().contains("port: 8080"));
 | BOM | パーサーは通常の文字として扱い、CLI がファイル読み込み時に除去する |
 | キーと `:` の間の空白 | lossless な木にトリビアとして残し、`to_string()` は元のテキストを再現する。`format` は値の前後の空白だけを正規化する |
 | 編集結果の妥当性 | 行末でしか終端できない値（引用符なし文字列など）を挿入する場合は改行を補い、常に再パースできるテキストを返す |
+| 整形の検証 | `format` / `format_container` / `format_slot` は、整形の前後で**値とコメント**が変わっていないことを検査する（`--no-verify` で無効化） |
 | 編集の検証 | 各編集の後に再パース・編集した値と**文書全体の値**の一致（`HjsonValue` を基準にする）・対象外コメントの保存を検査し、崩れた結果は `HjsonEditError::InvalidEdit` として返す。整形（`format` / `format_container` / `format_slot`）も値を変えないことを検査する（`verify_edits(false)` で無効化） |
 | 挿入位置 | 新しい要素は末尾の要素の後ろ、閉じ区切りの直前にあるコメント（footer）の手前に入る。字下げは既存の要素に揃える（空のコンテナではコンテナの行の字下げ＋1 段） |
 | 複数行文字列の整形 | `'''` の桁が変わるときは本文の字下げも同じだけ動かし、値を変えない。1 行の `'''...'''` は複数行になるときだけ整形する |
 | `edit` の既定 | 変更した行と挿入した行だけを整える。空行・インラインの `{...}` / `[...]`・既存の体裁はそのまま残す。`--format`（または整形オプションの指定）で変更したコンテナを整形する |
-| 整形と空行 | `format` は空行を保つ（要素間・コメントの前後・閉じ区切りの前・文書末尾）。空行はレイアウトであり、整形の対象にしない |
+| 整形と空行 | `format` は空行を保つ（要素間・コメントの前後・閉じ区切りの前・文書末尾）。空行はレイアウトであり、整形の対象にしない。要素もコメントも無いコンテナは、元が複数行なら 1 行に畳まない |
 | 整形と複数行文字列の配置 | `:` の後ろで改行している値はその行に置いたまま、`'''` の桁に合わせて本文を書き直す（値は変えない）。`:` と値の間のコメントも保つ |
 | インライン位置のコンテナ | `--format` で整形するとき、対象が行頭になければ行頭になる祖先コンテナまで遡って整形する（親のレイアウトと混ざらないようにする） |
 | 書けない値 | HJSON で表現できない値（NaN・無限大、指定スタイルで書けない文字列）は `HjsonEditError::ValueNotRepresentable`。`Prefer::Preserve` で書けない文字列は二重引用符へ切り替える |

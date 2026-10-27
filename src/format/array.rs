@@ -2,7 +2,7 @@ use rowan::GreenNode;
 
 use super::value::multiline_block_node;
 use super::{leading_segments, make_comment_node, push_leading, Format, FormatConfig};
-use crate::ast::{Array as AstArray, DelimiterStyle, Trivia};
+use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Trivia};
 use crate::syntax::{GreenElement, SyntaxKind};
 
 impl Format for AstArray {
@@ -14,6 +14,17 @@ impl Format for AstArray {
         let mut children: Vec<GreenElement> = Vec::new();
 
         let is_braced = self.delimiter_style == DelimiterStyle::Braced;
+        // 要素もコメントも無いコンテナでも、元が複数行なら 1 行に畳まない
+        let keep_empty_lines = is_braced
+            && items.is_empty()
+            && !self
+                .leading_trivia
+                .iter()
+                .any(|trivia| matches!(trivia, Trivia::Comment(_)))
+            && self
+                .syntax()
+                .children_with_tokens()
+                .any(|child| matches!(child, rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Newline));
         let has_leading_comments = self
             .leading_trivia
             .iter()
@@ -23,7 +34,7 @@ impl Format for AstArray {
             children.push(SyntaxKind::LBracket.create_token("[").into());
         }
 
-        if !items.is_empty() || has_leading_comments {
+        if !items.is_empty() || has_leading_comments || keep_empty_lines {
             children.push(SyntaxKind::Newline.create_token(nl).into());
         }
 
@@ -60,6 +71,7 @@ impl Format for AstArray {
                     &val,
                     &format!("{indent_str}{}", config.indent.unit()),
                     indent_str.chars().count(),
+                    &indent_str,
                     &indent_str,
                     nl,
                 )
@@ -99,7 +111,8 @@ impl Format for AstArray {
         }
 
         if is_braced {
-            let needs_closing_indent = !items.is_empty() || has_leading_comments;
+            let needs_closing_indent =
+                !items.is_empty() || has_leading_comments || keep_empty_lines;
             if needs_closing_indent && depth > 0 {
                 children.push(
                     SyntaxKind::Whitespace

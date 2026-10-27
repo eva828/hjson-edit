@@ -85,6 +85,25 @@ pub(crate) fn values_unchanged(
     Ok(())
 }
 
+/// 整形の前後で、値とコメントが変わっていないこと。
+///
+/// 整形はレイアウトだけを変える操作であり、コメントを落としたり増やしたりしてはならない。
+pub(crate) fn formatting_unchanged(
+    previous: &RedNode,
+    updated: &RedNode,
+) -> Result<(), HjsonEditError> {
+    values_unchanged(previous, updated)?;
+
+    if all_comment_bodies(previous) != all_comment_bodies(updated) {
+        return Err(HjsonEditError::InvalidEdit {
+            target: "(document)".to_string(),
+            detail: "comments changed".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 /// 編集で変化してよい範囲。解決できない場合は `None`（コメントは一切変わってはならない）。
 fn edited_range(root: &RedNode, path: &HjsonObjectPath, region: EditedRegion) -> Option<TextRange> {
     match region {
@@ -510,5 +529,31 @@ mod tests {
         assert!(slots.contains(&("a[0]:before".to_string(), vec!["first".to_string()])));
         assert!(slots.contains(&("a[0]:inline".to_string(), vec!["tail".to_string()])));
         assert!(slots.contains(&("a:footer".to_string(), vec!["items".to_string()])));
+    }
+}
+
+#[cfg(test)]
+mod formatting_tests {
+    use super::*;
+
+    #[test]
+    fn formatting_unchanged_rejects_a_lost_comment() {
+        let before = HjsonDocument::parse("{\n  a: 1 // note\n}\n").unwrap();
+        let after = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+
+        let error = formatting_unchanged(before.syntax_root(), after.syntax_root()).unwrap_err();
+
+        assert!(
+            matches!(error, HjsonEditError::InvalidEdit { .. }),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn formatting_unchanged_accepts_a_layout_only_change() {
+        let before = HjsonDocument::parse("{\n  a: 1\n\n  b: 2 // note\n}\n").unwrap();
+        let after = HjsonDocument::parse("{\n\ta: 1\n\n\tb: 2 // note\n}\n").unwrap();
+
+        formatting_unchanged(before.syntax_root(), after.syntax_root()).unwrap();
     }
 }

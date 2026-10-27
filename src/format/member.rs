@@ -45,10 +45,17 @@ impl Format for Member {
                 indent.clone(),
             )
         };
+        // 値が独立した行にある場合は、元の字下げ（タブ等）を本文にも使う
+        let column_indent_text = if value_on_new_line {
+            value_indent.as_str()
+        } else {
+            ""
+        };
         let formatted_value = multiline_block_node(
             &val,
             &body_indent,
             delimiter_column,
+            column_indent_text,
             &closing_indent,
             &config.newline,
         )

@@ -123,3 +123,30 @@ fn formatting_keeps_a_value_on_its_own_line() {
             .unwrap()
     );
 }
+
+#[test]
+fn an_empty_braced_object_keeps_its_line_break() {
+    assert_eq!(format("{\n}\n"), "{\n}\n");
+    assert_eq!(format("{\n  a: {\n  }\n}\n"), "{\n  a: {\n  }\n}\n");
+}
+
+#[test]
+fn an_empty_braced_array_keeps_its_line_break() {
+    assert_eq!(format("[\n]\n"), "[\n]\n");
+}
+
+#[test]
+fn an_empty_object_written_on_one_line_stays_on_one_line() {
+    assert_eq!(format("{\n  a: {}\n}\n"), "{\n  a: {}\n}\n");
+}
+
+#[test]
+fn a_block_string_written_with_tabs_keeps_tabs() {
+    let input = "key:\n\t'''\n\tline1\n\t\tline2\n\t'''\n";
+    let document = HjsonDocument::parse(input).unwrap();
+    let formatted = document
+        .format_container(&empty(), &document.current_format_config())
+        .unwrap();
+
+    assert_eq!(formatted.to_string(), input);
+}

@@ -129,4 +129,10 @@ fn format_command() -> Command {
                 .value_parser(["lf", "crlf"])
                 .help("Newline style: lf or crlf (default: detected from the document)"),
         )
+        .arg(
+            Arg::new("no-verify")
+                .long("no-verify")
+                .action(ArgAction::SetTrue)
+                .help("Skip validating that the result keeps the values and comments"),
+        )
 }

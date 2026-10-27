@@ -46,7 +46,9 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
         config = config.with_newline(if newline == "crlf" { "\r\n" } else { "\n" });
     }
 
-    // 整形は値を変えてはならない（format_container が検証する）
+    let doc = doc.verify_edits(!matches.get_flag("no-verify"));
+
+    // 整形は値とコメントを変えてはならない（format_container が検証する）
     let empty = HjsonObjectPath::parse("").expect("the empty path is always valid");
     let formatted = doc
         .format_container(&empty, &config)
