@@ -1762,19 +1762,31 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
         return Vec::new();
     }
 
-    let children = if let Some(parent) = node.parent() {
-        parent.children_with_tokens().collect::<Vec<_>>()
-    } else {
-        node.children_with_tokens().collect::<Vec<_>>()
-    };
+    // 親の子をすべて並べると要素数に対して二次関数的になるため、兄弟を後方へたどる
+    let mut items: Vec<Trivia> = Vec::new();
+    let mut cursor = node.prev_sibling_or_token();
+    while let Some(element) = cursor {
+        // コメントは Comment ノードなので `is_trivia` では判定できない
+        let Some(item) = trivia_from_element(&element) else {
+            break;
+        };
+        if matches!(item, Trivia::Comma(_)) {
+            break;
+        }
+        items.push(item);
+        cursor = element.prev_sibling_or_token();
+    }
+    items.reverse();
 
-    let index = node.index();
-    let start = leading_trivia_start(&children, index);
-
-    children[start..index]
+    // 直前の要素の行末の改行は、その要素の trailing に属する
+    if let Some(position) = items
         .iter()
-        .filter_map(trivia_from_element)
-        .collect()
+        .position(|item| matches!(item, Trivia::Newline { .. }))
+    {
+        items.drain(..=position);
+    }
+
+    items
 }
 
 /// 指定 index の要素の直前にあるトリビアの開始 index。
@@ -1861,18 +1873,22 @@ fn collect_trailing_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
         return Vec::new();
     }
 
-    let children = if let Some(parent) = node.parent() {
-        parent.children_with_tokens().collect::<Vec<_>>()
-    } else {
-        node.children_with_tokens().collect::<Vec<_>>()
-    };
+    // 親の子をすべて並べると要素数に対して二次関数的になるため、兄弟を前方へたどる
+    let mut items: Vec<Trivia> = Vec::new();
+    let mut cursor = node.next_sibling_or_token();
+    while let Some(element) = cursor {
+        let Some(item) = trivia_from_element(&element) else {
+            break;
+        };
+        let is_newline = matches!(item, Trivia::Newline { .. });
+        items.push(item);
+        if is_newline {
+            break;
+        }
+        cursor = element.next_sibling_or_token();
+    }
 
-    let start = node.index() + 1;
-    let end = trailing_trivia_end(&children, start);
-    children[start..end]
-        .iter()
-        .filter_map(trivia_from_element)
-        .collect()
+    items
 }
 
 fn collect_root_trailing_trivia(node: &RedNode) -> Vec<Trivia> {
@@ -1906,15 +1922,16 @@ fn collect_layout(node: &RedNode, owns_trivia: bool) -> Layout {
         current = parent.parent();
     }
 
-    let is_last = node.parent().is_some_and(|parent| {
-        let mut last_child = None;
-        for child in parent.children() {
-            if !child.kind().is_trivia() {
-                last_child = Some(child);
-            }
+    // 親の子をすべて走査すると要素数に対して二次関数的になるため、後続の兄弟だけを見る
+    let mut next = node.next_sibling();
+    let mut is_last = true;
+    while let Some(sibling) = next {
+        if trivia_from_element(&NodeOrToken::Node(sibling.clone())).is_none() {
+            is_last = false;
+            break;
         }
-        last_child.is_some_and(|child| child == *node)
-    });
+        next = sibling.next_sibling();
+    }
 
     Layout {
         depth,
