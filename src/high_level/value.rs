@@ -363,6 +363,9 @@ impl HjsonValue {
             SyntaxKind::Object => {
                 // 重複キーは後勝ち（基準実装の JsonObject と同じ）。位置は最初の出現を保つ。
                 let mut entries: Vec<(String, HjsonValue)> = Vec::new();
+                // メンバーごとに線形走査すると要素数に対して二次関数的になる
+                let mut positions: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for member in node
                     .children()
                     .filter(|child| child.kind() == SyntaxKind::Member)
@@ -384,9 +387,12 @@ impl HjsonValue {
                             found: node.kind(),
                         })?;
                     let parsed = Self::from_node(&value)?;
-                    match entries.iter_mut().find(|(existing, _)| *existing == key) {
-                        Some(entry) => entry.1 = parsed,
-                        None => entries.push((key, parsed)),
+                    match positions.get(&key) {
+                        Some(index) => entries[*index].1 = parsed,
+                        None => {
+                            positions.insert(key.clone(), entries.len());
+                            entries.push((key, parsed));
+                        }
                     }
                 }
                 Ok(HjsonValue::Object(entries))

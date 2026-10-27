@@ -126,3 +126,48 @@ fn get_value_with_braces() {
     let value = doc.get(HjsonObjectPath::parse("value").unwrap()).unwrap();
     assert!(matches!(value, hjson_edit::high_level::value::HjsonValue::String(s) if s == "a{1}b"));
 }
+
+#[test]
+fn duplicate_keys_keep_the_first_position_and_the_last_value() {
+    let document = HjsonDocument::parse("{\n  a: 1\n  b: 2\n  a: 3\n}\n").unwrap();
+    let value = document.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+
+    let hjson_edit::high_level::value::HjsonValue::Object(entries) = value else {
+        panic!("expected an object");
+    };
+    let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(keys, ["a", "b"]);
+    assert_eq!(
+        entries[0].1,
+        hjson_edit::high_level::value::HjsonValue::Integer(3)
+    );
+    assert_eq!(
+        entries[1].1,
+        hjson_edit::high_level::value::HjsonValue::Integer(2)
+    );
+}
+
+#[test]
+fn many_unique_keys_keep_the_source_order() {
+    let mut text = String::from("{\n");
+    for index in 0..2000 {
+        text.push_str(&format!("  k{index}: {index}\n"));
+    }
+    text.push_str("}\n");
+
+    let document = HjsonDocument::parse(&text).unwrap();
+    let hjson_edit::high_level::value::HjsonValue::Object(entries) =
+        document.get(HjsonObjectPath::parse("").unwrap()).unwrap()
+    else {
+        panic!("expected an object");
+    };
+
+    assert_eq!(entries.len(), 2000);
+    for (index, (key, value)) in entries.iter().enumerate() {
+        assert_eq!(key, &format!("k{index}"));
+        assert_eq!(
+            value,
+            &hjson_edit::high_level::value::HjsonValue::Integer(index as i64)
+        );
+    }
+}
