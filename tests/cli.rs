@@ -771,3 +771,17 @@ fn cli_check_validates_a_single_file() {
         .assert()
         .failure();
 }
+
+#[test]
+fn cli_format_accepts_no_verify() {
+    let stdout = format_stdout(&["format", "--no-verify"], "{\n  a: 1\n}\n");
+
+    assert_eq!(stdout, "{\n  a: 1\n}\n");
+}
+
+#[test]
+fn cli_format_verifies_by_default() {
+    let stdout = format_stdout(&["format"], "{\n  a: 1\n}\n");
+
+    assert_eq!(stdout, "{\n  a: 1\n}\n");
+}
