@@ -1560,20 +1560,39 @@ fn container_slots(node: &RedNode, element_kind: SyntaxKind) -> Vec<SlotSpan> {
     let children = node.children_with_tokens().collect::<Vec<_>>();
     let mut slots = Vec::new();
 
+    // 各要素の直前トリビアの開始を、要素ごとに先頭から数え直すと要素数に対して
+    // 二次関数的になる。`leading_trivia_start` と同じ規則を 1 回の走査で進める。
+    let mut lead = 0usize;
+    let mut saw_boundary_newline = false;
+
     for (index, child) in children.iter().enumerate() {
-        if !matches!(child, NodeOrToken::Node(element) if element.kind() == element_kind) {
+        if matches!(child, NodeOrToken::Node(element) if element.kind() == element_kind) {
+            let trail_end = trailing_trivia_end(&children, index + 1);
+            slots.push(SlotSpan {
+                lead: lead..index,
+                elem: index..index + 1,
+                trail: index + 1..trail_end,
+                at_line_start: follows_line_break(&children, lead),
+                line_break: first_newline_index(&children, index + 1..trail_end),
+            });
+
+            // 要素そのものは非トリビアとして扱う
+            lead = index + 1;
+            saw_boundary_newline = false;
             continue;
         }
 
-        let lead = leading_trivia_start(&children, index);
-        let trail_end = trailing_trivia_end(&children, index + 1);
-        slots.push(SlotSpan {
-            lead: lead..index,
-            elem: index..index + 1,
-            trail: index + 1..trail_end,
-            at_line_start: follows_line_break(&children, lead),
-            line_break: first_newline_index(&children, index + 1..trail_end),
-        });
+        match trivia_from_element(child) {
+            None | Some(Trivia::Comma(_)) => {
+                lead = index + 1;
+                saw_boundary_newline = false;
+            }
+            Some(Trivia::Newline { .. }) if !saw_boundary_newline => {
+                lead = index + 1;
+                saw_boundary_newline = true;
+            }
+            _ => {}
+        }
     }
 
     slots
@@ -1787,37 +1806,6 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
     }
 
     items
-}
-
-/// 指定 index の要素の直前にあるトリビアの開始 index。
-///
-/// カンマ・行を区切る改行・非トリビア要素で区切られた「最後の連続したトリビア列」の
-/// 先頭を返す。`collect_leading_trivia` と同じ規則を共有するための唯一の実装。
-fn leading_trivia_start(children: &[NodeOrToken<RedNode, RedToken>], index: usize) -> usize {
-    let mut start = 0usize;
-    let mut saw_boundary_newline = false;
-
-    for (position, elem) in children.iter().enumerate().take(index) {
-        let Some(item) = trivia_from_element(elem) else {
-            start = position + 1;
-            saw_boundary_newline = false;
-            continue;
-        };
-
-        match item {
-            Trivia::Comma(_) => {
-                start = position + 1;
-                saw_boundary_newline = false;
-            }
-            Trivia::Newline { .. } if !saw_boundary_newline => {
-                start = position + 1;
-                saw_boundary_newline = true;
-            }
-            _ => {}
-        }
-    }
-
-    start
 }
 
 fn collect_root_leading_trivia(node: &RedNode) -> Vec<Trivia> {

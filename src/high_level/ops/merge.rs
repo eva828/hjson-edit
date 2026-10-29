@@ -1,16 +1,18 @@
-use rowan::GreenNode;
+use std::collections::HashMap;
 
-use crate::ast::{AstNode, Member, Object as AstObject, Trivia, ValueContent};
+use rowan::{GreenNode, NodeOrToken};
+
+use crate::ast::{AstNode, Member, Trivia, ValueContent};
 use crate::high_level::{
     error::HjsonEditError,
     ops::{
         ensure_depth_within_limit,
-        insert::{newline_element, plan_insert, InsertPosition, RenderedElement},
+        insert::{newline_element, plan_append_many, plan_insert, InsertPosition, RenderedElement},
         object::rebuild_tree_with_set,
         receiving_container_depth, relative_container_depth,
     },
     path::{HjsonObjectPath, PathSegment},
-    resolve::{member_index, resolve_body, ExistingPrefix, PathResolver},
+    resolve::{resolve_body, ExistingPrefix, PathResolver},
     style::detect_document_newline,
     value::HjsonValue,
     HjsonDocument, Prefer,
@@ -162,59 +164,92 @@ fn merge_from_root(
 
 /// `target_object` を `source_object` の各メンバーで更新する。
 ///
-/// 対象オブジェクトの green ノードを毎回更新しながら処理する。
+/// 子の並びを取り出して対象メンバーの位置を 1 回だけ調べ、既存メンバーはその場で
+/// 差し替える。新規メンバーは最後にまとめて挿入する（メンバーごとに木を作り直さない）。
 fn merge_objects(
     target_object: &RedNode,
     source_object: &RedNode,
     base_indent: &str,
 ) -> Result<GreenNode, HjsonEditError> {
-    let mut current: GreenNode = target_object.green().clone().into();
+    let newline = detect_document_newline(target_object);
+    let mut children: Vec<crate::syntax::GreenElement> = target_object
+        .green()
+        .children()
+        .map(|child| child.to_owned())
+        .collect();
 
+    // 同じキーが複数ある場合は、`set` と同じくすべてを更新する
+    let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
+    for member in target_object
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::Member)
+    {
+        let key = Member::cast(member.clone())?
+            .member_key()
+            .ok_or_else(|| HjsonEditError::MergeConflict("cannot read member key".to_string()))?;
+        positions.entry(key).or_default().push(member.index());
+    }
+
+    let mut pending: Vec<RenderedElement> = Vec::new();
     for source_member in source_object
         .children()
         .filter(|child| child.kind() == SyntaxKind::Member)
     {
-        let target = RedNode::new_root(current.clone());
-        let source = Member::cast(source_member.clone())?;
+        let source = Member::cast(source_member)?;
         let key = source
             .member_key()
             .ok_or_else(|| HjsonEditError::MergeConflict("cannot read member key".to_string()))?;
 
-        current = match member_index(&target, &key) {
-            Some(index) => {
-                let existing = &AstObject::cast(target.clone())?.members()[index];
-                merge_existing_member(&current, existing, &source, base_indent)?
+        match positions.get(&key) {
+            Some(indices) => {
+                for &index in indices {
+                    let existing_green = match &children[index] {
+                        NodeOrToken::Node(node) => node.clone(),
+                        NodeOrToken::Token(_) => {
+                            return Err(HjsonEditError::MergeConflict(
+                                "member is not a node".to_string(),
+                            ))
+                        }
+                    };
+                    let existing = Member::cast(RedNode::new_root(existing_green))?;
+                    children[index] = merge_member(&existing, &source, base_indent)?.into();
+                }
             }
-            None => insert_member(&target, &current, &source, base_indent)?,
-        };
+            None => pending.push(copy_member_with_comments(&source, newline)),
+        }
     }
 
-    Ok(current)
-}
+    if pending.is_empty() {
+        return Ok(GreenNode::new(SyntaxKind::Object.into(), children));
+    }
 
-/// 新規メンバーを、付いていたコメントごと挿入する。
-fn insert_member(
-    target_object: &RedNode,
-    current: &GreenNode,
-    source: &Member,
-    base_indent: &str,
-) -> Result<GreenNode, HjsonEditError> {
-    let newline = detect_document_newline(target_object);
-    let element = copy_member_with_comments(source, newline);
-    let (at, elements) = plan_insert(
-        target_object,
-        InsertPosition::End,
-        element,
-        newline,
-        Some(base_indent),
-    )?;
+    let current = GreenNode::new(SyntaxKind::Object.into(), children);
+    let container = RedNode::new_root(current.clone());
+    if let Some((at, elements)) =
+        plan_append_many(&container, pending.clone(), newline, Some(base_indent))?
+    {
+        return Ok(current.splice_children(at..at, elements));
+    }
 
-    Ok(current.splice_children(at..at, elements))
+    // 1 行のコンテナなど、まとめて並べられない形は 1 件ずつ追加する
+    let mut green = current;
+    for element in pending {
+        let container = RedNode::new_root(green.clone());
+        let (at, elements) = plan_insert(
+            &container,
+            InsertPosition::End,
+            element,
+            newline,
+            Some(base_indent),
+        )?;
+        green = green.splice_children(at..at, elements);
+    }
+
+    Ok(green)
 }
 
 /// 既存メンバーがオブジェクトなら再帰マージ、それ以外は後勝ちで置き換える。
-fn merge_existing_member(
-    object_green: &GreenNode,
+fn merge_member(
     existing: &Member,
     source: &Member,
     base_indent: &str,
@@ -255,14 +290,11 @@ fn merge_existing_member(
     };
 
     let value_index = existing_value.syntax().index();
-    let updated_member = existing
+    Ok(existing
         .syntax()
         .green()
         .clone()
-        .splice_children(value_index..value_index + 1, vec![updated_value.into()]);
-    let member_index = existing.syntax().index();
-
-    Ok(object_green.splice_children(member_index..member_index + 1, vec![updated_member.into()]))
+        .splice_children(value_index..value_index + 1, vec![updated_value.into()]))
 }
 
 /// ソースのメンバーを、先頭のコメント行と行末コメントごと要素にする。

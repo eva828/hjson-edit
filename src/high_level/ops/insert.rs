@@ -33,6 +33,7 @@ use crate::syntax::{GreenElement, NewlineKind, RedNode, SyntaxKind};
 ///
 /// コメントを伴う要素（マージでコメントごとコピーする場合）もあるため、
 /// 要素は複数の green 要素の並びとして持つ。
+#[derive(Clone)]
 pub(crate) struct RenderedElement {
     elements: Vec<GreenElement>,
     line_terminated: bool,
@@ -243,6 +244,72 @@ fn plan_append(
     }
 
     Ok((insert_index, inserted))
+}
+
+/// 末尾へ複数要素をまとめて追加する。
+///
+/// 複数要素をまとめて扱える形（複数行のコンテナ・ブレースレス・閉じ区切りが独立した行に
+/// ある空のコンテナ）では、位置と字下げを 1 回だけ決めて全要素を並べる。1 行のコンテナなど
+/// 並べ方に例外がある形では `None` を返し、呼び出し側が 1 件ずつ追加する。
+pub(crate) fn plan_append_many(
+    container: &RedNode,
+    elements: Vec<RenderedElement>,
+    newline: NewlineKind,
+    base_indent: Option<&str>,
+) -> Result<Option<(usize, Vec<GreenElement>)>, HjsonEditError> {
+    let slots = container_slots(container)?;
+    let braceless = is_braceless(container)?;
+    let base_indent = base_indent.map_or_else(
+        || line_indent(&root_of(container), container.text_range().start().into()),
+        str::to_string,
+    );
+    let newline = container_newline(container).unwrap_or(newline);
+
+    let Some(last) = slots.last() else {
+        let insertion = body_insertion(container)?;
+        if braceless || insertion.start_new_line() {
+            return Ok(None);
+        }
+        let (index, at_line_start) = empty_body_insertion(container, insertion.index());
+        if !at_line_start {
+            return Ok(None);
+        }
+
+        let indent = container_indent(container, &base_indent);
+        let mut inserted = Vec::new();
+        for element in elements {
+            let mut block = element.elements;
+            block.push(newline_element(newline));
+            inserted.extend(indent_lines(block, &indent));
+        }
+        return Ok(Some((index, inserted)));
+    };
+
+    if let Some(line_break) = last.line_break() {
+        let kind = newline_at(container, line_break).unwrap_or(newline);
+        let indent = indent_before(
+            &root_of(container),
+            child_start(container, last.elem().start),
+        );
+        let mut inserted = Vec::new();
+        for element in elements {
+            let mut block = element.elements;
+            block.push(newline_element(kind));
+            inserted.extend(indent_lines(block, &indent));
+        }
+        return Ok(Some((line_break + 1, inserted)));
+    }
+
+    if braceless {
+        let mut inserted = Vec::new();
+        for element in elements {
+            inserted.push(newline_element(newline));
+            inserted.extend(element.elements);
+        }
+        return Ok(Some((last.trail().end, inserted)));
+    }
+
+    Ok(None)
 }
 
 /// 本文が空のコンテナへ要素を追加する。

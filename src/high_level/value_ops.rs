@@ -227,18 +227,27 @@ fn merge_objects_in_value(
     };
 
     let mut entries = target_entries.clone();
+    // メンバーごとに線形走査すると要素数に対して二次関数的になる
+    let mut positions: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (index, (key, _)) in entries.iter().enumerate() {
+        positions.insert(key.clone(), index);
+    }
+
     for (key, source_value) in source_entries {
-        match entries.iter_mut().find(|(existing, _)| existing == key) {
-            Some(entry) => {
-                entry.1 = if matches!(entry.1, HjsonValue::Object(_))
+        match positions.get(key) {
+            Some(index) => {
+                entries[*index].1 = if matches!(entries[*index].1, HjsonValue::Object(_))
                     && matches!(source_value, HjsonValue::Object(_))
                 {
-                    merge_objects_in_value(&entry.1, source_value)?
+                    merge_objects_in_value(&entries[*index].1, source_value)?
                 } else {
                     source_value.clone()
                 };
             }
-            None => entries.push((key.clone(), source_value.clone())),
+            None => {
+                positions.insert(key.clone(), entries.len());
+                entries.push((key.clone(), source_value.clone()));
+            }
         }
     }
 
