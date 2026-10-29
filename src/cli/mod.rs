@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use hjson_edit::MAX_INPUT_BYTES;
 use std::path::Path;
 
-mod check;
 mod edit;
 mod format;
 mod parse;
@@ -36,7 +35,6 @@ pub(crate) fn warn_skipped_input(document: &hjson_edit::HjsonDocument) {
     }
 }
 
-pub use check::check_command;
 pub use edit::edit_command;
 pub use format::run_format;
 pub use parse::run_parse;
@@ -48,10 +46,7 @@ pub fn run() -> anyhow::Result<()> {
         Some(("parse", sub_matches)) => run_parse(sub_matches),
         Some(("format", sub_matches)) => run_format(sub_matches),
         Some(("edit", sub_matches)) => edit::run_edit(sub_matches),
-        Some(("check", sub_matches)) => check::run_check(sub_matches),
-        _ => anyhow::bail!(
-            "Usage: hjson-edit <command> [args]\nCommands: parse, format, edit, check"
-        ),
+        _ => anyhow::bail!("Usage: hjson-edit <command> [args]\nCommands: parse, format, edit"),
     }
 }
 
@@ -63,7 +58,6 @@ pub fn build_cli() -> Command {
         .subcommand(parse_command())
         .subcommand(format_command())
         .subcommand(edit_command())
-        .subcommand(check_command())
 }
 
 fn parse_command() -> Command {

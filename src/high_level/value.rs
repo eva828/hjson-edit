@@ -88,11 +88,6 @@ impl From<Vec<(String, HjsonValue)>> for HjsonValue {
 }
 
 impl HjsonValue {
-    /// 2 つの値が同じか。整数と浮動小数は数値として比較する。
-    pub fn same_value(&self, other: &Self) -> bool {
-        crate::high_level::value_ops::values_equal(self, other)
-    }
-
     /// 値に含まれる文字列を順に呼び出す。
     pub(crate) fn for_each_string(&self, visit: &mut impl FnMut(&str)) {
         match self {

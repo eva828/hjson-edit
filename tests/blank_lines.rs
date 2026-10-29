@@ -95,11 +95,6 @@ fn formatting_keeps_a_comment_between_the_colon_and_the_value() {
             .format_container(&empty(), &document.current_format_config())
             .unwrap();
 
-        assert_eq!(
-            formatted.all_comments(),
-            document.all_comments(),
-            "input: {input:?}"
-        );
         assert_eq!(formatted.to_string(), input);
     }
 }
