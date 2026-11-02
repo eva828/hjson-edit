@@ -240,3 +240,67 @@ fn arbitrary_values_keep_a_preserved_block_style_safe() {
         }
     }
 }
+
+#[test]
+fn a_preferred_style_that_cannot_represent_the_value_falls_back() {
+    // 行頭が空白の行は Block では書けない。
+    let document = HjsonDocument::parse(UNQUOTED_DOCUMENT)
+        .unwrap()
+        .string_style(Prefer::Preferred(QuoteStyle::Block));
+    let edited = document
+        .set(
+            path("added"),
+            HjsonValue::String("  indented\n  lines".to_string()),
+        )
+        .unwrap();
+
+    assert!(
+        edited
+            .to_string()
+            .contains("added: \"  indented\\n  lines\""),
+        "document: {:?}",
+        edited.to_string()
+    );
+    assert_eq!(
+        edited.get(path("added")).unwrap(),
+        HjsonValue::String("  indented\n  lines".to_string())
+    );
+}
+
+#[test]
+fn a_preferred_style_that_can_represent_the_value_is_kept() {
+    let document = HjsonDocument::parse(UNQUOTED_DOCUMENT)
+        .unwrap()
+        .string_style(Prefer::Preferred(QuoteStyle::Block));
+    let edited = document
+        .set(path("added"), HjsonValue::String("line".to_string()))
+        .unwrap();
+
+    assert!(
+        edited.to_string().contains("added: '''line'''"),
+        "document: {:?}",
+        edited.to_string()
+    );
+}
+
+#[test]
+fn a_preferred_style_wins_over_the_detected_style() {
+    for style in [
+        QuoteStyle::DoubleQuoted,
+        QuoteStyle::SingleQuoted,
+        QuoteStyle::Block,
+    ] {
+        let document = HjsonDocument::parse(UNQUOTED_DOCUMENT)
+            .unwrap()
+            .string_style(Prefer::Preferred(style));
+        let edited = document
+            .set(path("added"), HjsonValue::String("hello".to_string()))
+            .unwrap();
+
+        assert!(
+            edited.to_string().contains(&style.render("hello")),
+            "style: {style:?}, document: {:?}",
+            edited.to_string()
+        );
+    }
+}

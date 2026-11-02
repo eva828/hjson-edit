@@ -31,13 +31,15 @@ use crate::RedNode;
 use line_index::LineIndex;
 use rowan::GreenNode;
 
-/// 値の維持（Preserve）または明示的な指定（Explicit）を表す型
+/// スタイルの選び方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Prefer<T> {
-    /// 元のスタイルを保つ。
+    /// 元のスタイルを保つ。書けない値なら二重引用符へ切り替える。
     #[default]
     Preserve,
-    /// 指定したスタイルを使う。
+    /// 希望のスタイル。書けない値なら二重引用符へ切り替える。
+    Preferred(T),
+    /// 指定したスタイル。書けない値はエラーにする。
     Explicit(T),
 }
 

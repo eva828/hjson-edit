@@ -457,11 +457,17 @@ fn cli_edit_string_style_applies_to_subsequent_sets() {
 }
 
 #[test]
-fn cli_edit_inline_string_style_overrides_string_style() {
+fn cli_edit_string_style_overrides_inline_string_style() {
     let stdout = edit_stdout(
         &["edit", "--string-style", "unquoted", "--set", "b", "\"x\""],
         "{a: 1}\n",
     );
+    assert_eq!(stdout, "{a: 1, b: x\n}\n");
+}
+
+#[test]
+fn cli_edit_uses_inline_string_style_without_the_option() {
+    let stdout = edit_stdout(&["edit", "--set", "b", "\"x\""], "{a: 1}\n");
     assert_eq!(stdout, "{a: 1, b: \"x\"}\n");
 }
 
@@ -700,4 +706,41 @@ fn cli_format_verifies_by_default() {
     let stdout = format_stdout(&["format"], "{\n  a: 1\n}\n");
 
     assert_eq!(stdout, "{\n  a: 1\n}\n");
+}
+
+#[test]
+fn cli_set_keeps_the_quotes_of_the_value_text() {
+    let stdout = edit_stdout(&["edit", "--set", "a", "\"hi\""], "{\n  a: 1\n}\n");
+
+    assert!(stdout.contains("a: \"hi\""), "stdout: {stdout}");
+}
+
+#[test]
+fn cli_set_keeps_single_quotes_of_the_value_text() {
+    let stdout = edit_stdout(&["edit", "--set", "a", "'hi'"], "{\n  a: 1\n}\n");
+
+    assert!(stdout.contains("a: 'hi'"), "stdout: {stdout}");
+}
+
+#[test]
+fn cli_string_style_overrides_the_value_text() {
+    let stdout = edit_stdout(
+        &["edit", "--string-style", "unquoted", "--set", "a", "\"hi\""],
+        "{\n  a: 1\n}\n",
+    );
+
+    assert!(stdout.contains("a: hi"), "stdout: {stdout}");
+}
+
+#[test]
+fn cli_set_accepts_an_indented_block_value_text() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "a", "'''\n  multi\n  line'''"],
+        "{\n  a: 1\n}\n",
+    );
+
+    assert!(
+        stdout.contains("a: \"  multi\\n  line\""),
+        "stdout: {stdout}"
+    );
 }

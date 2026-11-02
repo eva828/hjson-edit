@@ -929,7 +929,7 @@ fn resolve_comment_style(
 ) -> CommentKind {
     match preferred {
         Prefer::Preserve => existing_style.unwrap_or(CommentKind::Block),
-        Prefer::Explicit(kind) => kind,
+        Prefer::Preferred(kind) | Prefer::Explicit(kind) => kind,
     }
 }
 

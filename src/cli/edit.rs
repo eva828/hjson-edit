@@ -100,13 +100,16 @@ pub fn edit_command() -> Command {
                 .long("string-style")
                 .value_name("STYLE")
                 .value_parser(["preserve", "double", "block", "unquoted"])
-                .help("String style used by set operations (default: preserve)"),
+                .help(
+                    "String style for set operations, overriding the quotes of the VALUE text \
+                     (default: preserve)",
+                ),
         )
         .arg(
             Arg::new("no-verify")
                 .long("no-verify")
                 .action(ArgAction::SetTrue)
-                .help("Skip validating the result of each edit (faster, less safe)"),
+                .help("Skip validating that edits keep values and comments (faster, less safe)"),
         )
         .arg(
             Arg::new("format")
@@ -260,13 +263,18 @@ fn contains_comment(root: &hjson_edit::RedNode) -> bool {
     })
 }
 
-/// 値テキストの引用スタイル（`"..."` / `'''...'''`）。指定があればその値だけに使う。
+/// 値テキストの引用スタイル（`"..."` / `'...'` / `'''...'''`）。指定があればその値だけに使う。
+///
+/// 希望として扱い、そのスタイルで書けない値は二重引用符へ降格させる。
 fn inline_string_style(raw: &str) -> Option<Prefer<QuoteStyle>> {
     if raw.len() >= 6 && raw.starts_with("'''") && raw.ends_with("'''") {
-        return Some(Prefer::Explicit(QuoteStyle::Block));
+        return Some(Prefer::Preferred(QuoteStyle::Block));
     }
     if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-        return Some(Prefer::Explicit(QuoteStyle::DoubleQuoted));
+        return Some(Prefer::Preferred(QuoteStyle::DoubleQuoted));
+    }
+    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
+        return Some(Prefer::Preferred(QuoteStyle::SingleQuoted));
     }
     None
 }
@@ -457,15 +465,16 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
 
     let ops = EditOpCollector::new(matches).collect()?;
     let config = format_config(matches, &doc);
-    let string_style = match matches.get_one::<String>("string-style") {
-        Some(style) => parse_string_style(style)?,
-        None => Prefer::Preserve,
-    };
+    // `--string-style` の指定は値テキストの引用より優先する。無ければ値テキストを使う。
+    let string_style = matches
+        .get_one::<String>("string-style")
+        .map(|style| parse_string_style(style))
+        .transpose()?;
 
     doc = doc
         .verify_edits(!matches.get_flag("no-verify"))
         .format_config(config)
-        .string_style(string_style);
+        .string_style(string_style.unwrap_or_default());
     if let Some(style) = matches.get_one::<String>("comment-style") {
         doc = doc.comment_style(parse_comment_style(style)?);
     }
@@ -484,13 +493,13 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 string_style: inline_style,
             } => {
                 let parsed = parse_object_path(&path)?;
-                // 値テキストの引用スタイルは、その値だけに適用する
-                let styled = match inline_style {
-                    Some(style) => doc.string_style(style),
-                    None => doc,
+                // 値テキストの引用スタイルは、その値だけに使う（`--string-style` があれば使わない）
+                let styled = match (string_style, inline_style) {
+                    (None, Some(style)) => doc.string_style(style),
+                    _ => doc,
                 };
                 doc = styled.set(parsed.clone(), value)?;
-                doc = doc.string_style(string_style);
+                doc = doc.string_style(string_style.unwrap_or_default());
                 edited_slots.push(parsed);
             }
             EditOp::Remove { path } => {
@@ -637,11 +646,15 @@ mod tests {
         assert_eq!(inline_string_style("hello"), None);
         assert_eq!(
             inline_string_style("\"x\""),
-            Some(Prefer::Explicit(QuoteStyle::DoubleQuoted))
+            Some(Prefer::Preferred(QuoteStyle::DoubleQuoted))
+        );
+        assert_eq!(
+            inline_string_style("'x'"),
+            Some(Prefer::Preferred(QuoteStyle::SingleQuoted))
         );
         assert_eq!(
             inline_string_style("'''x'''"),
-            Some(Prefer::Explicit(QuoteStyle::Block))
+            Some(Prefer::Preferred(QuoteStyle::Block))
         );
     }
 }

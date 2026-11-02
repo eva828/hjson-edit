@@ -523,7 +523,7 @@ fn render_value_like_node(
 
 /// 値が指定スタイルで書けるかを確認し、必要なら降格する。
 ///
-/// `Prefer::Preserve` は希望なので、書けない場合は二重引用符へ降格する。
+/// `Prefer::Preserve` と `Prefer::Preferred` は希望なので、書けない場合は二重引用符へ降格する。
 /// `Prefer::Explicit` は指定なので、書けない場合はエラーを返す。
 fn checked_style(
     value: &HjsonValue,
@@ -534,7 +534,7 @@ fn checked_style(
 
     match style {
         Some(style) if !value.is_representable_with(style) => match preference {
-            Prefer::Preserve => Ok(Some(QuoteStyle::DoubleQuoted)),
+            Prefer::Preserve | Prefer::Preferred(_) => Ok(Some(QuoteStyle::DoubleQuoted)),
             Prefer::Explicit(_) => Err(HjsonEditError::ValueNotRepresentable {
                 reason: format!("the requested string style {style:?} cannot represent this value"),
             }),
@@ -546,7 +546,7 @@ fn checked_style(
 fn resolve_quote_style(preference: Prefer<QuoteStyle>, detected: Option<QuoteStyle>) -> QuoteStyle {
     match preference {
         Prefer::Preserve => detected.unwrap_or(QuoteStyle::DoubleQuoted),
-        Prefer::Explicit(style) => style,
+        Prefer::Preferred(style) | Prefer::Explicit(style) => style,
     }
 }
 
