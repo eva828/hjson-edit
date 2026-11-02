@@ -744,3 +744,16 @@ fn cli_set_accepts_an_indented_block_value_text() {
         "stdout: {stdout}"
     );
 }
+
+#[test]
+fn cli_set_with_an_equal_value_keeps_the_document() {
+    for (value, input) in [
+        ("{x: 1, y: 2}", "{\n  a: {x: 1, y: 2}\n}\n"),
+        ("1.0", "{\n  a: 1.0\n}\n"),
+        ("1e3", "{\n  a: 1e3\n}\n"),
+    ] {
+        let stdout = edit_stdout(&["edit", "--set", "a", value], input);
+
+        assert_eq!(stdout, input, "value: {value}");
+    }
+}

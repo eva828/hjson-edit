@@ -271,3 +271,75 @@ fn set_on_string_root_is_rejected() {
         "文字列ルートへの設定はエラーになる: {error:?}"
     );
 }
+
+/// 値を変えない `set` はテキストも変えない（体裁の正規化を起こさない）。
+#[test]
+fn set_with_an_equal_value_keeps_the_text() {
+    for input in [
+        "{\n  a: {x: 1, y: 2}\n}\n",
+        "{\n  a: [1, 2]\n}\n",
+        "{\n  a: { \"k\": 1 }\n}\n",
+        "{\n  a: 1.0\n}\n",
+        "{\n  a: 1e3\n}\n",
+        "{\n  a:\n    {\n      x: 1\n    }\n}\n",
+    ] {
+        let doc = HjsonDocument::parse(input).unwrap();
+        let value = doc.get(HjsonObjectPath::parse("a").unwrap()).unwrap();
+        let updated = doc
+            .set(HjsonObjectPath::parse("a").unwrap(), value)
+            .unwrap();
+
+        assert_eq!(updated.to_string(), input);
+    }
+}
+
+#[test]
+fn set_with_an_equal_number_keeps_the_float_text() {
+    let doc = HjsonDocument::parse("{\n  a: 1.0\n}\n").unwrap();
+    let updated = doc.set(HjsonObjectPath::parse("a").unwrap(), 1).unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  a: 1.0\n}\n");
+}
+
+#[test]
+fn set_with_an_equal_array_item_keeps_the_text() {
+    let input = "{\n  items: [{x: 1, y: 2}, 3]\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let value = doc
+        .get(HjsonObjectPath::parse("items[0]").unwrap())
+        .unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("items[0]").unwrap(), value)
+        .unwrap();
+
+    assert_eq!(updated.to_string(), input);
+}
+
+#[test]
+fn set_with_an_equal_value_for_duplicate_keys_keeps_both() {
+    let input = "{\n  a: {x: 1}\n  a: {x: 1}\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let value = doc.get(HjsonObjectPath::parse("a").unwrap()).unwrap();
+    let updated = doc
+        .set(HjsonObjectPath::parse("a").unwrap(), value)
+        .unwrap();
+
+    assert_eq!(updated.to_string(), input);
+}
+
+#[test]
+fn set_with_an_equal_value_and_an_explicit_style_rewrites_the_value() {
+    let doc = HjsonDocument::parse("{\n  a: x\n}\n")
+        .unwrap()
+        .string_style(hjson_edit::Prefer::Explicit(
+            hjson_edit::ast::QuoteStyle::DoubleQuoted,
+        ));
+    let updated = doc
+        .set(
+            HjsonObjectPath::parse("a").unwrap(),
+            HjsonValue::String("x".to_string()),
+        )
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  a: \"x\"\n}\n");
+}

@@ -5,7 +5,7 @@ use crate::{
         detected_string_style_of_node, Array as AstArray, AstNode, Object as AstObject, QuoteStyle,
         Trivia,
     },
-    high_level::value_ops::build_nested_value,
+    high_level::value_ops::{build_nested_value, values_equal},
     high_level::{
         error::HjsonEditError,
         ops::{
@@ -290,6 +290,12 @@ fn set_object_child(
                     path: HjsonObjectPath::from_segments(vec![last.clone()]),
                     reason: "member without a value".to_string(),
                 })?;
+            // 同じ値なら書き換えない（値を変えない編集で体裁を変えない）
+            if matches!(string_style, Prefer::Preserve)
+                && values_equal(&HjsonValue::from_node(value_child.syntax())?, value)
+            {
+                continue;
+            }
             let updated = render_value_like_node(
                 value_child.syntax(),
                 value,
@@ -368,6 +374,11 @@ fn set_array_child(
                 return Err(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len });
             }
             let current = &array_ast.items()[*index];
+            if matches!(string_style, Prefer::Preserve)
+                && values_equal(&HjsonValue::from_node(current.syntax())?, value)
+            {
+                return Ok(parent.green().clone().into_owned());
+            }
             let updated = render_value_like_node(
                 current.syntax(),
                 value,
