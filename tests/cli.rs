@@ -1049,3 +1049,20 @@ fn cli_edit_format_emits_a_comment_after_a_comma_once() {
     assert_eq!(stdout.matches("/* c */").count(), 1, "{stdout}");
     assert_parses(&stdout);
 }
+
+#[test]
+fn cli_edit_set_root_replaces_the_document() {
+    // 空のパスは文書全体の差し替え（本文ごと置き換わる）
+    let stdout = edit_stdout(&["edit", "--set", "", "5"], "a: 1\n// footer\n");
+
+    assert_eq!(stdout, "5\n");
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_set_root_keeps_the_document_header() {
+    let stdout = edit_stdout(&["edit", "--set", "", "5"], "// header\na: 1\n");
+
+    assert_eq!(stdout, "// header\n5\n");
+    assert_parses(&stdout);
+}

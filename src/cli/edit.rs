@@ -570,6 +570,10 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         }
 
         for slot in edited_slots {
+            // 空のパスは文書全体なので、要素の整形はしない（コンテナ側で処理済み）
+            if slot.depth() == 0 {
+                continue;
+            }
             match doc.format_slot(&slot, &config) {
                 Ok(updated) => doc = updated,
                 Err(
