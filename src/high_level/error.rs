@@ -108,7 +108,7 @@ fn format_path(path: &HjsonObjectPath) -> String {
 }
 
 /// 過大な入力を、先頭のみを残して省略した表示にする。
-fn format_text(text: &str) -> String {
+pub(crate) fn format_text(text: &str) -> String {
     let mut chars = text.chars();
     let head: String = chars.by_ref().take(MAX_ERROR_TEXT_CHARS).collect();
     let head_len = head.chars().count();

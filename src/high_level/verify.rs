@@ -10,7 +10,7 @@
 
 use rowan::{NodeOrToken, TextRange};
 
-use crate::high_level::error::HjsonEditError;
+use crate::high_level::error::{format_text, HjsonEditError};
 use crate::high_level::ops::comment::{all_comment_bodies, comment_slots, CommentSlot};
 use crate::high_level::ops::insert::slot_at;
 use crate::high_level::path::{ArrayPathSegment, HjsonCommentPath, HjsonObjectPath, PathSegment};
@@ -113,10 +113,7 @@ pub(crate) fn value_edits_unchanged(
     // 編集後のテキストが再パースでき、値が期待どおりであること
     let actual = reparsed_value(updated, &empty)?;
     if !values_equal(&expected, &actual) {
-        return Err(HjsonEditError::InvalidEdit {
-            target: "(document)".to_string(),
-            detail: "values changed".to_string(),
-        });
+        return Err(value_mismatch(&expected, &actual, edits));
     }
 
     // 編集した範囲の外側でコメントが変化していないこと
@@ -128,15 +125,76 @@ pub(crate) fn value_edits_unchanged(
         .iter()
         .filter_map(|edit| edited_range(updated, edit.path(), edit.region()))
         .collect();
-    if comments_outside(original, &previous_allowed) != comments_outside(updated, &updated_allowed)
-    {
+    let previous_comments = comments_outside(original, &previous_allowed);
+    let updated_comments = comments_outside(updated, &updated_allowed);
+    if previous_comments != updated_comments {
         return Err(HjsonEditError::InvalidEdit {
             target: "(document)".to_string(),
-            detail: "comments outside the edited regions changed".to_string(),
+            detail: comment_difference(&previous_comments, &updated_comments),
         });
     }
 
     Ok(())
+}
+
+/// 値の不一致を、編集のパスで説明する。
+///
+/// 編集は適用順なので、後ろから見て最初に食い違ったパスを返す（同じパスを後で上書き
+/// していれば、そのパスの期待値は最終値なので一致する）。
+fn value_mismatch(
+    expected: &HjsonValue,
+    actual: &HjsonValue,
+    edits: &[ValueEdit],
+) -> HjsonEditError {
+    for edit in edits.iter().rev() {
+        let path = edit.path();
+        match (
+            crate::high_level::value_ops::get_in(expected, path),
+            crate::high_level::value_ops::get_in(actual, path),
+        ) {
+            (Some(want), Some(found)) if !values_equal(want, found) => {
+                return HjsonEditError::InvalidEdit {
+                    target: path.to_string(),
+                    detail: format!("expected {want:?}, found {found:?}"),
+                }
+            }
+            (None, Some(found)) => {
+                return HjsonEditError::InvalidEdit {
+                    target: path.to_string(),
+                    detail: format!("expected no value at this path, found {found:?}"),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    HjsonEditError::InvalidEdit {
+        target: "(document)".to_string(),
+        detail: "values changed".to_string(),
+    }
+}
+
+/// コメントの並びの最初の差分を説明する。
+fn comment_difference(previous: &[String], updated: &[String]) -> String {
+    let common = previous
+        .iter()
+        .zip(updated)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let detail = match (previous.get(common), updated.get(common)) {
+        (Some(before), Some(after)) => {
+            format!(
+                "expected {}, found {}",
+                format_text(before),
+                format_text(after)
+            )
+        }
+        (Some(before), None) => format!("{} is missing", format_text(before)),
+        (None, Some(after)) => format!("unexpected {}", format_text(after)),
+        (None, None) => "changed".to_string(),
+    };
+
+    format!("comments outside the edited regions changed: {detail}")
 }
 
 /// 2 つの木の文書全体の値が同じか。整形は値を変えてはならない。
@@ -630,5 +688,111 @@ mod formatting_tests {
         let after = HjsonDocument::parse("{\n\ta: 1\n\n\tb: 2 // note\n}\n").unwrap();
 
         formatting_unchanged(before.syntax_root(), after.syntax_root()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod edit_attribution_tests {
+    use super::*;
+    use crate::high_level::ops::object::HjsonDocumentEdit;
+    use crate::high_level::path::HjsonObjectPath;
+
+    fn path(raw: &str) -> HjsonObjectPath {
+        HjsonObjectPath::parse(raw).unwrap()
+    }
+
+    fn batch_error(
+        original: &HjsonDocument,
+        updated: &HjsonDocument,
+        edits: &[ValueEdit],
+    ) -> (String, String) {
+        match value_edits_unchanged(original.syntax_root(), updated.syntax_root(), edits) {
+            Err(HjsonEditError::InvalidEdit { target, detail }) => (target, detail),
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn value_edits_report_the_failing_path() {
+        let original = HjsonDocument::parse("{\n  a: 1\n  b: 2\n}\n").unwrap();
+        let updated = original
+            .clone()
+            .set(path("a"), 9)
+            .unwrap()
+            .set(path("b"), 7)
+            .unwrap();
+
+        let (target, detail) = batch_error(
+            &original,
+            &updated,
+            &[
+                ValueEdit::Set(path("a"), 9.into()),
+                ValueEdit::Set(path("b"), 8.into()),
+            ],
+        );
+
+        assert_eq!(target, "b");
+        assert!(detail.contains("Integer(8)"), "detail: {detail}");
+    }
+
+    #[test]
+    fn value_edits_report_an_earlier_failing_path() {
+        let original = HjsonDocument::parse("{\n  a: 1\n  b: 2\n}\n").unwrap();
+        let updated = original
+            .clone()
+            .set(path("a"), 10)
+            .unwrap()
+            .set(path("b"), 8)
+            .unwrap();
+
+        let (target, detail) = batch_error(
+            &original,
+            &updated,
+            &[
+                ValueEdit::Set(path("a"), 9.into()),
+                ValueEdit::Set(path("b"), 8.into()),
+            ],
+        );
+
+        assert_eq!(target, "a");
+        assert!(detail.contains("Integer(10)"), "detail: {detail}");
+    }
+
+    #[test]
+    fn value_edits_report_a_removal_that_did_not_happen() {
+        let original = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+
+        let (target, detail) = batch_error(&original, &original, &[ValueEdit::Remove(path("a"))]);
+
+        assert_eq!(target, "a");
+        assert!(detail.contains("no value"), "detail: {detail}");
+    }
+
+    #[test]
+    fn comment_changes_name_the_first_difference() {
+        let original = HjsonDocument::parse("{\n  // keep\n  a: 1\n}\n").unwrap();
+        let updated = HjsonDocument::parse("{\n  a: 9\n}\n").unwrap();
+
+        let (target, detail) =
+            batch_error(&original, &updated, &[ValueEdit::Set(path("a"), 9.into())]);
+
+        assert_eq!(target, "(document)");
+        assert!(detail.contains("// keep"), "detail: {detail}");
+    }
+
+    #[test]
+    fn array_removal_index_shift_still_detects_a_lost_comment() {
+        // items[0] を消すつもりで、後ろの要素のコメントまで消した文書
+        let original = HjsonDocument::parse("items: [\n  1\n  // keep\n  2\n]\n").unwrap();
+        let faulty = HjsonDocument::parse("items: [\n  2\n]\n").unwrap();
+
+        let error = value_edits_unchanged(
+            original.syntax_root(),
+            faulty.syntax_root(),
+            &[ValueEdit::Remove(path("items[0]"))],
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("// keep"), "unexpected: {error}");
     }
 }

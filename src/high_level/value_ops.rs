@@ -280,6 +280,31 @@ pub(crate) fn build_nested_value(
     Ok(current)
 }
 
+/// 値の木で `path` が指す値（無ければ `None`）。
+pub(crate) fn get_in<'a>(value: &'a HjsonValue, path: &HjsonObjectPath) -> Option<&'a HjsonValue> {
+    let mut current = value;
+    for segment in path.segments() {
+        current = match (current, segment) {
+            (HjsonValue::Object(entries), PathSegment::Key(key)) => entries
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value)?,
+            (HjsonValue::Array(items), PathSegment::Array(ArrayPathSegment::Index(index))) => {
+                items.get(*index)?
+            }
+            (HjsonValue::Array(items), PathSegment::Array(ArrayPathSegment::InsertAt(index))) => {
+                items.get(*index)?
+            }
+            (HjsonValue::Array(items), PathSegment::Array(ArrayPathSegment::Push)) => {
+                items.last()?
+            }
+            _ => return None,
+        };
+    }
+
+    Some(current)
+}
+
 /// 値の等価判定。整数と浮動小数は数値として比較する。
 pub(crate) fn values_equal(left: &HjsonValue, right: &HjsonValue) -> bool {
     match (left, right) {
