@@ -304,3 +304,34 @@ fn a_preferred_style_wins_over_the_detected_style() {
         );
     }
 }
+
+#[test]
+fn same_value_compares_numbers_by_value() {
+    assert!(HjsonValue::Integer(1).same_value(&HjsonValue::Float(1.0)));
+    assert!(!HjsonValue::Integer(1).same_value(&HjsonValue::Float(1.5)));
+}
+
+#[test]
+fn same_value_distinguishes_a_string_from_a_number() {
+    assert!(!HjsonValue::String("1".to_string()).same_value(&HjsonValue::Integer(1)));
+    assert!(HjsonValue::String("1".to_string()).same_value(&HjsonValue::String("1".to_string())));
+}
+
+#[test]
+fn same_value_compares_nested_containers() {
+    let left = HjsonValue::Object(vec![(
+        "items".to_string(),
+        HjsonValue::Array(vec![HjsonValue::Integer(1)]),
+    )]);
+    let equal = HjsonValue::Object(vec![(
+        "items".to_string(),
+        HjsonValue::Array(vec![HjsonValue::Float(1.0)]),
+    )]);
+    let different = HjsonValue::Object(vec![(
+        "items".to_string(),
+        HjsonValue::Array(vec![HjsonValue::Integer(2)]),
+    )]);
+
+    assert!(left.same_value(&equal));
+    assert!(!left.same_value(&different));
+}

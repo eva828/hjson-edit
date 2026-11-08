@@ -240,3 +240,20 @@ fn set_multiline_header_comment_with_line_style_splits_into_lines() {
     let expected = "// line1\n// line2\n{\n  foo: 1\n}";
     assert_eq!(new_doc.to_string(), expected);
 }
+
+#[test]
+fn all_comments_lists_bodies_in_order() {
+    let input = "// first\na: 1 // inline\n# hash\nb: 2 /* block */\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+
+    assert_eq!(
+        doc.all_comments(),
+        vec![
+            "first".to_string(),
+            "inline".to_string(),
+            "hash".to_string(),
+            "block".to_string(),
+        ]
+    );
+}

@@ -334,6 +334,11 @@ impl HjsonDocument {
         &self.newline
     }
 
+    /// 文書内のコメント（本文のみ）を出現順に返す。
+    pub fn all_comments(&self) -> Vec<String> {
+        crate::high_level::ops::comment::all_comment_bodies(self.syntax_root())
+    }
+
     /// 一連の値の編集を、文書全体の値とコメントで検証する。
     ///
     /// 編集ごとの検証（`set` / `remove` の既定）は操作のたびに文書全体を再パースするため、
