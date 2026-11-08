@@ -147,6 +147,17 @@ pub(crate) fn rebuild_tree_with_set(
     string_style: Prefer<QuoteStyle>,
     newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
+    rebuild_tree_with_set_inner(root, path, value, string_style, newline)
+        .map_err(|error| retarget(error, path))
+}
+
+fn rebuild_tree_with_set_inner(
+    root: RedNode,
+    path: &HjsonObjectPath,
+    value: &HjsonValue,
+    string_style: Prefer<QuoteStyle>,
+    newline: NewlineKind,
+) -> Result<GreenNode, HjsonEditError> {
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
         Ok(ParentResolution { parent, last }) => {
@@ -190,6 +201,13 @@ pub(crate) fn rebuild_tree_with_set(
 }
 
 pub(crate) fn rebuild_tree_with_remove(
+    root: RedNode,
+    path: &HjsonObjectPath,
+) -> Result<GreenNode, HjsonEditError> {
+    remove_with_retarget(root, path).map_err(|error| retarget(error, path))
+}
+
+fn remove_with_retarget(
     root: RedNode,
     path: &HjsonObjectPath,
 ) -> Result<GreenNode, HjsonEditError> {
@@ -394,8 +412,7 @@ fn set_object_child(
         .into();
     let element = RenderedElement::single(member_node);
 
-    let (at, elements) = plan_insert(parent, InsertPosition::End, element, newline, None)
-        .map_err(|error| with_segment(error, last))?;
+    let (at, elements) = plan_insert(parent, InsertPosition::End, element, newline, None)?;
     Ok(parent.green().splice_children(at..at, elements))
 }
 
@@ -472,18 +489,11 @@ fn set_array_child(
                 InsertPosition::Before(*index)
             };
             let insert_style = array_insert_style(parent, value, string_style)?;
-            insert_array_element(parent, position, value, insert_style, newline, last)
+            insert_array_element(parent, position, value, insert_style, newline)
         }
         ArrayPathSegment::Push => {
             let insert_style = array_insert_style(parent, value, string_style)?;
-            insert_array_element(
-                parent,
-                InsertPosition::End,
-                value,
-                insert_style,
-                newline,
-                last,
-            )
+            insert_array_element(parent, InsertPosition::End, value, insert_style, newline)
         }
     }
 }
@@ -512,7 +522,6 @@ fn insert_array_element(
     value: &HjsonValue,
     insert_style: Option<QuoteStyle>,
     newline: NewlineKind,
-    last: &PathSegment,
 ) -> Result<GreenNode, HjsonEditError> {
     let value_node: GreenElement = value
         .render_value_node(&RenderConfig {
@@ -522,8 +531,7 @@ fn insert_array_element(
         .into();
     let element = RenderedElement::single(value_node);
 
-    let (at, elements) = plan_insert(parent, position, element, newline, None)
-        .map_err(|error| with_segment(error, last))?;
+    let (at, elements) = plan_insert(parent, position, element, newline, None)?;
     Ok(parent.green().splice_children(at..at, elements))
 }
 
@@ -578,18 +586,19 @@ fn remove_array_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode,
     let index = array_slot_index(parent, seg).ok_or_else(|| {
         HjsonEditError::PathNotFound(HjsonObjectPath::from_segments(vec![last.clone()]))
     })?;
-    let range = plan_remove(parent, index).map_err(|error| with_segment(error, last))?;
+    let range = plan_remove(parent, index)?;
 
     Ok(parent.green().splice_children(range, Vec::new()))
 }
 
-/// 挿入層が返す位置エラーに、対象のセグメントを補う。
-fn with_segment(error: HjsonEditError, last: &PathSegment) -> HjsonEditError {
+/// エラーのパスを、利用者が指定したパスに付け替える（理由はそのまま）。
+pub(crate) fn retarget(error: HjsonEditError, path: &HjsonObjectPath) -> HjsonEditError {
     match error {
         HjsonEditError::InvalidTarget { reason, .. } => HjsonEditError::InvalidTarget {
-            path: HjsonObjectPath::from_segments(vec![last.clone()]),
+            path: path.clone(),
             reason,
         },
+        HjsonEditError::PathNotFound(_) => HjsonEditError::PathNotFound(path.clone()),
         other => other,
     }
 }
@@ -673,7 +682,12 @@ pub(crate) fn replace_value_with_node(
     let ParentResolution { parent, last } = PathResolver::new(root.clone()).resolve_parent(path)?;
     // 文書直下は Value に包まれていることがあるため、実体のコンテナまで降りる
     let container = match parent.kind() {
-        SyntaxKind::Value | SyntaxKind::Root => resolve_body(&parent)?,
+        SyntaxKind::Value | SyntaxKind::Root => {
+            resolve_body(&parent).map_err(|_| HjsonEditError::InvalidTarget {
+                path: path.clone(),
+                reason: "the path points into a scalar value".to_string(),
+            })?
+        }
         _ => parent,
     };
 

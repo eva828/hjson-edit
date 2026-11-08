@@ -450,3 +450,74 @@ fn set_value_text_rejects_texts_that_cannot_be_placed_inline() {
         assert!(result.is_err(), "path: {path}, text: {text:?}");
     }
 }
+
+#[test]
+fn set_value_text_replaces_the_document_body() {
+    let doc = HjsonDocument::parse("a: 1\n").unwrap();
+    let updated = doc
+        .set_value_text(HjsonObjectPath::parse("").unwrap(), "5")
+        .unwrap();
+
+    // ルートの差し替えは set("") と同じ（本文ノードを置き換える）
+    assert_eq!(updated.to_string(), "5");
+}
+
+#[test]
+fn set_value_text_on_root_accepts_multiline_and_key_line_text() {
+    let path = HjsonObjectPath::parse("").unwrap();
+
+    let doc = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+    let updated = doc.set_value_text(path.clone(), "a: 1\nb: 2").unwrap();
+    assert_eq!(updated.to_string(), "a: 1\nb: 2\n");
+
+    let doc = HjsonDocument::parse("a: 1\n").unwrap();
+    let updated = doc.set_value_text(path, "{\n  x: 1\n}").unwrap();
+    assert_eq!(updated.to_string(), "{\n  x: 1\n}");
+}
+
+#[test]
+fn set_value_text_on_root_keeps_document_header_and_footer() {
+    let path = HjsonObjectPath::parse("").unwrap();
+
+    // ヘッダーは Root 直下なので残る
+    let doc = HjsonDocument::parse("// header\na: 1\n").unwrap();
+    let updated = doc.set_value_text(path.clone(), "5").unwrap();
+    assert_eq!(updated.to_string(), "// header\n5");
+
+    // 中括弧付き文書のフッターも Root 直下なので残る
+    let doc = HjsonDocument::parse("{\n  a: 1\n}\n// f\n").unwrap();
+    let updated = doc.set_value_text(path.clone(), "5").unwrap();
+    assert_eq!(updated.to_string(), "5\n// f\n");
+
+    // ブレースレス文書の末尾コメントは本文の内側なので、本文ごと置き換わる
+    let doc = HjsonDocument::parse("a: 1\n// footer\n").unwrap();
+    let updated = doc.set_value_text(path, "5").unwrap();
+    assert_eq!(updated.to_string(), "5");
+}
+
+#[test]
+fn set_value_text_retargets_a_missing_parent_to_the_requested_path() {
+    let doc = HjsonDocument::parse("a: 1\n").unwrap();
+    let requested = HjsonObjectPath::parse("a.b.c").unwrap();
+    let error = doc.set_value_text(requested.clone(), "2").unwrap_err();
+
+    match error {
+        hjson_edit::HjsonEditError::PathNotFound(path) => assert_eq!(path, requested),
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn set_value_text_reports_a_scalar_parent_as_invalid_target() {
+    let doc = HjsonDocument::parse("a: 1\n").unwrap();
+    let requested = HjsonObjectPath::parse("a.b").unwrap();
+    let error = doc.set_value_text(requested.clone(), "2").unwrap_err();
+
+    match error {
+        hjson_edit::HjsonEditError::InvalidTarget { path, reason } => {
+            assert_eq!(path, requested);
+            assert!(reason.contains("scalar"), "reason: {reason}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}

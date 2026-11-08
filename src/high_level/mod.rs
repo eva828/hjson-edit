@@ -259,12 +259,17 @@ impl HjsonDocument {
     /// - ブレースレス（`a: 1` のようなキー行）でないこと
     ///
     /// パスは既存の値を指している必要がある（新規作成は `set` を使う）。
+    /// 空のパスは文書全体の差し替えで、複数行のテキストもキー行も受け付ける。
+    /// 本文（ブレースレス文書では末尾コメントを含む）は置き換わり、`Root` 直下の
+    /// ヘッダー/フッターは残る。これは `set(path(""))` と同じ挙動。
     ///
     /// # Errors
     ///
     /// 上の条件を満たさないテキスト、パスが存在しない場合、検証に失敗した場合。
     pub fn set_value_text(self, path: HjsonObjectPath, text: &str) -> Result<Self, HjsonEditError> {
-        if text.contains('\n') || text.contains('\r') {
+        let at_root = path.depth() == 0;
+
+        if !at_root && (text.contains('\n') || text.contains('\r')) {
             return Err(HjsonEditError::InvalidEdit {
                 target: path.to_string(),
                 detail: "multi-line value text is not supported (use set instead)".to_string(),
@@ -287,32 +292,46 @@ impl HjsonDocument {
         }
 
         let body = crate::high_level::resolve::resolve_body(parsed.syntax_root())?;
-        let braceless_object = body.kind() == SyntaxKind::Object
-            && crate::ast::Object::cast(body.clone())
-                .map(|object| object.delimiter_style == crate::ast::DelimiterStyle::Braceless)
-                .unwrap_or(false);
-        if braceless_object {
-            return Err(HjsonEditError::InvalidEdit {
-                target: path.to_string(),
-                detail: "a key line cannot be a value (use set instead)".to_string(),
-            });
-        }
-        if body
-            .last_token()
-            .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString)
-        {
-            return Err(HjsonEditError::InvalidEdit {
-                target: path.to_string(),
-                detail: "a value that ends with an unquoted string cannot be placed inline \
-                         (quote the string to place it inline)"
-                    .to_string(),
-            });
+        if !at_root {
+            let braceless_object = body.kind() == SyntaxKind::Object
+                && crate::ast::Object::cast(body.clone())
+                    .map(|object| object.delimiter_style == crate::ast::DelimiterStyle::Braceless)
+                    .unwrap_or(false);
+            if braceless_object {
+                return Err(HjsonEditError::InvalidEdit {
+                    target: path.to_string(),
+                    detail: "a key line cannot be a value (use set instead)".to_string(),
+                });
+            }
+            if body
+                .last_token()
+                .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString)
+            {
+                return Err(HjsonEditError::InvalidEdit {
+                    target: path.to_string(),
+                    detail: "a value that ends with an unquoted string cannot be placed inline \
+                             (quote the string to place it inline)"
+                        .to_string(),
+                });
+            }
         }
 
         let root = self.syntax_root().clone();
         let verify = self.current_verify();
-        let touched = crate::high_level::ops::object::receiving_container(&root, &path);
-        let updated = crate::high_level::ops::object::replace_value_with_node(&root, &path, &body)?;
+        let (updated, touched) = if at_root {
+            let current = crate::high_level::resolve::resolve_body(&root)?;
+            let updated = root.green().clone().into_owned().splice_children(
+                current.index()..current.index() + 1,
+                vec![body.green().clone().into()],
+            );
+            (updated, HjsonObjectPath::from_segments(Vec::new()))
+        } else {
+            let touched = crate::high_level::ops::object::receiving_container(&root, &path);
+            let updated =
+                crate::high_level::ops::object::replace_value_with_node(&root, &path, &body)
+                    .map_err(|error| crate::high_level::ops::object::retarget(error, &path))?;
+            (updated, touched)
+        };
         let document = self.root(updated).note_touched(touched);
 
         if verify {
