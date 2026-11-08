@@ -98,3 +98,33 @@ fn merging_copies_comments_of_new_members_in_one_batch() {
         "{\n  keep: 1\n  // lead\n  a: 1 // inline\n  b: 2\n}\n"
     );
 }
+
+#[test]
+fn merging_copies_only_the_last_of_duplicate_source_keys() {
+    let host = HjsonDocument::parse("a: 1\n").unwrap();
+    let source = HjsonDocument::parse("b: 1\nb: 2\n").unwrap();
+
+    let merged = host.merge_from(&empty(), &source).unwrap();
+
+    assert_eq!(merged.to_string(), "a: 1\nb: 2\n");
+}
+
+#[test]
+fn merging_updates_a_host_key_from_the_last_source_duplicate() {
+    let host = HjsonDocument::parse("b: 0\n").unwrap();
+    let source = HjsonDocument::parse("b: 1\nb: 2\n").unwrap();
+
+    let merged = host.merge_from(&empty(), &source).unwrap();
+
+    assert_eq!(merged.to_string(), "b: 2\n");
+}
+
+#[test]
+fn merging_keeps_the_comments_of_the_kept_duplicate() {
+    let host = HjsonDocument::parse("a: 1\n").unwrap();
+    let source = HjsonDocument::parse("b: 1\n// note\nb: 2\n").unwrap();
+
+    let merged = host.merge_from(&empty(), &source).unwrap();
+
+    assert_eq!(merged.to_string(), "a: 1\n// note\nb: 2\n");
+}

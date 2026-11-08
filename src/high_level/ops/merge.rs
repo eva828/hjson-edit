@@ -189,20 +189,35 @@ fn merge_objects(
         positions.entry(key).or_default().push(member.index());
     }
 
-    let mut pending: Vec<RenderedElement> = Vec::new();
-    for source_member in source_object
+    let source_members: Vec<Member> = source_object
         .children()
         .filter(|child| child.kind() == SyntaxKind::Member)
-    {
-        let source = Member::cast(source_member)?;
+        .map(Member::cast)
+        .collect::<Result<_, _>>()?;
+
+    // 値の層（後勝ち）に合わせて、同じキーは最後の出現だけを使う
+    let mut last_of_key: HashMap<String, usize> = HashMap::new();
+    for (index, member) in source_members.iter().enumerate() {
+        let key = member
+            .member_key()
+            .ok_or_else(|| HjsonEditError::MergeConflict("cannot read member key".to_string()))?;
+        last_of_key.insert(key, index);
+    }
+
+    let mut pending: Vec<RenderedElement> = Vec::new();
+    for (index, source) in source_members.iter().enumerate() {
         let key = source
             .member_key()
             .ok_or_else(|| HjsonEditError::MergeConflict("cannot read member key".to_string()))?;
 
+        if matches!(last_of_key.get(&key), Some(last) if *last != index) {
+            continue;
+        }
+
         match positions.get(&key) {
             Some(indices) => {
-                for &index in indices {
-                    let existing_green = match &children[index] {
+                for &target_index in indices {
+                    let existing_green = match &children[target_index] {
                         NodeOrToken::Node(node) => node.clone(),
                         NodeOrToken::Token(_) => {
                             return Err(HjsonEditError::MergeConflict(
@@ -211,11 +226,11 @@ fn merge_objects(
                         }
                     };
                     let existing = Member::cast(RedNode::new_root(existing_green))?;
-                    children[index] =
-                        merge_member(&existing, &source, base_indent, newline)?.into();
+                    children[target_index] =
+                        merge_member(&existing, source, base_indent, newline)?.into();
                 }
             }
-            None => pending.push(copy_member_with_comments(&source, newline)),
+            None => pending.push(copy_member_with_comments(source, newline)),
         }
     }
 
