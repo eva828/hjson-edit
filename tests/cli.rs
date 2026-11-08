@@ -832,3 +832,23 @@ fn cli_edit_in_place_keeps_the_file_on_error() {
 
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "{a: 1}\n");
 }
+
+#[test]
+fn cli_edit_batch_set_and_remove() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "a", "9", "--remove", "b"],
+        "{\n  a: 1\n  b: 2\n}\n",
+    );
+
+    assert_eq!(stdout, "{\n  a: 9\n}\n");
+}
+
+#[test]
+fn cli_edit_batch_set_creates_nested_paths() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "a.b.c", "1", "--set", "d", "[1, 2]"],
+        "{\n  x: 1\n}\n",
+    );
+
+    assert_eq!(stdout, "{\n  x: 1\n  a: {b: {c: 1}}\n  d: [1,2]\n}\n");
+}

@@ -16,7 +16,7 @@ pub mod style;
 /// 値の型と描画。
 pub mod value;
 mod value_ops;
-mod verify;
+pub mod verify;
 
 use crate::ast as semantic_ast;
 use crate::ast::{AstNode, CommentKind, QuoteStyle};
@@ -250,6 +250,21 @@ impl HjsonDocument {
     /// この文書で検出した改行コード。
     pub fn current_newline(&self) -> &str {
         &self.newline
+    }
+
+    /// 一連の値の編集を、文書全体の値とコメントで検証する。
+    ///
+    /// 編集ごとの検証（`set` / `remove` の既定）は操作のたびに文書全体を再パースするため、
+    /// 操作が多いと文書の大きさ × 操作数の費用がかかる。この関数は再パースを 1 回だけ行う。
+    ///
+    /// `original` は編集前の文書、`edits` は適用した値の操作（適用順）。
+    /// 検証に失敗した場合は [`HjsonEditError::InvalidEdit`] を返す。
+    pub fn verify_value_edits(
+        &self,
+        original: &HjsonDocument,
+        edits: &[verify::ValueEdit],
+    ) -> Result<(), HjsonEditError> {
+        verify::value_edits_unchanged(original.syntax_root(), self.syntax_root(), edits)
     }
 
     /// この文書で検出した改行コード（編集の描画に使う）。

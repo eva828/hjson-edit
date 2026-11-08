@@ -8,6 +8,7 @@ use hjson_edit::{
         path::{HjsonCommentPath, HjsonObjectPath},
         style::detect_indent_from_ast,
         value::HjsonValue,
+        verify::ValueEdit,
         HjsonDocument, Prefer,
     },
     FormatConfig, HjsonEditError, IndentStyle,
@@ -471,8 +472,11 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         .map(|style| parse_string_style(style))
         .transpose()?;
 
+    // 値の操作は、操作ごとに編集した値だけを検証し、最後に文書全体を 1 回だけ検証する。
+    // コメント操作は従来どおり操作ごとに検証する。
+    let verify = !matches.get_flag("no-verify");
     doc = doc
-        .verify_edits(!matches.get_flag("no-verify"))
+        .verify_edits(false)
         .format_config(config)
         .string_style(string_style.unwrap_or_default());
     if let Some(style) = matches.get_one::<String>("comment-style") {
@@ -485,6 +489,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
 
     let original = doc.clone();
     let mut edited_slots: Vec<HjsonObjectPath> = Vec::new();
+    let mut value_edits: Vec<ValueEdit> = Vec::new();
     for op in ops {
         match op {
             EditOp::Set {
@@ -498,23 +503,33 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                     (None, Some(style)) => doc.string_style(style),
                     _ => doc,
                 };
-                doc = styled.set(parsed.clone(), value)?;
+                doc = styled.set(parsed.clone(), value.clone())?;
                 doc = doc.string_style(string_style.unwrap_or_default());
+                value_edits.push(ValueEdit::Set(parsed.clone(), value));
                 edited_slots.push(parsed);
             }
             EditOp::Remove { path } => {
-                doc = doc.remove(parse_object_path(&path)?)?;
+                let parsed = parse_object_path(&path)?;
+                doc = doc.remove(parsed.clone())?;
+                value_edits.push(ValueEdit::Remove(parsed));
             }
             EditOp::CommentSet { path, text } => {
-                doc = doc.set_comment(path, text)?;
+                doc = doc.verify_edits(verify).set_comment(path, text)?;
+                doc = doc.verify_edits(false);
             }
             EditOp::CommentAppend { path, text } => {
-                doc = doc.append_comment(path, text)?;
+                doc = doc.verify_edits(verify).append_comment(path, text)?;
+                doc = doc.verify_edits(false);
             }
             EditOp::CommentRemove { path } => {
-                doc = doc.remove_comment(path)?;
+                doc = doc.verify_edits(verify).remove_comment(path)?;
+                doc = doc.verify_edits(false);
             }
         }
+    }
+
+    if verify && !value_edits.is_empty() {
+        doc.verify_value_edits(&original, &value_edits)?;
     }
 
     // 既定は保存重視: 複数行になった要素だけを整える。--format（または整形オプションの

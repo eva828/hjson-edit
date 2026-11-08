@@ -1,5 +1,6 @@
 use hjson_edit::high_level::{
-    ops::object::HjsonDocumentEdit, path::HjsonObjectPath, value::HjsonValue, HjsonDocument,
+    ops::comment::HjsonDocumentCommentEdit, ops::object::HjsonDocumentEdit, path::HjsonObjectPath,
+    value::HjsonValue, HjsonDocument,
 };
 use pretty_assertions::assert_eq;
 
@@ -342,4 +343,70 @@ fn set_with_an_equal_value_and_an_explicit_style_rewrites_the_value() {
         .unwrap();
 
     assert_eq!(updated.to_string(), "{\n  a: \"x\"\n}\n");
+}
+
+#[test]
+fn verify_value_edits_accepts_a_matching_batch() {
+    use hjson_edit::high_level::verify::ValueEdit;
+
+    let original = HjsonDocument::parse("{\n  a: 1\n  b: 2\n}\n").unwrap();
+    let edits = vec![
+        ValueEdit::Set(HjsonObjectPath::parse("a").unwrap(), HjsonValue::Integer(9)),
+        ValueEdit::Remove(HjsonObjectPath::parse("b").unwrap()),
+    ];
+
+    let mut doc = original.clone().verify_edits(false);
+    doc = doc.set(HjsonObjectPath::parse("a").unwrap(), 9).unwrap();
+    doc = doc.remove(HjsonObjectPath::parse("b").unwrap()).unwrap();
+
+    doc.verify_value_edits(&original, &edits).unwrap();
+}
+
+#[test]
+fn verify_value_edits_rejects_a_mismatched_value() {
+    use hjson_edit::high_level::verify::ValueEdit;
+
+    let original = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+    let edits = vec![ValueEdit::Set(
+        HjsonObjectPath::parse("a").unwrap(),
+        HjsonValue::Integer(9),
+    )];
+
+    let doc = original
+        .clone()
+        .verify_edits(false)
+        .set(HjsonObjectPath::parse("a").unwrap(), 8)
+        .unwrap();
+    let error = doc.verify_value_edits(&original, &edits).unwrap_err();
+
+    assert!(matches!(
+        error,
+        hjson_edit::HjsonEditError::InvalidEdit { .. }
+    ));
+}
+
+#[test]
+fn verify_value_edits_rejects_a_lost_comment() {
+    use hjson_edit::high_level::verify::ValueEdit;
+
+    let original = HjsonDocument::parse("// keep\n{\n  a: 1\n}\n").unwrap();
+    let edits = vec![ValueEdit::Set(
+        HjsonObjectPath::parse("a").unwrap(),
+        HjsonValue::Integer(2),
+    )];
+
+    // 値を変えつつ、編集対象の外にあるコメントを消した文書
+    let doc = original
+        .clone()
+        .verify_edits(false)
+        .set(HjsonObjectPath::parse("a").unwrap(), 2)
+        .unwrap()
+        .remove_comment(hjson_edit::high_level::path::HjsonCommentPath::Header)
+        .unwrap();
+    let error = doc.verify_value_edits(&original, &edits).unwrap_err();
+
+    assert!(matches!(
+        error,
+        hjson_edit::HjsonEditError::InvalidEdit { .. }
+    ));
 }

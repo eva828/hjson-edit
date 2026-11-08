@@ -3,7 +3,7 @@
 //! 編集は「最小限のテキスト変更」で行うため、結果が妥当かどうかを必ず検査する。
 //!
 //! - 編集後のテキストが再パースできること
-//! - 値が「元の値に同じ操作を適用した結果」と一致すること（[`super::value_ops`] を基準にする）
+//! - 値が「元の値に同じ操作を適用した結果」と一致すること（値の層の操作を基準にする）
 //! - コメント操作では、対象以外のコメントが変化していないこと
 //!
 //! 検証に失敗した場合は編集結果を返さず [`HjsonEditError::InvalidEdit`] を返す。
@@ -60,6 +60,79 @@ pub(crate) fn value_edit(
         return Err(HjsonEditError::InvalidEdit {
             target: path.to_string(),
             detail: "comments outside the edited region changed".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+/// 値を指定した操作（バッチ検証用）。
+#[derive(Debug, Clone)]
+pub enum ValueEdit {
+    /// 値を設定した。
+    Set(HjsonObjectPath, HjsonValue),
+    /// 値を削除した。
+    Remove(HjsonObjectPath),
+}
+
+impl ValueEdit {
+    fn path(&self) -> &HjsonObjectPath {
+        match self {
+            ValueEdit::Set(path, _) | ValueEdit::Remove(path) => path,
+        }
+    }
+
+    fn region(&self) -> EditedRegion {
+        match self {
+            ValueEdit::Set(_, _) => EditedRegion::Node,
+            ValueEdit::Remove(_) => EditedRegion::Slot,
+        }
+    }
+}
+
+/// 一連の値の編集を、文書全体の値とコメントで検証する。
+///
+/// 編集ごとの検証（`set` / `remove` の既定）は操作のたびに文書全体を再パースするため、
+/// 操作が多いと文書の大きさ × 操作数の費用がかかる。この関数は再パースを 1 回だけ行う。
+pub(crate) fn value_edits_unchanged(
+    original: &RedNode,
+    updated: &RedNode,
+    edits: &[ValueEdit],
+) -> Result<(), HjsonEditError> {
+    let empty = HjsonObjectPath::from_segments(Vec::new());
+    let mut expected = value_of(original, &empty)?;
+    for edit in edits {
+        expected = match edit {
+            ValueEdit::Set(path, value) => {
+                crate::high_level::value_ops::set_path(&expected, path, value.clone())?
+            }
+            ValueEdit::Remove(path) => crate::high_level::value_ops::remove_path(&expected, path)?,
+        };
+    }
+
+    // 編集後のテキストが再パースでき、値が期待どおりであること
+    let actual = reparsed_value(updated, &empty)?;
+    if !values_equal(&expected, &actual) {
+        return Err(HjsonEditError::InvalidEdit {
+            target: "(document)".to_string(),
+            detail: "values changed".to_string(),
+        });
+    }
+
+    // 編集した範囲の外側でコメントが変化していないこと
+    let previous_allowed: Vec<TextRange> = edits
+        .iter()
+        .filter_map(|edit| edited_range(original, edit.path(), edit.region()))
+        .collect();
+    let updated_allowed: Vec<TextRange> = edits
+        .iter()
+        .filter_map(|edit| edited_range(updated, edit.path(), edit.region()))
+        .collect();
+    if comments_outside(original, &previous_allowed) != comments_outside(updated, &updated_allowed)
+    {
+        return Err(HjsonEditError::InvalidEdit {
+            target: "(document)".to_string(),
+            detail: "comments outside the edited regions changed".to_string(),
         });
     }
 
@@ -149,16 +222,18 @@ fn comments_outside_unchanged(
     previous_allowed: Option<TextRange>,
     updated_allowed: Option<TextRange>,
 ) -> bool {
-    comments_outside(previous, previous_allowed) == comments_outside(updated, updated_allowed)
+    let previous_allowed: Vec<TextRange> = previous_allowed.into_iter().collect();
+    let updated_allowed: Vec<TextRange> = updated_allowed.into_iter().collect();
+    comments_outside(previous, &previous_allowed) == comments_outside(updated, &updated_allowed)
 }
 
 /// 許可された範囲の外側にあるコメント。
-fn comments_outside(root: &RedNode, allowed: Option<TextRange>) -> Vec<String> {
+fn comments_outside(root: &RedNode, allowed: &[TextRange]) -> Vec<String> {
     let mut texts = Vec::new();
     for (range, text) in comment_texts(root) {
-        let inside = allowed.is_some_and(|allowed| {
-            allowed.start() <= range.start() && range.end() <= allowed.end()
-        });
+        let inside = allowed
+            .iter()
+            .any(|allowed| allowed.start() <= range.start() && range.end() <= allowed.end());
         if !inside {
             texts.push(text);
         }
