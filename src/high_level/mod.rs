@@ -373,6 +373,17 @@ impl HjsonDocument {
         verify::value_edits_unchanged(original.syntax_root(), self.syntax_root(), edits)
     }
 
+    /// 整形の前後で、値とコメントが変わっていないことを検証する。
+    ///
+    /// `previous` は整形前の文書。`format_container` / `format_slot` は
+    /// `verify_edits(true)` なら呼び出しごとに検証するが、複数のコンテナを
+    /// まとめて整形する場合はこの関数で 1 回だけ検証できる。
+    ///
+    /// 検証に失敗した場合は [`HjsonEditError::InvalidEdit`] を返す。
+    pub fn verify_formatting(&self, previous: &HjsonDocument) -> Result<(), HjsonEditError> {
+        verify::formatting_unchanged(previous.syntax_root(), self.syntax_root())
+    }
+
     /// この文書で検出した改行コード（編集の描画に使う）。
     pub(crate) fn current_newline_kind(&self) -> NewlineKind {
         match self.newline.as_str() {

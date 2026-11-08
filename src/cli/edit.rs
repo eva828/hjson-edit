@@ -534,8 +534,8 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     }
 
     // ここから先は整形だけを行う。整形も値とコメントを変えてはいけないので、
-    // 値を検証した後は編集時と同じ設定で検証を戻す。
-    doc = doc.verify_edits(verify);
+    // まとめて整形した後に 1 回だけ検証する（コンテナごとの再パースを避ける）。
+    let before_formatting = doc.clone();
 
     // 既定は保存重視: 複数行になった要素だけを整える。--format（または整形オプションの
     // 明示指定）があるときは、変更したコンテナを整形する。
@@ -578,6 +578,10 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
                 Err(error) => return Err(error.into()),
             }
         }
+    }
+
+    if verify {
+        doc.verify_formatting(&before_formatting)?;
     }
 
     write_output(matches, path, &doc.to_string(), &content)
