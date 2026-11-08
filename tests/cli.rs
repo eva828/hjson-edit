@@ -1005,3 +1005,64 @@ fn cli_invalid_path_is_not_doubled() {
         .stderr(predicate::str::contains("Invalid path: a..b"))
         .stderr(predicate::str::contains("Invalid path:").count(1));
 }
+
+#[cfg(unix)]
+fn is_writable(path: &std::path::Path) -> bool {
+    std::fs::OpenOptions::new().write(true).open(path).is_ok()
+}
+
+#[cfg(unix)]
+fn read_only_file(text: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.hjson");
+    std::fs::write(&path, text).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+    (dir, path)
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_in_place_refuses_a_read_only_file() {
+    let (_dir, path) = read_only_file("a: 1\n");
+    if is_writable(&path) {
+        // root ではパーミッションで拒否できないため検証しない
+        return;
+    }
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--in-place", "--set", "b", "2"])
+        .arg(&path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to write file"));
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "a: 1\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_output_refuses_a_read_only_file() {
+    let (_dir, path) = read_only_file("old\n");
+    if is_writable(&path) {
+        return;
+    }
+
+    let mut input = NamedTempFile::new().unwrap();
+    writeln!(input, "a: 1").unwrap();
+    input.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["format", "--output"])
+        .arg(&path)
+        .arg(input.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to write file"));
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\n");
+}

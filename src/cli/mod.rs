@@ -80,6 +80,15 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
         .to_string_lossy()
         .into_owned();
 
+    // rename はファイルの書き込み権限ではなくディレクトリの権限で決まる。
+    // 読み取り専用のファイルを置き換えないよう、先に書き込めることを確かめる。
+    if target.exists() {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)
+            .with_context(|| format!("Failed to write file: {}", target.display()))?;
+    }
+
     let mut attempt = 0u32;
     let (temp_path, mut file) = loop {
         let candidate = directory.join(format!(".{name}.{}.{attempt}.tmp", std::process::id()));
