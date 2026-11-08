@@ -72,6 +72,8 @@ pub const MAX_NESTING_DEPTH: usize = 128;
 struct ParseOutcome {
     result: ParseResult,
     braceless: bool,
+    /// ネスト上限に達した（単一値としての読み直しで覆してはならない）。
+    depth_exceeded: bool,
 }
 
 /// 構文解析器
@@ -84,6 +86,7 @@ pub struct Parser<'a> {
     lex_errors: Vec<super::lexer::LexError>,
     relexed_from: Option<usize>,
     depth: usize,
+    depth_exceeded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +115,7 @@ impl<'a> Parser<'a> {
             lex_errors: Vec::new(),
             relexed_from: None,
             depth: 0,
+            depth_exceeded: false,
         }
     }
 
@@ -139,6 +143,7 @@ impl<'a> Parser<'a> {
             let offset = self.current().map_or(0, |token| token.offset);
             let limit = MAX_NESTING_DEPTH;
             self.error(offset, format!("Nesting too deep: limit is {limit}"));
+            self.depth_exceeded = true;
             return false;
         }
 
@@ -215,7 +220,8 @@ impl<'a> Parser<'a> {
         let tokens = self.tokens.clone();
 
         let first = Parser::new(source, tokens.clone()).parse_inner(RootMode::Auto);
-        if !first.braceless || first.result.errors.is_empty() {
+        // 深さ上限は入力の性質なので、単一値として読み直しても解消しない
+        if first.depth_exceeded || !first.braceless || first.result.errors.is_empty() {
             return first.result;
         }
 
@@ -277,6 +283,7 @@ impl<'a> Parser<'a> {
                 relexed_from: self.relexed_from,
             },
             braceless,
+            depth_exceeded: self.depth_exceeded,
         }
     }
 
@@ -1025,6 +1032,31 @@ mod tests {
             .len()
             .into();
         assert_eq!(text_len, src.len());
+    }
+
+    #[test]
+    fn test_depth_error_is_not_overridden_by_the_single_value_retry() {
+        // 1 行のブレースレス文書は、深さ超過なら単一値として読み直さない
+        let src = format!(
+            "x: {}1{}",
+            "[".repeat(MAX_NESTING_DEPTH),
+            "]".repeat(MAX_NESTING_DEPTH)
+        );
+        let parsed = parse_text(&src);
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.message.contains("Nesting too deep")));
+    }
+
+    #[test]
+    fn test_single_value_retry_still_accepts_a_key_like_string() {
+        // 再解釈は深さ超過以外の失敗では従来どおり働く
+        let parsed = parse_text("key# value : 1");
+        assert!(parsed.errors.is_empty(), "errors: {:?}", parsed.errors);
+
+        let document = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
+        assert!(document.object().is_none(), "単一値として読む");
     }
 
     #[test]

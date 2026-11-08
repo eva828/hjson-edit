@@ -170,3 +170,31 @@ fn invalid_path_error_truncates_long_input() {
     assert!(err.len() < 400, "エラー表示が長すぎる: {} bytes", err.len());
     assert!(err.contains("chars"), "文字数が示される: {err}");
 }
+
+// ------------------------------------------------------------------
+// 1 行のブレースレス文書でも深さ上限を守ること
+// ------------------------------------------------------------------
+
+fn single_line_nested(depth: usize) -> String {
+    format!("x: {}{}\n", "[".repeat(depth), "]".repeat(depth))
+}
+
+#[test]
+fn single_line_braceless_document_at_the_limit_is_accepted() {
+    // ブレースレス文書の本文も 1 段として数える
+    let text = single_line_nested(MAX_NESTING_DEPTH - 1);
+
+    assert!(HjsonDocument::parse(&text).is_ok());
+}
+
+#[test]
+fn single_line_braceless_document_beyond_the_limit_is_rejected() {
+    for depth in [MAX_NESTING_DEPTH, 200] {
+        let text = single_line_nested(depth);
+        let error = HjsonDocument::parse(&text)
+            .expect_err("深さ超過は引用符なし文字列として受理しない")
+            .to_string();
+
+        assert!(error.contains("Nesting too deep"), "depth {depth}: {error}");
+    }
+}
