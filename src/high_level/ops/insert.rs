@@ -134,15 +134,6 @@ fn newline_at(container: &RedNode, index: usize) -> Option<NewlineKind> {
 }
 
 /// 要素本体だけを差し替える位置と要素を返す。
-pub(crate) fn plan_replace(
-    container: &RedNode,
-    index: usize,
-    element: RenderedElement,
-) -> Result<(usize, Vec<GreenElement>), HjsonEditError> {
-    let slot = slot_at(container, index)?;
-    Ok((slot.elem().start, element.elements))
-}
-
 /// 要素をトリビアごと削除する範囲を返す。
 pub(crate) fn plan_remove(
     container: &RedNode,

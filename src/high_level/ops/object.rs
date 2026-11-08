@@ -1,21 +1,20 @@
-use rowan::GreenNode;
+use rowan::{GreenNode, NodeOrToken};
 
 use crate::{
     ast::{
-        detected_string_style_of_node, Array as AstArray, AstNode, Object as AstObject, QuoteStyle,
-        Trivia,
+        detected_string_style_of_node, Array as AstArray, AstNode, Key, Member,
+        Object as AstObject, QuoteStyle, Trivia,
     },
     high_level::value_ops::{build_nested_value, values_equal},
     high_level::{
         error::HjsonEditError,
         ops::{
             container_depth_of_value, ensure_depth_within_limit,
-            insert::{plan_insert, plan_remove, plan_replace, InsertPosition, RenderedElement},
+            insert::{plan_insert, plan_remove, InsertPosition, RenderedElement},
             receiving_container_depth,
         },
         path::{ArrayPathSegment, HjsonObjectPath, PathSegment},
         resolve::{array_slot_index, resolve_body, ExistingPrefix, ParentResolution, PathResolver},
-        style::detect_document_newline,
         value::{HjsonValue, RenderConfig},
         HjsonDocument, Prefer,
     },
@@ -75,10 +74,11 @@ impl HjsonDocumentEdit for HjsonDocument {
         let verify = self.current_verify();
         let touched = receiving_container(&root, &path);
 
+        let newline = self.current_newline_kind();
         let updated = if path.depth() == 0 {
-            replace_root_value(&root, &value, string_style)?
+            replace_root_value(&root, &value, string_style, newline)?
         } else {
-            rebuild_tree_with_set(root.clone(), &path, &value, string_style)?
+            rebuild_tree_with_set(root.clone(), &path, &value, string_style, newline)?
         };
         let document = self.root(updated).note_touched(touched);
 
@@ -124,13 +124,14 @@ pub(crate) fn replace_root_value(
     root: &RedNode,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     ensure_depth_within_limit(container_depth_of_value(value))?;
 
     let child = resolve_body(root)?;
     let config = RenderConfig {
         string_style: None,
-        newline: detect_document_newline(&child),
+        newline,
     };
     let updated_child = render_value_like_node(&child, value, string_style, &config)?;
 
@@ -144,6 +145,7 @@ pub(crate) fn rebuild_tree_with_set(
     path: &HjsonObjectPath,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     let resolver = PathResolver::new(root.clone());
     match resolver.resolve_parent(path) {
@@ -152,7 +154,7 @@ pub(crate) fn rebuild_tree_with_set(
                 receiving_container_depth(&parent) + container_depth_of_value(value),
             )?;
 
-            let new_parent = apply_set_to_node(&parent, &last, value, string_style)?;
+            let new_parent = apply_set_to_node(&parent, &last, value, string_style, newline)?;
 
             if parent.kind() == SyntaxKind::Root {
                 Ok(new_parent)
@@ -174,7 +176,8 @@ pub(crate) fn rebuild_tree_with_set(
             ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
 
             let nested_value = build_nested_value(&path.segments()[consumed + 1..], value.clone())?;
-            let new_parent = apply_set_to_node(&ancestor, missing, &nested_value, string_style)?;
+            let new_parent =
+                apply_set_to_node(&ancestor, missing, &nested_value, string_style, newline)?;
 
             if ancestor.kind() == SyntaxKind::Root {
                 Ok(new_parent)
@@ -232,12 +235,13 @@ fn apply_set_to_node(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     transform_node(
         node,
         last,
-        |node, last| set_object_child(node, last, value, string_style),
-        |node, last| set_array_child(node, last, value, string_style),
+        |node, last| set_object_child(node, last, value, string_style, newline),
+        |node, last| set_array_child(node, last, value, string_style, newline),
     )
 }
 
@@ -245,11 +249,50 @@ fn apply_remove_to_node(node: &RedNode, last: &PathSegment) -> Result<GreenNode,
     transform_node(node, last, remove_object_child, remove_array_child)
 }
 
+/// メンバーのキーが `key` と一致するか。
+///
+/// 大半のキーは引用符なしなので、生テキストの比較で済ませる（デコードしない）。
+fn member_key_matches(member: &RedNode, key: &str) -> bool {
+    let Some(key_node) = member
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Key)
+    else {
+        return false;
+    };
+    let token = key_node
+        .children_with_tokens()
+        .find_map(|element| match element {
+            NodeOrToken::Token(token)
+                if matches!(
+                    token.kind(),
+                    SyntaxKind::String | SyntaxKind::BlockString | SyntaxKind::UnquotedString
+                ) =>
+            {
+                Some(token)
+            }
+            _ => None,
+        });
+    let Some(token) = token else {
+        return false;
+    };
+    if token.kind() == SyntaxKind::UnquotedString {
+        return token.text() == key;
+    }
+
+    // 引用符付きのキーは本文へデコードして比較する（まれ）
+    Key::cast(key_node)
+        .ok()
+        .and_then(|key_node| key_node.body_text())
+        .as_deref()
+        == Some(key)
+}
+
 fn set_object_child(
     parent: &RedNode,
     last: &PathSegment,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     let key = match last {
         PathSegment::Key(key) => key,
@@ -261,43 +304,38 @@ fn set_object_child(
         }
     };
 
-    let object_ast = AstObject::cast(parent.clone())?;
-    let insert_style = resolve_insert_style(string_style, object_ast.detected_string_style());
-    let insert_style = checked_style(value, insert_style, string_style)?;
-    let newline = detect_document_newline(parent);
-    let config = RenderConfig {
-        string_style: insert_style,
-        newline,
-    };
-
     // 既存のメンバーは値だけを差し替える。キー・区切り・前後のコメントはそのまま残る。
     // 同じキーが複数ある場合はすべて同じ値にする（値の層では後勝ちのため）。
-    let members = object_ast.members();
-    let existing: Vec<usize> = members
-        .iter()
-        .enumerate()
-        .filter(|(_, member)| member.member_key().as_deref() == Some(key.as_str()))
-        .map(|(index, _)| index)
-        .collect();
+    // メンバーの一覧を作らず、子を 1 回走査して一致する要素だけを扱う。
+    let mut existing: Vec<(usize, RedNode, RedNode)> = Vec::new();
+    let mut matched = false;
+    for child in parent.children() {
+        if child.kind() != SyntaxKind::Member || !member_key_matches(&child, key) {
+            continue;
+        }
+        matched = true;
+        let member = Member::cast(child.clone())?;
+        let value_child = member
+            .value()
+            .ok_or_else(|| HjsonEditError::InvalidTarget {
+                path: HjsonObjectPath::from_segments(vec![last.clone()]),
+                reason: "member without a value".to_string(),
+            })?;
+        // 同じ値なら書き換えない（値を変えない編集で体裁を変えない）
+        if matches!(string_style, Prefer::Preserve)
+            && values_equal(&HjsonValue::from_node(value_child.syntax())?, value)
+        {
+            continue;
+        }
+        existing.push((child.index(), child, value_child.syntax().clone()));
+    }
 
-    if !existing.is_empty() {
+    // 一致するメンバーがあるときは差し替えだけで終える（同値で全部を飛ばした場合も含む）
+    if matched {
         let mut green: GreenNode = parent.green().clone().into_owned();
-        for index in existing {
-            let member = &members[index];
-            let value_child = member
-                .value()
-                .ok_or_else(|| HjsonEditError::InvalidTarget {
-                    path: HjsonObjectPath::from_segments(vec![last.clone()]),
-                    reason: "member without a value".to_string(),
-                })?;
-            // 同じ値なら書き換えない（値を変えない編集で体裁を変えない）
-            if matches!(string_style, Prefer::Preserve)
-                && values_equal(&HjsonValue::from_node(value_child.syntax())?, value)
-            {
-                continue;
-            }
+        for (member_index, member, value_child) in existing {
             let updated = render_value_like_node(
-                value_child.syntax(),
+                &value_child,
                 value,
                 string_style,
                 &RenderConfig {
@@ -306,13 +344,11 @@ fn set_object_child(
                 },
             )?;
             // 値はメンバーの子なので、メンバー → オブジェクトの順に差し替える
-            let value_index = value_child.syntax().index();
+            let value_index = value_child.index();
             let updated_member = member
-                .syntax()
                 .green()
                 .clone()
                 .splice_children(value_index..value_index + 1, vec![updated.into()]);
-            let member_index = member.syntax().index();
 
             green =
                 green.splice_children(member_index..member_index + 1, vec![updated_member.into()]);
@@ -321,13 +357,34 @@ fn set_object_child(
         return Ok(green);
     }
 
-    let (before_colon_trivia, after_colon_trivia) = if let Some(first_member) = members.first() {
-        (
-            first_member.before_colon_trivia.clone(),
-            first_member.after_colon_trivia.clone(),
-        )
-    } else {
-        (vec![], vec![Trivia::Whitespace(" ".to_string())])
+    let object_ast = AstObject::cast(parent.clone())?;
+    let detect_style = matches!(string_style, Prefer::Preserve) && value.has_string();
+    let insert_style = resolve_insert_style(
+        string_style,
+        if detect_style {
+            object_ast.detected_string_style()
+        } else {
+            None
+        },
+    );
+    let insert_style = checked_style(value, insert_style, string_style)?;
+    let config = RenderConfig {
+        string_style: insert_style,
+        newline,
+    };
+
+    let first_member = parent
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Member);
+    let (before_colon_trivia, after_colon_trivia) = match first_member {
+        Some(node) => {
+            let member = Member::cast(node)?;
+            (
+                member.before_colon_trivia.clone(),
+                member.after_colon_trivia.clone(),
+            )
+        }
+        None => (vec![], vec![Trivia::Whitespace(" ".to_string())]),
     };
 
     let member_node: GreenElement = value
@@ -351,6 +408,7 @@ fn set_array_child(
     last: &PathSegment,
     value: &HjsonValue,
     string_style: Prefer<QuoteStyle>,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     let seg = match last {
         PathSegment::Array(seg) => seg,
@@ -362,25 +420,39 @@ fn set_array_child(
         }
     };
 
-    let array_ast = AstArray::cast(parent.clone())?;
-    let insert_style = resolve_insert_style(string_style, array_ast.detected_string_style());
-    let insert_style = checked_style(value, insert_style, string_style)?;
-    let newline = detect_document_newline(parent);
-    let len = array_ast.slots().len();
+    // 要素の一覧を作らず、子をたどって長さと対象を得る
+    let len = parent
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::Value)
+        .count();
 
     match seg {
         ArrayPathSegment::Index(index) => {
             if *index >= len {
                 return Err(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len });
             }
-            let current = &array_ast.items()[*index];
+            let current = parent
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::Value)
+                .nth(*index)
+                .ok_or(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len })?;
             if matches!(string_style, Prefer::Preserve)
-                && values_equal(&HjsonValue::from_node(current.syntax())?, value)
+                && values_equal(&HjsonValue::from_node(&current)?, value)
             {
                 return Ok(parent.green().clone().into_owned());
             }
+            let array_ast = AstArray::cast(parent.clone())?;
+            let insert_style = resolve_insert_style(
+                string_style,
+                if matches!(string_style, Prefer::Preserve) && value.has_string() {
+                    array_ast.detected_string_style()
+                } else {
+                    None
+                },
+            );
+            let insert_style = checked_style(value, insert_style, string_style)?;
             let updated = render_value_like_node(
-                current.syntax(),
+                &current,
                 value,
                 string_style,
                 &RenderConfig {
@@ -388,10 +460,11 @@ fn set_array_child(
                     newline,
                 },
             )?;
-            let rendered = RenderedElement::single(updated.into());
-            let (at, elements) = plan_replace(parent, *index, rendered)
-                .map_err(|error| with_segment(error, last))?;
-            Ok(parent.green().splice_children(at..at + 1, elements))
+            // 値ノードをそのまま差し替える（トリビアを含むスロットの再計算は不要）
+            let at = current.index();
+            Ok(parent
+                .green()
+                .splice_children(at..at + 1, vec![updated.into()]))
         }
         ArrayPathSegment::InsertAt(index) => {
             if *index > len {
@@ -402,17 +475,39 @@ fn set_array_child(
             } else {
                 InsertPosition::Before(*index)
             };
+            let insert_style = array_insert_style(parent, value, string_style)?;
             insert_array_element(parent, position, value, insert_style, newline, last)
         }
-        ArrayPathSegment::Push => insert_array_element(
-            parent,
-            InsertPosition::End,
-            value,
-            insert_style,
-            newline,
-            last,
-        ),
+        ArrayPathSegment::Push => {
+            let insert_style = array_insert_style(parent, value, string_style)?;
+            insert_array_element(
+                parent,
+                InsertPosition::End,
+                value,
+                insert_style,
+                newline,
+                last,
+            )
+        }
     }
+}
+
+/// 配列へ要素を入れるときの文字列スタイル。
+fn array_insert_style(
+    parent: &RedNode,
+    value: &HjsonValue,
+    string_style: Prefer<QuoteStyle>,
+) -> Result<Option<QuoteStyle>, HjsonEditError> {
+    let detected = if matches!(string_style, Prefer::Preserve) && value.has_string() {
+        AstArray::cast(parent.clone())?.detected_string_style()
+    } else {
+        None
+    };
+    checked_style(
+        value,
+        resolve_insert_style(string_style, detected),
+        string_style,
+    )
 }
 
 fn insert_array_element(

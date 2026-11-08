@@ -116,6 +116,19 @@ impl HjsonValue {
         ok
     }
 
+    /// 文字列を 1 つでも含むか（含まなければ文字列スタイルの検出は不要）。
+    pub(crate) fn has_string(&self) -> bool {
+        match self {
+            HjsonValue::String(_) => true,
+            HjsonValue::Array(items) => items.iter().any(Self::has_string),
+            HjsonValue::Object(entries) => entries.iter().any(|(_, value)| value.has_string()),
+            HjsonValue::Integer(_)
+            | HjsonValue::Float(_)
+            | HjsonValue::Bool(_)
+            | HjsonValue::Null => false,
+        }
+    }
+
     /// HJSON で表現できない数値（NaN と無限大）を含むか。
     pub(crate) fn has_unrepresentable_number(&self) -> bool {
         match self {

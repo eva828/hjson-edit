@@ -986,8 +986,11 @@ impl Object {
 
     /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
-        self.members()
-            .into_iter()
+        // 全メンバーを Vec にすると要素数に比例した費用が毎回かかるため、見つかり次第返す
+        self.syntax
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::Member)
+            .filter_map(|child| Member::cast(child).ok())
             .find_map(|member| member.detected_string_style())
     }
 }
@@ -1110,8 +1113,10 @@ impl Array {
 
     /// 使われている文字列スタイル。
     pub fn detected_string_style(&self) -> Option<QuoteStyle> {
-        self.values()
-            .into_iter()
+        self.syntax
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::Value)
+            .filter_map(|child| Value::cast(child).ok())
             .find_map(|item| item.detected_string_style())
     }
 }

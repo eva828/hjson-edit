@@ -13,7 +13,6 @@ use crate::high_level::{
     },
     path::{HjsonObjectPath, PathSegment},
     resolve::{resolve_body, ExistingPrefix, PathResolver},
-    style::detect_document_newline,
     value::HjsonValue,
     HjsonDocument, Prefer,
 };
@@ -57,7 +56,8 @@ impl HjsonDocumentMerge for HjsonDocument {
         let carried = relative_container_depth(&source_object).saturating_sub(1);
         ensure_depth_within_limit(receiving_container_depth(&ancestor) + created + carried)?;
 
-        let updated = merge_from_root(root, path, &source_object)?;
+        let newline = self.current_newline_kind();
+        let updated = merge_from_root(root, path, &source_object, newline)?;
         let document = self.clone().root(updated).note_touched(path.clone());
 
         if self.current_verify() {
@@ -98,6 +98,7 @@ fn merge_from_root(
     root: RedNode,
     path: &HjsonObjectPath,
     source_object: &RedNode,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     let body = resolve_body(&root)?;
     if object_body(&body).is_none() {
@@ -142,6 +143,7 @@ fn merge_from_root(
                 path,
                 &HjsonValue::Object(Vec::new()),
                 Prefer::Preserve,
+                newline,
             )?;
             RedNode::new_root(created)
         }
@@ -157,7 +159,7 @@ fn merge_from_root(
         &crate::high_level::indent::root_of(&target),
         target_object.text_range().start().into(),
     );
-    let merged = merge_objects(&target_object, source_object, &base_indent)?;
+    let merged = merge_objects(&target_object, source_object, &base_indent, newline)?;
 
     Ok(target_object.replace_with(merged))
 }
@@ -170,8 +172,8 @@ fn merge_objects(
     target_object: &RedNode,
     source_object: &RedNode,
     base_indent: &str,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
-    let newline = detect_document_newline(target_object);
     let mut children: Vec<crate::syntax::GreenElement> = target_object
         .green()
         .children()
@@ -212,7 +214,8 @@ fn merge_objects(
                         }
                     };
                     let existing = Member::cast(RedNode::new_root(existing_green))?;
-                    children[index] = merge_member(&existing, &source, base_indent)?.into();
+                    children[index] =
+                        merge_member(&existing, &source, base_indent, newline)?.into();
                 }
             }
             None => pending.push(copy_member_with_comments(&source, newline)),
@@ -253,6 +256,7 @@ fn merge_member(
     existing: &Member,
     source: &Member,
     base_indent: &str,
+    newline: NewlineKind,
 ) -> Result<GreenNode, HjsonEditError> {
     let existing_value = existing
         .value()
@@ -282,6 +286,7 @@ fn merge_member(
             existing_object.syntax(),
             source_object.syntax(),
             base_indent,
+            newline,
         )?;
         GreenNode::new(SyntaxKind::Value.into(), vec![merged.into()])
     } else {

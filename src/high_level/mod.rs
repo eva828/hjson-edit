@@ -26,6 +26,7 @@ use crate::high_level::path::HjsonObjectPath;
 use crate::high_level::style::detect_newline_from_ast;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
+use crate::syntax::NewlineKind;
 use crate::syntax::MAX_INPUT_BYTES;
 use crate::RedNode;
 use line_index::LineIndex;
@@ -249,6 +250,14 @@ impl HjsonDocument {
     /// この文書で検出した改行コード。
     pub fn current_newline(&self) -> &str {
         &self.newline
+    }
+
+    /// この文書で検出した改行コード（編集の描画に使う）。
+    pub(crate) fn current_newline_kind(&self) -> NewlineKind {
+        match self.newline.as_str() {
+            "\r\n" => NewlineKind::CrLf,
+            _ => NewlineKind::Lf,
+        }
     }
 
     /// lossless な構文木のルート。
