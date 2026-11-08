@@ -122,7 +122,8 @@ fn merge_from_root(
         Ok(node) => {
             if object_body(&node).is_none() {
                 return Err(HjsonEditError::MergeConflict(format!(
-                    "cannot merge: {path:?} is not an object"
+                    "{} is not an object",
+                    path
                 )));
             }
             root
@@ -133,7 +134,8 @@ fn merge_from_root(
                 PathResolver::new(root.clone()).resolve_existing_prefix(path);
             if consumed < path.depth() && object_body(&ancestor).is_none() {
                 return Err(HjsonEditError::MergeConflict(format!(
-                    "cannot merge: {path:?} is not inside an object"
+                    "{} is not inside an object",
+                    path
                 )));
             }
 
@@ -151,9 +153,8 @@ fn merge_from_root(
     };
 
     let target = PathResolver::new(root.clone()).resolve_node(path)?;
-    let target_object = object_body(&target).ok_or_else(|| {
-        HjsonEditError::MergeConflict(format!("cannot merge: {path:?} is not an object"))
-    })?;
+    let target_object = object_body(&target)
+        .ok_or_else(|| HjsonEditError::MergeConflict(format!("{path} is not an object")))?;
     // 対象のコンテナは行の途中から始まることもあるため、字下げをここで求めて渡す
     let base_indent = crate::high_level::indent::line_indent(&target_object);
     let merged = merge_objects(&target_object, source_object, &base_indent, newline)?;

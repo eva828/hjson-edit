@@ -128,3 +128,29 @@ fn merging_keeps_the_comments_of_the_kept_duplicate() {
 
     assert_eq!(merged.to_string(), "a: 1\n// note\nb: 2\n");
 }
+
+#[test]
+fn merge_reports_the_requested_path_for_a_scalar_target() {
+    let host = HjsonDocument::parse("a: 1\n").unwrap();
+    let source = HjsonDocument::parse("b: 2\n").unwrap();
+
+    let error = host
+        .merge_from(&path("a"), &source)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(error, "Cannot merge: a is not an object");
+}
+
+#[test]
+fn merge_reports_the_requested_path_when_a_parent_is_a_scalar() {
+    let host = HjsonDocument::parse("a: 1\n").unwrap();
+    let source = HjsonDocument::parse("b: 2\n").unwrap();
+
+    let error = host
+        .merge_from(&path("a.b"), &source)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(error, "Cannot merge: a.b is not inside an object");
+}

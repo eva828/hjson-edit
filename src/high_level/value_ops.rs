@@ -210,7 +210,8 @@ fn merge_in(
             Ok(HjsonValue::Object(entries))
         }
         _ => Err(HjsonEditError::MergeConflict(format!(
-            "cannot merge: {path:?} is not an object"
+            "{} is not an object",
+            path
         ))),
     }
 }
