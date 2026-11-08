@@ -579,8 +579,16 @@ impl<'a> Parser<'a> {
             return;
         }
 
+        let mut unclosed = false;
         loop {
             if self.at(SyntaxKind::RBrace) {
+                break;
+            }
+
+            // 外側の配列の閉じ区切りが現れたら、このオブジェクトは閉じていない
+            if self.at(SyntaxKind::RBracket) {
+                self.error(opening, "Unclosed object, expected '}'");
+                unclosed = true;
                 break;
             }
 
@@ -623,6 +631,11 @@ impl<'a> Parser<'a> {
                 if self.is_object_member_start() {
                     continue;
                 }
+                if self.at(SyntaxKind::RBracket) {
+                    self.error(opening, "Unclosed object, expected '}'");
+                    unclosed = true;
+                    break;
+                }
                 self.recover_from_separator_error(
                     "Expected ',' or '}'",
                     &[
@@ -636,7 +649,9 @@ impl<'a> Parser<'a> {
         }
 
         // }
-        if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
+        if unclosed {
+            // 外側の閉じ区切りは親のコンテナに任せる
+        } else if !self.at(SyntaxKind::RBrace) && !self.is_at_end() {
             let token = self.current().unwrap();
             self.error(token.offset, "Expected '}'");
         } else {
@@ -676,8 +691,16 @@ impl<'a> Parser<'a> {
             return;
         }
 
+        let mut unclosed = false;
         loop {
             if self.at(SyntaxKind::RBracket) {
+                break;
+            }
+
+            // 外側のオブジェクトの閉じ区切りが現れたら、この配列は閉じていない
+            if self.at(SyntaxKind::RBrace) {
+                self.error(opening, "Unclosed array, expected ']'");
+                unclosed = true;
                 break;
             }
 
@@ -713,6 +736,11 @@ impl<'a> Parser<'a> {
                     break;
                 }
             } else if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
+                if self.at(SyntaxKind::RBrace) {
+                    self.error(opening, "Unclosed array, expected ']'");
+                    unclosed = true;
+                    break;
+                }
                 // 改行（トリビア）が消費されていればHJSONの改行区切りとして有効
                 if had_newline {
                     // カンマなし・改行ありは有効な区切り → ループ継続
@@ -731,7 +759,9 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
+        if unclosed {
+            // 外側の閉じ区切りは親のコンテナに任せる
+        } else if !self.at(SyntaxKind::RBracket) && !self.is_at_end() {
             let token = self.current().unwrap();
             self.error(token.offset, "Expected ']'");
         } else {
@@ -1027,19 +1057,39 @@ mod tests {
 
     #[test]
     fn test_unclosed_container_errors_point_at_the_opening_delimiter() {
+        // `[web, api]` は引用符なし文字列が `]` を飲み込み、配列が閉じない。
+        // 次の行の `}` は外側のオブジェクトのものなので、配列だけを報告する。
         let src = "{\n  list: [web, api]\n}\n";
         let parsed = parse_text(src);
-        let object_offset = 0;
         let array_offset = src.find('[').unwrap();
 
-        assert!(parsed
-            .errors
-            .iter()
-            .any(|e| e.offset == object_offset && e.message.contains("Unclosed object")));
-        assert!(parsed
-            .errors
-            .iter()
-            .any(|e| e.offset == array_offset && e.message.contains("Unclosed array")));
+        assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+        assert!(parsed.errors[0].message.contains("Unclosed array"));
+        assert_eq!(parsed.errors[0].offset, array_offset);
+
+        // オブジェクトは `}` で閉じて回復する
+        let document = Document::cast(crate::syntax::RedNode::new_root(parsed.green)).unwrap();
+        assert_eq!(document.object().unwrap().members().len(), 1);
+    }
+
+    #[test]
+    fn test_array_closed_by_object_brace_reports_the_unclosed_array() {
+        let src = "{\n  a: [1, 2\n}\n";
+        let parsed = parse_text(src);
+
+        assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+        assert!(parsed.errors[0].message.contains("Unclosed array"));
+        assert_eq!(parsed.errors[0].offset, src.find('[').unwrap());
+    }
+
+    #[test]
+    fn test_object_closed_by_array_bracket_reports_the_unclosed_object() {
+        let src = "[{a: 1]\n";
+        let parsed = parse_text(src);
+
+        assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+        assert!(parsed.errors[0].message.contains("Unclosed object"));
+        assert_eq!(parsed.errors[0].offset, src.find('{').unwrap());
     }
 
     #[test]
