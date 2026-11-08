@@ -1066,3 +1066,18 @@ fn cli_edit_set_root_keeps_the_document_header() {
     assert_eq!(stdout, "// header\n5\n");
     assert_parses(&stdout);
 }
+
+#[test]
+fn cli_parse_warns_about_duplicate_keys() {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{{\n  a: 1\n  a: 2\n}}\n").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("parse")
+        .arg(file.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Warning: duplicate key \"a\""));
+}

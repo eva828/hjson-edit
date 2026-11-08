@@ -130,7 +130,7 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
 /// パース時に読み飛ばした入力を警告として stderr に出す。
 pub(crate) fn warn_skipped_input(document: &hjson_edit::HjsonDocument) {
     for warning in document.warnings() {
-        eprintln!("Warning: skipped input: {warning}");
+        eprintln!("Warning: {warning}");
     }
 }
 

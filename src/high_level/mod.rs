@@ -103,9 +103,10 @@ impl HjsonDocument {
             });
         }
 
+        let line_index = LineIndex::new(input);
         let mut warnings: Vec<String> = warnings
             .iter()
-            .map(|error| error.format_with_source(&LineIndex::new(input), input))
+            .map(|error| lexer_warning(error, &line_index, input))
             .collect();
 
         // キーが `//` を含む場合の再字句解析で見つかったエラーも、初回と同じ扱いにする
@@ -124,7 +125,7 @@ impl HjsonDocument {
         warnings.extend(
             retry_warnings
                 .iter()
-                .map(|error| error.format_with_source(&LineIndex::new(input), input)),
+                .map(|error| lexer_warning(error, &line_index, input)),
         );
 
         if !result.errors.is_empty() {
@@ -136,6 +137,7 @@ impl HjsonDocument {
         }
 
         let root = RedNode::new_root(result.green);
+        warnings.extend(duplicate_key_warnings(&root, input));
         let newline = detect_newline_from_ast(&root).as_str().to_string();
 
         Ok(Self {
@@ -407,6 +409,62 @@ impl std::fmt::Display for HjsonDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.root)
     }
+}
+
+/// 読み飛ばした入力の警告。CLI はそのまま "Warning: {warning}" として出す。
+fn lexer_warning(
+    error: &crate::syntax::lexer::LexError,
+    line_index: &LineIndex,
+    input: &str,
+) -> String {
+    let (line, column) =
+        crate::syntax::char_line_col(line_index, input, error.offset).unwrap_or((0, error.offset));
+    format!(
+        "skipped input at line {}, column {}: {}",
+        line + 1,
+        column + 1,
+        error.message
+    )
+}
+
+/// 値の層で後勝ちになる重複キーの警告（出現順）。
+fn duplicate_key_warnings(root: &RedNode, input: &str) -> Vec<String> {
+    use crate::ast::{AstNode, Member};
+    use std::collections::HashSet;
+
+    let line_index = LineIndex::new(input);
+    let mut warnings = Vec::new();
+
+    for object in root
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::Object)
+    {
+        let mut seen: HashSet<String> = HashSet::new();
+        for child in object
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::Member)
+        {
+            let Ok(member) = Member::cast(child) else {
+                continue;
+            };
+            let Some(key) = member.member_key() else {
+                continue;
+            };
+            if !seen.insert(key.clone()) {
+                let offset: u32 = member.syntax().text_range().start().into();
+                let (line, column) =
+                    crate::syntax::char_line_col(&line_index, input, offset as usize)
+                        .unwrap_or((0, offset as usize));
+                warnings.push(format!(
+                    "duplicate key {key:?} at line {}, column {} (the last value wins)",
+                    line + 1,
+                    column + 1
+                ));
+            }
+        }
+    }
+
+    warnings
 }
 
 #[cfg(test)]
