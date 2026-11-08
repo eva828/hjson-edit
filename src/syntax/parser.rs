@@ -123,6 +123,18 @@ impl<'a> Parser<'a> {
         self.errors.push(ParseError::new(offset, message));
     }
 
+    /// エラー表示用のトークン。内部の種類名ではなく、書かれている文字を見せる。
+    fn token_label(token: &Token) -> String {
+        const MAX_CHARS: usize = 40;
+        let mut chars = token.text.chars();
+        let head: String = chars.by_ref().take(MAX_CHARS).collect();
+        if chars.next().is_some() {
+            format!("{head:?} …")
+        } else {
+            format!("{head:?}")
+        }
+    }
+
     /// 再字句解析で見つかった字句エラーを、元の入力の位置に直して記録する。
     fn push_lex_errors(&mut self, errors: Vec<super::lexer::LexError>, offset: usize) {
         for mut error in errors {
@@ -265,7 +277,10 @@ impl<'a> Parser<'a> {
 
         if !self.is_at_end() {
             let token = self.current().unwrap();
-            self.error(token.offset, format!("Unexpected token: {:?}", token.kind));
+            self.error(
+                token.offset,
+                format!("Unexpected token: {}", Self::token_label(token)),
+            );
             self.start_error_node();
             while !self.is_at_end() {
                 self.bump();
@@ -547,7 +562,8 @@ impl<'a> Parser<'a> {
                         0
                     };
                     self.start_error_node();
-                    self.error(offset, format!("Unexpected token: {:?}", token_kind));
+                    let label = self.current().map(Self::token_label).unwrap_or_default();
+                    self.error(offset, format!("Unexpected token: {label}"));
                     self.bump();
                     self.finish_error_node();
                 }
@@ -812,7 +828,10 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 if let Some(t) = token {
-                    self.error(t.offset, format!("Expected key, found {:?}", t.kind));
+                    self.error(
+                        t.offset,
+                        format!("Expected key, found {}", Self::token_label(t)),
+                    );
                     self.start_error_node();
                     self.bump();
                     self.finish_error_node();
@@ -1053,6 +1072,38 @@ mod tests {
             .len()
             .into();
         assert_eq!(text_len, src.len());
+    }
+
+    #[test]
+    fn test_unexpected_token_shows_the_token_text() {
+        for (src, label) in [("{a: 1} }\n", "\"}\""), ("[1, 2]]\n", "\"]\"")] {
+            let parsed = parse_text(src);
+            let message = &parsed.errors[0].message;
+            assert_eq!(message, &format!("Unexpected token: {label}"), "{message}");
+            assert!(!message.contains("RBrace") && !message.contains("RBracket"));
+        }
+    }
+
+    #[test]
+    fn test_expected_key_shows_the_token_text() {
+        let parsed = parse_text("{ : 1 }\n");
+
+        assert!(
+            parsed
+                .errors
+                .iter()
+                .any(|e| e.message == "Expected key, found \":\""),
+            "{:?}",
+            parsed.errors
+        );
+    }
+
+    #[test]
+    fn test_long_unquoted_token_is_truncated_in_errors() {
+        let src = format!("{{a: 1}} {}\n", "x".repeat(200));
+        let parsed = parse_text(&src);
+
+        assert!(parsed.errors[0].message.len() < 100, "{:?}", parsed.errors);
     }
 
     #[test]
