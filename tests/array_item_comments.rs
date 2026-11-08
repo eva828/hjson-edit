@@ -46,7 +46,7 @@ fn set_inline_comment_of_array_item_keeps_member_comment() {
 
     assert_eq!(
         updated.to_string(),
-        "{\n  a: [\n    1 // item\n    2 /* second */\n  ] // keep\n}\n"
+        "{\n  a: [\n    1 // item\n    2 // second\n  ] // keep\n}\n"
     );
     assert_eq!(
         updated.get_comment(comment_path("a[0]:inline")).unwrap(),
@@ -87,7 +87,7 @@ fn set_before_comment_of_array_item() {
     // 要素の行の前にコメント行が入る（要素自身の行末コメントは残る）
     assert_eq!(
         updated.to_string(),
-        "{\n  a: [\n    /* note */\n    1 // item\n    2\n  ] // keep\n}\n"
+        "{\n  a: [\n    // note\n    1 // item\n    2\n  ] // keep\n}\n"
     );
 }
 
@@ -114,10 +114,7 @@ fn array_item_comments_in_root_array() {
     );
 
     let updated = doc.set_comment(comment_path("[1]:before"), "note").unwrap();
-    assert_eq!(
-        updated.to_string(),
-        "[\n  1 // item\n  /* note */\n  2\n]\n"
-    );
+    assert_eq!(updated.to_string(), "[\n  1 // item\n  // note\n  2\n]\n");
 }
 
 #[test]

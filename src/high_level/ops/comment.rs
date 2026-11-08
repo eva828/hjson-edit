@@ -594,17 +594,24 @@ fn update_comment(
 ) -> Result<GreenNode, HjsonEditError> {
     let root = doc.syntax_root().clone();
     let preferred = doc.current_comment_style();
+    let document_style = dominant_comment_kind(&root);
     let newline = doc.current_newline();
 
     match resolve_comment_target(&path) {
         CommentTarget::Document { header } => {
-            build_document_comment(&root, header, comment, preferred, newline)
+            build_document_comment(&root, header, comment, preferred, document_style, newline)
         }
-        CommentTarget::Slot { path, location } => {
-            build_slot_comment(root, path, location, comment, preferred, newline)
-        }
+        CommentTarget::Slot { path, location } => build_slot_comment(
+            root,
+            path,
+            location,
+            comment,
+            preferred,
+            document_style,
+            newline,
+        ),
         CommentTarget::ContainerFooter { path } => {
-            build_container_footer_comment(root, path, comment, preferred, newline)
+            build_container_footer_comment(root, path, comment, preferred, document_style, newline)
         }
     }
 }
@@ -614,6 +621,7 @@ fn build_document_comment(
     header: bool,
     comment: Option<String>,
     preferred: Prefer<CommentKind>,
+    document_style: Option<CommentKind>,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let ast = Document::cast(root.clone())?;
@@ -659,7 +667,7 @@ fn build_document_comment(
     };
 
     if let Some(comment) = comment {
-        let resolved_style = resolve_comment_style(preferred, existing_style);
+        let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
         let comment_elements = make_comment_nodes(resolved_style, &comment, newline);
 
         let mut inserted: Vec<GreenElement> = comment_elements;
@@ -679,6 +687,7 @@ fn build_slot_comment(
     location: CommentLocation,
     comment: Option<String>,
     preferred: Prefer<CommentKind>,
+    document_style: Option<CommentKind>,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let slot = PathResolver::new(root).resolve_slot(path)?;
@@ -697,7 +706,7 @@ fn build_slot_comment(
         return Ok(container.replace_with(green_after_remove));
     };
 
-    let resolved_style = resolve_comment_style(preferred, existing_style);
+    let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
     let children = children_of(&container);
 
     let (insert_at, inserted) = match location {
@@ -763,6 +772,7 @@ fn build_container_footer_comment(
     path: &HjsonObjectPath,
     comment: Option<String>,
     preferred: Prefer<CommentKind>,
+    document_style: Option<CommentKind>,
     newline: &str,
 ) -> Result<GreenNode, HjsonEditError> {
     let container = resolve_container_node(&root, path)?;
@@ -803,7 +813,7 @@ fn build_container_footer_comment(
 
     let mut inserted: Vec<GreenElement> = Vec::new();
     if let Some(comment) = comment {
-        let resolved_style = resolve_comment_style(preferred, existing_style);
+        let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
         // コメントは要素の後の行に置くため、直前が行末でなければ改行を足す
         if !at_line_start {
             inserted.push(SyntaxKind::Newline.create_token(newline).into());
@@ -920,6 +930,36 @@ fn kind_from_style(style: CommentKind) -> SyntaxKind {
         CommentKind::Line => SyntaxKind::LineComment,
         CommentKind::Hash => SyntaxKind::HashComment,
     }
+}
+
+/// 文書で最も多く使われているコメント種別。同数なら先に現れたもの。
+fn dominant_comment_kind(root: &RedNode) -> Option<CommentKind> {
+    use crate::syntax::SyntaxKind;
+
+    let mut counts = [0usize; 3];
+    let mut first = [usize::MAX; 3];
+    for element in root.descendants_with_tokens() {
+        let rowan::NodeOrToken::Token(token) = element else {
+            continue;
+        };
+        let index = match token.kind() {
+            SyntaxKind::LineComment => 0,
+            SyntaxKind::HashComment => 1,
+            SyntaxKind::BlockComment => 2,
+            _ => continue,
+        };
+        counts[index] += 1;
+        first[index] = first[index].min(token.text_range().start().into());
+    }
+
+    (0..3)
+        .filter(|index| counts[*index] > 0)
+        .max_by_key(|index| (counts[*index], std::cmp::Reverse(first[*index])))
+        .map(|index| match index {
+            0 => CommentKind::Line,
+            1 => CommentKind::Hash,
+            _ => CommentKind::Block,
+        })
 }
 
 fn resolve_comment_style(

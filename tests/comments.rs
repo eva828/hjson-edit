@@ -257,3 +257,27 @@ fn all_comments_lists_bodies_in_order() {
         ]
     );
 }
+
+#[test]
+fn inserted_comment_uses_a_hash_dominant_document() {
+    let input = "# first\na: 1\nb: 2\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from("b:before").unwrap(), "note")
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "# first\na: 1\n# note\nb: 2\n");
+}
+
+#[test]
+fn inserted_comment_falls_back_to_a_block_comment() {
+    let input = "{\n  a: 1\n}\n";
+
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from("a:before").unwrap(), "note")
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  /* note */\n  a: 1\n}\n");
+}
