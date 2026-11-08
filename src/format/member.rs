@@ -3,7 +3,7 @@ use rowan::GreenNode;
 use super::value::multiline_block_node;
 use super::{Format, FormatConfig};
 use crate::ast::{AstNode, Member, Trivia};
-use crate::high_level::indent::{line_indent, root_of};
+use crate::high_level::indent::line_indent;
 use crate::syntax::{GreenElement, SyntaxKind};
 
 impl Format for Member {
@@ -25,10 +25,7 @@ impl Format for Member {
             .iter()
             .any(|trivia| matches!(trivia, Trivia::Newline { .. }));
         let value_indent = if value_on_new_line {
-            line_indent(
-                &root_of(val.syntax()),
-                val.syntax().text_range().start().into(),
-            )
+            line_indent(val.syntax())
         } else {
             indent.clone()
         };

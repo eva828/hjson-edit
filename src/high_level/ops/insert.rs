@@ -23,9 +23,7 @@ use crate::ast::{
     Array as AstArray, AstNode, BodyInsertion, DelimiterStyle, Object as AstObject, SlotSpan,
 };
 use crate::high_level::error::HjsonEditError;
-use crate::high_level::indent::{
-    container_indent, indent_before, indent_lines, line_indent, root_of,
-};
+use crate::high_level::indent::{container_indent, indent_before, indent_lines, line_indent};
 use crate::high_level::path::HjsonObjectPath;
 use crate::syntax::{GreenElement, NewlineKind, RedNode, SyntaxKind};
 
@@ -85,10 +83,7 @@ pub(crate) fn plan_insert(
 ) -> Result<(usize, Vec<GreenElement>), HjsonEditError> {
     let slots = container_slots(container)?;
     let braceless = is_braceless(container)?;
-    let base_indent = base_indent.map_or_else(
-        || line_indent(&root_of(container), container.text_range().start().into()),
-        str::to_string,
-    );
+    let base_indent = base_indent.map_or_else(|| line_indent(container), str::to_string);
     // 混在した改行コードの文書でも、コンテナ内で使われている改行に合わせる
     let newline = container_newline(container).unwrap_or(newline);
 
@@ -201,8 +196,7 @@ fn plan_append(
     if let Some(line_break) = last.line_break() {
         let kind = newline_at(container, line_break).unwrap_or(newline);
         let indent = indent_before(
-            &root_of(container),
-            child_start(container, last.elem().start),
+            &child_node(container, last.elem().start).unwrap_or_else(|| container.clone()),
         );
         let mut inserted = elements;
         inserted.push(newline_element(kind));
@@ -250,10 +244,7 @@ pub(crate) fn plan_append_many(
 ) -> Result<Option<(usize, Vec<GreenElement>)>, HjsonEditError> {
     let slots = container_slots(container)?;
     let braceless = is_braceless(container)?;
-    let base_indent = base_indent.map_or_else(
-        || line_indent(&root_of(container), container.text_range().start().into()),
-        str::to_string,
-    );
+    let base_indent = base_indent.map_or_else(|| line_indent(container), str::to_string);
     let newline = container_newline(container).unwrap_or(newline);
 
     let Some(last) = slots.last() else {
@@ -279,8 +270,7 @@ pub(crate) fn plan_append_many(
     if let Some(line_break) = last.line_break() {
         let kind = newline_at(container, line_break).unwrap_or(newline);
         let indent = indent_before(
-            &root_of(container),
-            child_start(container, last.elem().start),
+            &child_node(container, last.elem().start).unwrap_or_else(|| container.clone()),
         );
         let mut inserted = Vec::new();
         for element in elements {
@@ -377,8 +367,7 @@ fn plan_before(
             String::new()
         } else {
             indent_before(
-                &root_of(container),
-                child_start(container, target.elem().start),
+                &child_node(container, target.elem().start).unwrap_or_else(|| container.clone()),
             )
         };
         let mut inserted = elements;
@@ -429,11 +418,12 @@ fn plan_before(
 }
 
 /// 子要素の開始テキスト位置。
-fn child_start(container: &RedNode, index: usize) -> usize {
-    container.children_with_tokens().nth(index).map_or_else(
-        || container.text_range().end().into(),
-        |child| child.text_range().start().into(),
-    )
+/// 子の並びの `index` 番目にあるノード。
+fn child_node(container: &RedNode, index: usize) -> Option<RedNode> {
+    container
+        .children_with_tokens()
+        .nth(index)
+        .and_then(|child| child.into_node())
 }
 
 /// 空の本文への挿入位置。閉じ区切りが独立した行にある場合は、行頭（字下げの手前）へ入れる。
@@ -468,7 +458,10 @@ fn inline_insertion_indent(container: &RedNode, insert_index: usize, base_indent
         return container_indent(container, base_indent);
     }
 
-    line_indent(&root_of(container), child_start(container, insert_index))
+    match child_node(container, insert_index) {
+        Some(node) => line_indent(&node),
+        None => line_indent(container),
+    }
 }
 
 /// 行の途中に置けない要素を、独立した行（字下げ付き）に置く。

@@ -63,7 +63,7 @@ impl HjsonDocument {
         };
         // 行の途中にあるコンテナを単独で整形すると、親のインライン配置と混ざって崩れる。
         // 行頭になる祖先コンテナまで遡って整形する。
-        let container = line_aligned_container(self.syntax_root(), &container);
+        let container = line_aligned_container(&container);
 
         let depth = format_depth(&container)?;
         let formatted = match container.kind() {
@@ -144,11 +144,12 @@ impl HjsonDocument {
             }
         };
 
-        let root = self.syntax_root();
+        // 字下げ 1 段分は要素ごとに求めず 1 回だけ求める（文書全体の走査になるため）
+        let indent_unit = crate::high_level::indent::indent_unit(self.syntax_root());
         let mut green: rowan::GreenNode = container.green().clone().into_owned();
         let mut changed = false;
         for element in elements {
-            let Some(formatted) = formatted_block_element(root, &element, config)? else {
+            let Some(formatted) = formatted_block_element(&element, &indent_unit, config)? else {
                 continue;
             };
 
@@ -185,13 +186,13 @@ impl HjsonDocument {
 ///
 /// 対象でなければ `None`（インラインの要素と、Block 文字列を持たない要素）。
 fn formatted_block_element(
-    root: &RedNode,
     element: &RedNode,
+    indent_unit: &str,
     config: &FormatConfig,
 ) -> Result<Option<rowan::GreenNode>, HjsonEditError> {
     let start: usize = element.text_range().start().into();
     // 行の途中の要素は、複数行にすると親のレイアウトと混ざるため触らない
-    if !is_at_line_start(root, start) {
+    if !is_at_line_start(element) {
         return Ok(None);
     }
 
@@ -202,10 +203,10 @@ fn formatted_block_element(
         return Ok(None);
     };
 
-    let indent = line_indent(root, start);
+    let indent = line_indent(element);
     Ok(multiline_block_node(
         &Value::cast(value.clone())?,
-        &format!("{indent}{}", crate::high_level::indent::indent_unit(root)),
+        &format!("{indent}{indent_unit}"),
         start + prefix_width(element, &value),
         &indent,
         &indent,
@@ -229,10 +230,10 @@ fn prefix_width(element: &RedNode, value: &RedNode) -> usize {
 ///
 /// インラインの配列・オブジェクトの中にあるコンテナは、それだけを整形すると
 /// 親のレイアウトと混ざるため、行頭の要素に属する祖先まで遡る。
-fn line_aligned_container(root: &RedNode, container: &RedNode) -> RedNode {
+fn line_aligned_container(container: &RedNode) -> RedNode {
     let mut target = container.clone();
     while let Some(element) = containing_element(&target) {
-        if is_at_line_start(root, element.text_range().start().into()) {
+        if is_at_line_start(&element) {
             break;
         }
 

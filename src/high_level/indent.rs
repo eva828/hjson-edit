@@ -13,15 +13,73 @@ pub(crate) fn root_of(node: &RedNode) -> RedNode {
     node.ancestors().last().unwrap_or_else(|| node.clone())
 }
 
-/// 指定位置の行の字下げ（直前の改行から位置までの先頭の空白）。
-pub(crate) fn line_indent(root: &RedNode, offset: usize) -> String {
-    let text = root.text().to_string();
-    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+/// ノードの行頭からノードまでの先頭の空白と、その範囲が空白だけかを調べる。
+///
+/// 文書全体を文字列化すると要素数に対して二次関数的になるため、トークンを後方へ
+/// たどって行頭を探す。手前に要素があればその時点で行頭ではないと分かるので、
+/// `prefix_is_whitespace` はそこで打ち切る（1 行の巨大な文書でも 1 回あたり定数時間）。
+fn line_prefix(node: &RedNode) -> (String, bool) {
+    let mut run = String::new();
+    let mut only_whitespace = true;
 
-    text[line_start..offset]
-        .chars()
-        .take_while(|ch| *ch == ' ' || *ch == '\t')
-        .collect()
+    let mut token = node.first_token().and_then(|token| token.prev_token());
+    while let Some(current) = token {
+        let text = current.text();
+        match text.rfind('\n') {
+            Some(position) => {
+                let tail = &text[position + 1..];
+                let leading: String = tail
+                    .chars()
+                    .take_while(|ch| *ch == ' ' || *ch == '\t')
+                    .collect();
+                run.insert_str(0, &leading);
+                if leading.len() != tail.len() {
+                    only_whitespace = false;
+                }
+                return (run, only_whitespace);
+            }
+            None => {
+                if text.chars().all(|ch| ch == ' ' || ch == '\t') {
+                    run.insert_str(0, text);
+                } else {
+                    // 行頭はさらに手前にある。行頭直後の空白だけを残す
+                    only_whitespace = false;
+                    run.clear();
+                }
+            }
+        }
+        token = current.prev_token();
+    }
+
+    (run, only_whitespace)
+}
+
+/// ノードの手前（同じ行）に空白以外があるか。無ければ行頭。
+fn prefix_is_whitespace(node: &RedNode) -> bool {
+    let mut token = node.first_token().and_then(|token| token.prev_token());
+    while let Some(current) = token {
+        let text = current.text();
+        match text.rfind('\n') {
+            Some(position) => {
+                return text[position + 1..]
+                    .chars()
+                    .all(|ch| ch == ' ' || ch == '\t')
+            }
+            None => {
+                if !text.chars().all(|ch| ch == ' ' || ch == '\t') {
+                    return false;
+                }
+            }
+        }
+        token = current.prev_token();
+    }
+
+    true
+}
+
+/// ノードの行の字下げ（行頭からノードまでの先頭の空白）。
+pub(crate) fn line_indent(node: &RedNode) -> String {
+    line_prefix(node).0
 }
 
 /// 字下げ 1 段分。文書から推定し、推定できなければ 2 スペース。
@@ -32,16 +90,13 @@ pub(crate) fn indent_unit(root: &RedNode) -> String {
     }
 }
 
-/// 指定位置の直前にある字下げ。行頭でなければ空。
-pub(crate) fn indent_before(root: &RedNode, offset: usize) -> String {
-    let text = root.text().to_string();
-    let head = &text[..offset];
-    let trimmed = head.trim_end_matches([' ', '\t']);
-    if !trimmed.ends_with('\n') {
-        return String::new();
+/// ノードの直前にある字下げ。行頭でなければ空。
+pub(crate) fn indent_before(node: &RedNode) -> String {
+    if prefix_is_whitespace(node) {
+        line_indent(node)
+    } else {
+        String::new()
     }
-
-    head[trimmed.len()..].to_string()
 }
 
 /// コンテナの要素を置く字下げ。コンテナの行の字下げに 1 段を足す。
@@ -49,22 +104,16 @@ pub(crate) fn container_indent(container: &RedNode, base: &str) -> String {
     format!("{base}{}", indent_unit(&root_of(container)))
 }
 
-/// 指定位置が行頭（行の先頭から空白だけ）か。
-pub(crate) fn is_at_line_start(root: &RedNode, offset: usize) -> bool {
-    let text = root.text().to_string();
-    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
-
-    text[line_start..offset]
-        .chars()
-        .all(|ch| ch == ' ' || ch == '\t')
+/// ノードが行頭（行の先頭から空白だけ）から始まるか。
+pub(crate) fn is_at_line_start(node: &RedNode) -> bool {
+    prefix_is_whitespace(node)
 }
 
 /// 空のコンテナへ最初の要素を入れるときの字下げ。
 ///
 /// コンテナが文書に繋がっている場合は、その行の字下げに 1 段を足す。
 pub(crate) fn empty_container_indent(container: &RedNode) -> String {
-    let root = root_of(container);
-    let base = line_indent(&root, container.text_range().start().into());
+    let base = line_indent(container);
 
     container_indent(container, &base)
 }

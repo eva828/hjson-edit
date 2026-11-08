@@ -241,10 +241,7 @@ impl HjsonDocument {
         let resolved = crate::high_level::resolve::PathResolver::new(self.syntax_root().clone())
             .resolve_node(path)?;
 
-        Ok(crate::high_level::indent::is_at_line_start(
-            self.syntax_root(),
-            resolved.text_range().start().into(),
-        ))
+        Ok(crate::high_level::indent::is_at_line_start(&resolved))
     }
 
     /// この文書で検出した改行コード。

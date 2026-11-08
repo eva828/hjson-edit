@@ -848,10 +848,7 @@ fn closing_indent_of(
     if at_line_start {
         text
     } else {
-        crate::high_level::indent::line_indent(
-            &crate::high_level::indent::root_of(container),
-            container.text_range().start().into(),
-        )
+        crate::high_level::indent::line_indent(container)
     }
 }
 

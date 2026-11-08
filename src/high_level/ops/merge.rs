@@ -155,10 +155,7 @@ fn merge_from_root(
         HjsonEditError::MergeConflict(format!("cannot merge: {path:?} is not an object"))
     })?;
     // 対象のコンテナは行の途中から始まることもあるため、字下げをここで求めて渡す
-    let base_indent = crate::high_level::indent::line_indent(
-        &crate::high_level::indent::root_of(&target),
-        target_object.text_range().start().into(),
-    );
+    let base_indent = crate::high_level::indent::line_indent(&target_object);
     let merged = merge_objects(&target_object, source_object, &base_indent, newline)?;
 
     Ok(target_object.replace_with(merged))

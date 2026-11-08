@@ -1313,7 +1313,14 @@ impl Key {
                         | SyntaxKind::Null => return Some(text),
                         _ => return None,
                     };
-                    Some(style.decode_body(&text, token_column(&token)))
+                    // 列は Block の本文を読み取るときだけ必要
+                    // （引用符なしのキーで列を数えると、1 行の文書で走査が二次関数的になる）
+                    let column = if style == QuoteStyle::Block {
+                        token_column(&token)
+                    } else {
+                        0
+                    };
+                    Some(style.decode_body(&text, column))
                 }
                 _ => None,
             })
