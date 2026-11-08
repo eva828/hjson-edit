@@ -44,7 +44,7 @@ pub fn edit_command() -> Command {
             Arg::new("file")
                 .required(true)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
-                .help("HJSON file to read"),
+                .help("HJSON file to read (use - for standard input)"),
         )
         .arg(
             Arg::new("set")
@@ -454,6 +454,7 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     use std::path::PathBuf;
 
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
+    super::reject_in_place_stdin(matches, path)?;
     let content = super::read_input(path)?;
 
     let mut doc = match HjsonDocument::parse(&content) {

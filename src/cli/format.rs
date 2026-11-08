@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
     let path: &PathBuf = matches.get_one("file").context("missing file argument")?;
+    super::reject_in_place_stdin(matches, path)?;
     let content = super::read_input(path)?;
 
     let doc = match HjsonDocument::parse(&content) {

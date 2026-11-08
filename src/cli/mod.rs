@@ -8,24 +8,54 @@ mod edit;
 mod format;
 mod parse;
 
-/// ファイルを読み込む前にサイズを検査する。
+/// 標準入力をファイル名として表す引数。
+pub(crate) fn is_stdin(path: &Path) -> bool {
+    path == Path::new("-")
+}
+
+/// 入力を読み込む前にサイズを検査する。
 ///
 /// 上限を超える入力は位置情報を正しく扱えないため、読み込まずにエラーを返す。
+/// `-` は標準入力として読む。
 pub(crate) fn read_input(path: &Path) -> Result<String> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
-    let len = metadata.len();
-    if len > MAX_INPUT_BYTES as u64 {
-        anyhow::bail!("Input too long: {len} bytes, limit is {MAX_INPUT_BYTES} bytes");
-    }
+    let text = if is_stdin(path) {
+        use std::io::Read;
 
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+        let mut text = String::new();
+        std::io::stdin()
+            .lock()
+            .take(MAX_INPUT_BYTES as u64 + 1)
+            .read_to_string(&mut text)
+            .context("Failed to read standard input")?;
+        if text.len() > MAX_INPUT_BYTES {
+            anyhow::bail!("Input too long: limit is {MAX_INPUT_BYTES} bytes");
+        }
+        text
+    } else {
+        let metadata = std::fs::metadata(path)
+            .with_context(|| format!("Failed to read file: {}", path.display()))?;
+        let len = metadata.len();
+        if len > MAX_INPUT_BYTES as u64 {
+            anyhow::bail!("Input too long: {len} bytes, limit is {MAX_INPUT_BYTES} bytes");
+        }
 
-    // BOM はファイル読み込みの層で除去する（パーサーは通常の文字として扱う）。
+        std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {}", path.display()))?
+    };
+
+    // BOM は読み込みの層で除去する（パーサーは通常の文字として扱う）。
     Ok(text
         .strip_prefix('\u{feff}')
         .map_or(text.clone(), str::to_string))
+}
+
+/// `--in-place` を標準入力と一緒に使えないことを確かめる。
+pub(crate) fn reject_in_place_stdin(matches: &clap::ArgMatches, path: &Path) -> Result<()> {
+    if matches.get_flag("in-place") && is_stdin(path) {
+        anyhow::bail!("--in-place cannot be used with standard input");
+    }
+
+    Ok(())
 }
 
 /// ファイルへ書き込む。
@@ -126,7 +156,7 @@ fn parse_command() -> Command {
             Arg::new("file")
                 .required(true)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
-                .help("HJSON file to read"),
+                .help("HJSON file to read (use - for standard input)"),
         )
         .arg(
             Arg::new("ast")
@@ -162,7 +192,7 @@ fn format_command() -> Command {
             Arg::new("file")
                 .required(true)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
-                .help("HJSON file to read"),
+                .help("HJSON file to read (use - for standard input)"),
         )
         .arg(
             Arg::new("indent-style")

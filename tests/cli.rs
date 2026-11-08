@@ -852,3 +852,52 @@ fn cli_edit_batch_set_creates_nested_paths() {
 
     assert_eq!(stdout, "{\n  x: 1\n  a: {b: {c: 1}}\n  d: [1,2]\n}\n");
 }
+
+#[test]
+fn cli_format_reads_standard_input() {
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["format", "-"])
+        .write_stdin("{a:   1}")
+        .assert()
+        .success()
+        .stdout("{\n  a: 1\n}\n");
+}
+
+#[test]
+fn cli_edit_reads_standard_input() {
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--set", "b", "2", "-"])
+        .write_stdin("{\n  a: 1\n}\n")
+        .assert()
+        .success()
+        .stdout("{\n  a: 1\n  b: 2\n}\n");
+}
+
+#[test]
+fn cli_parse_reads_standard_input() {
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["parse", "--simple", "-"])
+        .write_stdin("{\n  a: 1\n}\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Object"));
+}
+
+#[test]
+fn cli_in_place_rejects_standard_input() {
+    for args in [
+        vec!["format", "--in-place", "-"],
+        vec!["edit", "--in-place", "--set", "a", "1", "-"],
+    ] {
+        Command::cargo_bin("hjson-edit")
+            .unwrap()
+            .args(args)
+            .write_stdin("{\n  a: 1\n}\n")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("standard input"));
+    }
+}
