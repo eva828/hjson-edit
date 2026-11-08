@@ -533,6 +533,10 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
         doc.verify_value_edits(&original, &value_edits)?;
     }
 
+    // ここから先は整形だけを行う。整形も値とコメントを変えてはいけないので、
+    // 値を検証した後は編集時と同じ設定で検証を戻す。
+    doc = doc.verify_edits(verify);
+
     // 既定は保存重視: 複数行になった要素だけを整える。--format（または整形オプションの
     // 明示指定）があるときは、変更したコンテナを整形する。
     let config = doc.current_format_config();

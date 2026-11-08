@@ -901,3 +901,75 @@ fn cli_in_place_rejects_standard_input() {
             .stderr(predicate::str::contains("standard input"));
     }
 }
+
+#[test]
+fn cli_edit_format_keeps_the_document_footer() {
+    let input = "name: app\nserver: {\n  host: localhost\n}\n// footer\n";
+    let stdout = edit_stdout(&["edit", "--format", "--set", "a", "9"], input);
+
+    assert_eq!(
+        stdout,
+        "name: app\nserver: {\n  host: localhost\n}\na: 9\n// footer\n"
+    );
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_format_with_no_verify_keeps_the_document_footer() {
+    let input = "name: app\nserver: {\n  host: localhost\n}\n// footer\n";
+    let stdout = edit_stdout(
+        &["edit", "--format", "--no-verify", "--set", "a", "9"],
+        input,
+    );
+
+    assert_eq!(
+        stdout,
+        "name: app\nserver: {\n  host: localhost\n}\na: 9\n// footer\n"
+    );
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_format_keeps_the_footer_of_a_braceless_document() {
+    let input = "a: 1\n// footer\n";
+
+    assert_eq!(format_stdout(&["format"], input), input);
+}
+
+#[test]
+fn cli_edit_format_indents_a_nested_container_in_a_braceless_document() {
+    let input = "name: app\nserver: {\n  host: localhost\n}\n";
+    let stdout = edit_stdout(&["edit", "--format", "--set", "server.port", "8080"], input);
+
+    assert_eq!(
+        stdout,
+        "name: app\nserver: {\n  host: localhost\n  port: 8080\n}\n"
+    );
+    assert_parses(&stdout);
+}
+
+#[test]
+fn cli_edit_format_verifies_the_formatting_phase() {
+    // インラインコンテナのカンマ直後のコメントは整形で重複する（既知の整形バグ）。
+    // 整形も検証の対象なので、--format は fail-closed で失敗する。
+    // （検証を整形フェーズに戻さないとこのコマンドは成功してしまう）
+    let input = "{a: 1, /* c */ b: 2}\n";
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{input}").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--format", "--set", "x", "1"])
+        .arg(file.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("comments changed"));
+
+    // --no-verify では整形結果がそのまま出る（検証の有無で挙動が変わる）
+    let stdout = edit_stdout(
+        &["edit", "--format", "--no-verify", "--set", "x", "1"],
+        input,
+    );
+    assert!(stdout.contains("/* c */"), "{stdout}");
+}
