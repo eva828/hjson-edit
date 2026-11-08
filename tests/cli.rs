@@ -1039,3 +1039,13 @@ fn cli_output_refuses_a_read_only_file() {
 
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\n");
 }
+
+#[test]
+fn cli_edit_format_emits_a_comment_after_a_comma_once() {
+    // カンマ直後のコメントは前の要素の行末コメントとして 1 回だけ出る
+    let input = "{a: 1, /* c */ b: 2}\n";
+    let stdout = edit_stdout(&["edit", "--format", "--set", "x", "1"], input);
+
+    assert_eq!(stdout.matches("/* c */").count(), 1, "{stdout}");
+    assert_parses(&stdout);
+}

@@ -1803,12 +1803,18 @@ fn collect_leading_trivia(node: &RedNode, enabled: bool) -> Vec<Trivia> {
     }
     items.reverse();
 
-    // 直前の要素の行末の改行は、その要素の trailing に属する
-    if let Some(position) = items
+    // 直前の要素の行末の改行は、その要素の trailing に属する。
+    // 改行が無くコメントを含む場合、その並びは前の要素と同じ行にあるので、
+    // すべてその要素の trailing のもの（同じコメントを二重に数えない）。
+    match items
         .iter()
         .position(|item| matches!(item, Trivia::Newline { .. }))
     {
-        items.drain(..=position);
+        Some(position) => {
+            items.drain(..=position);
+        }
+        None if items.iter().any(|item| matches!(item, Trivia::Comment(_))) => items.clear(),
+        None => {}
     }
 
     items
