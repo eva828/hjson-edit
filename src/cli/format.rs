@@ -60,6 +60,13 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
         result.push_str(config.newline());
     }
 
-    print!("{}", result);
+    if matches.get_flag("in-place") {
+        super::write_atomic(path, &result)?;
+    } else if let Some(output) = matches.get_one::<PathBuf>("output") {
+        super::write_atomic(output, &result)?;
+    } else {
+        print!("{}", result);
+    }
+
     Ok(())
 }

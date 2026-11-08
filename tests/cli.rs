@@ -757,3 +757,78 @@ fn cli_set_with_an_equal_value_keeps_the_document() {
         assert_eq!(stdout, input, "value: {value}");
     }
 }
+
+#[test]
+fn cli_format_in_place_rewrites_the_file() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "{{a:   1}}").unwrap();
+    temp_file.flush().unwrap();
+    let path = temp_file.path().to_str().unwrap().to_string();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["format", "--in-place"])
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(content, "{\n  a: 1\n}\n");
+}
+
+#[test]
+fn cli_format_output_writes_another_file() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "{{a:   1}}").unwrap();
+    temp_file.flush().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.hjson");
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["format", "--output"])
+        .arg(&output)
+        .arg(temp_file.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "{\n  a: 1\n}\n");
+    assert_eq!(
+        std::fs::read_to_string(temp_file.path()).unwrap(),
+        "{a:   1}\n"
+    );
+}
+
+#[test]
+fn cli_format_in_place_and_output_conflict() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "{{a: 1}}").unwrap();
+    temp_file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["format", "--in-place", "--output", "out.hjson"])
+        .arg(temp_file.path())
+        .assert()
+        .failure()
+        .code(2);
+}
+
+#[test]
+fn cli_edit_in_place_keeps_the_file_on_error() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "{{a: 1}}").unwrap();
+    temp_file.flush().unwrap();
+    let path = temp_file.path().to_str().unwrap().to_string();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--in-place", "--set", "a", "[1"])
+        .arg(&path)
+        .assert()
+        .failure();
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{a: 1}\n");
+}

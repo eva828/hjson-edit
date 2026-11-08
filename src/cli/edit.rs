@@ -588,11 +588,9 @@ fn write_output(
     };
 
     if matches.get_flag("in-place") {
-        std::fs::write(path, &result)
-            .with_context(|| format!("Failed to write file: {}", path.display()))?;
+        super::write_atomic(path, &result)?;
     } else if let Some(output_path) = matches.get_one::<PathBuf>("output") {
-        std::fs::write(output_path, &result)
-            .with_context(|| format!("Failed to write file: {}", output_path.display()))?;
+        super::write_atomic(output_path, &result)?;
     } else {
         print!("{result}");
     }

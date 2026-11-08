@@ -28,6 +28,65 @@ pub(crate) fn read_input(path: &Path) -> Result<String> {
         .map_or(text.clone(), str::to_string))
 }
 
+/// ファイルへ書き込む。
+///
+/// 同じディレクトリの一時ファイルへ書いてから rename する。書き込みに失敗しても
+/// 元のファイルを壊さない（`fs::write` は書き込み前に切り詰めるため）。
+pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
+    use std::io::Write;
+
+    // シンボリックリンクは参照先を置き換える（rename はリンク自体を置き換えてしまう）
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let directory = target
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
+    let name = target
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid file path: {}", target.display()))?
+        .to_string_lossy()
+        .into_owned();
+
+    let mut attempt = 0u32;
+    let (temp_path, mut file) = loop {
+        let candidate = directory.join(format!(".{name}.{}.{attempt}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => break (candidate, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && attempt < 100 => {
+                attempt += 1;
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to write file: {}", target.display()))
+            }
+        }
+    };
+
+    let written = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all());
+    drop(file);
+
+    let result = written.and_then(|()| {
+        if let Ok(metadata) = std::fs::metadata(&target) {
+            std::fs::set_permissions(&temp_path, metadata.permissions())?;
+        }
+        std::fs::rename(&temp_path, &target)
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+
+    result.with_context(|| format!("Failed to write file: {}", target.display()))
+}
+
 /// パース時に読み飛ばした入力を警告として stderr に出す。
 pub(crate) fn warn_skipped_input(document: &hjson_edit::HjsonDocument) {
     for warning in document.warnings() {
@@ -128,5 +187,19 @@ fn format_command() -> Command {
                 .long("no-verify")
                 .action(ArgAction::SetTrue)
                 .help("Skip validating that the result keeps the values and comments"),
+        )
+        .arg(
+            Arg::new("in-place")
+                .long("in-place")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("output")
+                .help("Write the result back to the input file"),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .value_name("output")
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .help("Write the result to this file instead of stdout"),
         )
 }

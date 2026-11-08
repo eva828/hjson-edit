@@ -71,7 +71,7 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 | コマンド | 主なオプション |
 |---|---|
 | `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
-| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定）, `--no-verify` |
+| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定）, `--no-verify`, `--in-place`, `--output <file>` |
 | `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
 
 `PATH` は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（配列の末尾）、
@@ -103,7 +103,11 @@ hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
 引用符なし文字列は行末までを飲み込むため、その直後への `:inline` はエラーになる。
 
 `--comment-style` と `--string-style` はその実行全体に適用する。
-`--no-verify` は編集ごとの検証（再パース・値の一致・コメントの保存）を無効化する。
+`--no-verify` は編集の検証（再パース・値の一致・コメントの保存）を無効化する。
+
+`--in-place` と `--output` は `edit` と `format` の両方で使える。書き込みは同じディレクトリの一時
+ファイルを作ってから置き換えるため、途中で失敗しても元のファイルは壊れない
+（`format f > f` のような自己リダイレクトでファイルを空にしないために使う）。
 
 ### ライブラリ
 
