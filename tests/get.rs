@@ -171,3 +171,37 @@ fn many_unique_keys_keep_the_source_order() {
         );
     }
 }
+
+#[test]
+fn get_returns_the_last_value_of_a_duplicate_key() {
+    // 値の層（後勝ち）に合わせる
+    let doc = HjsonDocument::parse("{\n  a: 1\n  a: 2\n}\n").unwrap();
+
+    let value = doc.get(HjsonObjectPath::parse("a").unwrap()).unwrap();
+
+    assert_eq!(value, hjson_edit::high_level::value::HjsonValue::Integer(2));
+}
+
+#[test]
+fn get_into_a_duplicate_container_uses_the_last_occurrence() {
+    let doc = HjsonDocument::parse("{\n  o: { x: 1 }\n  o: { x: 2 }\n}\n").unwrap();
+
+    let value = doc.get(HjsonObjectPath::parse("o.x").unwrap()).unwrap();
+
+    assert_eq!(value, hjson_edit::high_level::value::HjsonValue::Integer(2));
+}
+
+#[test]
+fn get_of_a_duplicate_key_agrees_with_the_document_value() {
+    let doc = HjsonDocument::parse("{\n  a: 1\n  a: 2\n}\n").unwrap();
+
+    let by_path = doc.get(HjsonObjectPath::parse("a").unwrap()).unwrap();
+    let whole = doc.get(HjsonObjectPath::parse("").unwrap()).unwrap();
+
+    match whole {
+        hjson_edit::high_level::value::HjsonValue::Object(entries) => {
+            assert_eq!(by_path, entries[0].1);
+        }
+        other => panic!("unexpected document value: {other:?}"),
+    }
+}

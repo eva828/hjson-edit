@@ -188,10 +188,12 @@ impl PathResolver {
                 self.resolve_one(&child, segment)
             }
             SyntaxKind::Object => match segment {
+                // 重複キーは値の層（後勝ち）に合わせて最後の出現を指す
                 PathSegment::Key(key) => node
                     .children()
                     .filter(|child| child.kind() == SyntaxKind::Member)
-                    .find(|member| self.match_key(member, key))
+                    .filter(|member| self.match_key(member, key))
+                    .last()
                     .and_then(|member| member.children().find(|c| c.kind() == SyntaxKind::Value)),
                 _ => None,
             },
