@@ -235,9 +235,22 @@ fn collect_container_comment_slots(
 ) -> Result<(), HjsonEditError> {
     let spans = crate::high_level::ops::insert::container_slots(container)?;
     let children = children_of(container);
+    // 要素ノードは 1 回だけ集める（要素ごとにメンバー一覧を作ると要素数の 2 乗になる）
+    let element_kind = match container.kind() {
+        SyntaxKind::Object => SyntaxKind::Member,
+        SyntaxKind::Array => SyntaxKind::Value,
+        _ => return Ok(()),
+    };
+    let elements: Vec<RedNode> = container
+        .children()
+        .filter(|child| child.kind() == element_kind)
+        .collect();
 
     for (index, span) in spans.iter().enumerate() {
-        let Some(element_path) = element_path(container, index, path)? else {
+        let Some(element) = elements.get(index) else {
+            continue;
+        };
+        let Some(element_path) = element_path_of(container, element, index, path)? else {
             continue;
         };
 
@@ -247,7 +260,7 @@ fn collect_container_comment_slots(
         let inline = comments_in(&children, span.trail());
         slots.push((CommentSlot::Inline(element_path.clone()), inline));
 
-        if let Some(child) = element_container(container, index) {
+        if let Some(child) = element_container_of(element) {
             collect_container_comment_slots(&child, &element_path, slots)?;
         }
     }
@@ -276,9 +289,10 @@ fn comments_in(
         .collect()
 }
 
-/// コンテナ内の要素のパス。要素が取れない場合は `None`。
-fn element_path(
+/// 要素ノードのパス。
+fn element_path_of(
     container: &RedNode,
+    element: &RedNode,
     index: usize,
     prefix: &HjsonObjectPath,
 ) -> Result<Option<HjsonObjectPath>, HjsonEditError> {
@@ -286,12 +300,7 @@ fn element_path(
 
     match container.kind() {
         SyntaxKind::Object => {
-            let object = crate::ast::Object::cast(container.clone())?;
-            let members = object.members();
-            let Some(member) = members.get(index) else {
-                return Ok(None);
-            };
-            let Some(key) = member.member_key() else {
+            let Some(key) = crate::ast::Member::cast(element.clone())?.member_key() else {
                 return Ok(None);
             };
             segments.push(crate::high_level::path::PathSegment::Key(key));
@@ -307,24 +316,17 @@ fn element_path(
     Ok(Some(HjsonObjectPath::from_segments(segments)))
 }
 
-/// コンテナ内の要素が中に持つコンテナ。
-fn element_container(container: &RedNode, index: usize) -> Option<RedNode> {
-    let element = match container.kind() {
-        SyntaxKind::Object => {
-            let object = crate::ast::Object::cast(container.clone()).ok()?;
-            let member = object.members().get(index)?.syntax().clone();
-            member
-                .children()
-                .find(|child| child.kind() == SyntaxKind::Value)?
-        }
-        SyntaxKind::Array => {
-            let array = crate::ast::Array::cast(container.clone()).ok()?;
-            array.items().get(index)?.syntax().clone()
-        }
+/// 要素ノードが中に持つコンテナ。
+fn element_container_of(element: &RedNode) -> Option<RedNode> {
+    let value = match element.kind() {
+        SyntaxKind::Member => element
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Value)?,
+        SyntaxKind::Value => element.clone(),
         _ => return None,
     };
 
-    let body = crate::high_level::resolve::resolve_body(&element).ok()?;
+    let body = crate::high_level::resolve::resolve_body(&value).ok()?;
     matches!(body.kind(), SyntaxKind::Object | SyntaxKind::Array).then_some(body)
 }
 
