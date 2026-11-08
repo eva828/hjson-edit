@@ -6,6 +6,7 @@ use std::path::Path;
 
 mod edit;
 mod format;
+mod get;
 mod parse;
 
 /// 標準入力をファイル名として表す引数。
@@ -135,6 +136,7 @@ pub(crate) fn warn_skipped_input(document: &hjson_edit::HjsonDocument) {
 
 pub use edit::edit_command;
 pub use format::run_format;
+pub use get::run_get;
 pub use parse::run_parse;
 
 pub fn run() -> anyhow::Result<()> {
@@ -144,7 +146,10 @@ pub fn run() -> anyhow::Result<()> {
         Some(("parse", sub_matches)) => run_parse(sub_matches),
         Some(("format", sub_matches)) => run_format(sub_matches),
         Some(("edit", sub_matches)) => edit::run_edit(sub_matches),
-        _ => anyhow::bail!("Usage: hjson-edit <command> [args]\nCommands: parse, format, edit"),
+        Some(("get", sub_matches)) => run_get(sub_matches),
+        _ => {
+            anyhow::bail!("Usage: hjson-edit <command> [args]\nCommands: parse, format, edit, get")
+        }
     }
 }
 
@@ -156,6 +161,7 @@ pub fn build_cli() -> Command {
         .subcommand(parse_command())
         .subcommand(format_command())
         .subcommand(edit_command())
+        .subcommand(get::get_command())
 }
 
 fn parse_command() -> Command {
