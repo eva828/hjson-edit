@@ -273,18 +273,28 @@ fn containing_element(node: &RedNode) -> Option<RedNode> {
 ///
 /// ブレースレスオブジェクトは文書直下にしか現れず、深さ 0 で整形される。
 fn format_depth(container: &RedNode) -> Result<usize, HjsonEditError> {
-    let is_document_body = container
-        .parent()
-        .is_some_and(|parent| parent.kind() == SyntaxKind::Root);
+    let is_braceless_document_body = |node: &RedNode| {
+        node.kind() == SyntaxKind::Object
+            && node
+                .parent()
+                .is_some_and(|parent| parent.kind() == SyntaxKind::Root)
+            && AstObject::cast(node.clone())
+                .map(|object| object.delimiter_style == DelimiterStyle::Braceless)
+                .unwrap_or(false)
+    };
 
-    if is_document_body && container.kind() == SyntaxKind::Object {
-        let object = AstObject::cast(container.clone())?;
-        if object.delimiter_style == DelimiterStyle::Braceless {
-            return Ok(0);
-        }
+    if is_braceless_document_body(container) {
+        return Ok(0);
     }
 
-    Ok(receiving_container_depth(container))
+    // ブレースレス文書の本文は 1 段として数えない（`Document::format_at` と同じ規則）
+    let braceless_documents = container
+        .ancestors()
+        .skip(1)
+        .filter(|node| is_braceless_document_body(node))
+        .count();
+
+    Ok(receiving_container_depth(container) - braceless_documents)
 }
 
 #[cfg(test)]

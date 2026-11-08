@@ -902,16 +902,14 @@ impl AstNode for Object {
                 SyntaxKind::RBrace,
             )
         };
-        let trailing_trivia = if is_root_child {
-            Vec::new()
-        } else {
-            collect_container_trailing_trivia(
-                &node,
-                SyntaxKind::Member,
-                SyntaxKind::LBrace,
-                SyntaxKind::RBrace,
-            )
-        };
+        // コンテナ自身の後続トリビアはコンテナノードの中にある（ルート直下でも同じ）。
+        // 先頭トリビアだけは文書側（Root）が持つ。
+        let trailing_trivia = collect_container_trailing_trivia(
+            &node,
+            SyntaxKind::Member,
+            SyntaxKind::LBrace,
+            SyntaxKind::RBrace,
+        );
         let empty_body_insert_index = node
             .children_with_tokens()
             .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBrace))
@@ -1028,16 +1026,12 @@ impl AstNode for Array {
                 SyntaxKind::RBracket,
             )
         };
-        let trailing_trivia = if is_root_child {
-            Vec::new()
-        } else {
-            collect_container_trailing_trivia(
-                &node,
-                SyntaxKind::Value,
-                SyntaxKind::LBracket,
-                SyntaxKind::RBracket,
-            )
-        };
+        let trailing_trivia = collect_container_trailing_trivia(
+            &node,
+            SyntaxKind::Value,
+            SyntaxKind::LBracket,
+            SyntaxKind::RBracket,
+        );
         let empty_body_insert_index = node
             .children_with_tokens()
             .position(|child| matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::RBracket))
