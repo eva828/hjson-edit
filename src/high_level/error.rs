@@ -15,7 +15,7 @@ pub enum HjsonEditError {
     #[error("Path not found: {}", format_path(.0))]
     PathNotFound(HjsonObjectPath),
     /// パスの書式が不正。
-    #[error("Invalid path: {}", format_text(.0))]
+    #[error("Invalid path: {}", format_plain(.0))]
     InvalidPath(String),
     /// 期待した構造と違う。
     #[error("Unexpected structure: expected {expected:?}, found {found:?}")]
@@ -100,11 +100,24 @@ pub enum HjsonEditError {
 fn format_path(path: &HjsonObjectPath) -> String {
     let segments = path.segments();
     if segments.len() <= MAX_ERROR_PATH_SEGMENTS {
-        return format!("{segments:?}");
+        return path.to_string();
     }
 
-    let head = &segments[..MAX_ERROR_PATH_SEGMENTS];
-    format!("{head:?} … ({} segments)", segments.len())
+    let head = HjsonObjectPath::from_segments(segments[..MAX_ERROR_PATH_SEGMENTS].to_vec());
+    format!("{head} … ({} segments)", segments.len())
+}
+
+/// 利用者が書いた文字列を、引用符を付けずに省略して表示する。
+fn format_plain(text: &str) -> String {
+    let mut chars = text.chars();
+    let head: String = chars.by_ref().take(MAX_ERROR_TEXT_CHARS).collect();
+    let head_len = head.chars().count();
+    let total = head_len + chars.count();
+    if total == head_len {
+        return head;
+    }
+
+    format!("{head} … ({total} chars)")
 }
 
 /// 過大な入力を、先頭のみを残して省略した表示にする。

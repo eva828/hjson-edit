@@ -71,7 +71,7 @@ impl TryFrom<&str> for HjsonCommentPath {
             Ok(Self::ContainerFooter(parse_element_path(stripped)?))
         } else if raw.contains(':') {
             Err(HjsonEditError::InvalidPath(format!(
-                "unknown comment suffix in path: {raw:?}"
+                "{raw}: unknown comment suffix in a comment path"
             )))
         } else {
             Ok(Self::Before(parse_element_path(raw)?))
@@ -182,17 +182,17 @@ impl HjsonObjectPath {
 
         if path.starts_with('.') {
             return Err(HjsonEditError::InvalidPath(format!(
-                "path must not start with '.': {path:?}"
+                "{path}: a path must not start with '.'"
             )));
         }
         if path.ends_with('.') {
             return Err(HjsonEditError::InvalidPath(format!(
-                "path must not end with '.': {path:?}"
+                "{path}: a path must not end with '.'"
             )));
         }
         if path.contains("..") {
             return Err(HjsonEditError::InvalidPath(format!(
-                "path must not contain consecutive dots: {path:?}"
+                "{path}: a path must not contain consecutive dots"
             )));
         }
 
@@ -238,7 +238,9 @@ impl HjsonObjectPath {
 
                 // Expect closing bracket
                 if chars.peek() != Some(&']') {
-                    return Err(HjsonEditError::InvalidPath(path.clone()));
+                    return Err(HjsonEditError::InvalidPath(format!(
+                        "{path}: expected ']' in an array segment"
+                    )));
                 }
                 chars.next(); // consume ']'
 
@@ -247,14 +249,18 @@ impl HjsonObjectPath {
                     // `[-]` と `[+]` はどちらも末尾を指す
                     segments.push(PathSegment::Array(ArrayPathSegment::Push));
                 } else if let Some(stripped) = op_str.strip_prefix('+') {
-                    let idx: usize = stripped
-                        .parse()
-                        .map_err(|_| HjsonEditError::InvalidPath(path.clone()))?;
+                    let idx: usize = stripped.parse().map_err(|_| {
+                        HjsonEditError::InvalidPath(format!(
+                            "{path}: an array index must be a number"
+                        ))
+                    })?;
                     segments.push(PathSegment::Array(ArrayPathSegment::InsertAt(idx)));
                 } else {
-                    let idx: usize = op_str
-                        .parse()
-                        .map_err(|_| HjsonEditError::InvalidPath(path.clone()))?;
+                    let idx: usize = op_str.parse().map_err(|_| {
+                        HjsonEditError::InvalidPath(format!(
+                            "{path}: an array index must be a number"
+                        ))
+                    })?;
                     segments.push(PathSegment::Array(ArrayPathSegment::Index(idx)));
                 }
             }

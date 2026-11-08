@@ -562,6 +562,7 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::Object.into());
 
         // {
+        let opening = self.current().map_or(0, |token| token.offset);
         self.bump();
 
         if self.at(SyntaxKind::RBrace) {
@@ -584,13 +585,8 @@ impl<'a> Parser<'a> {
             }
 
             if self.is_at_end() {
-                let offset = if self.position > 0 {
-                    let prev = &self.tokens[self.position - 1];
-                    prev.offset + prev.text.len()
-                } else {
-                    0
-                };
-                self.error(offset, "Unclosed object, expected '}'");
+                // 原因は開き区切りにある（入力末尾を指しても直せない）
+                self.error(opening, "Unclosed object, expected '}'");
                 break;
             }
 
@@ -663,6 +659,7 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::Array.into());
 
         // [
+        let opening = self.current().map_or(0, |token| token.offset);
         self.bump();
 
         if self.at(SyntaxKind::RBracket) {
@@ -685,13 +682,7 @@ impl<'a> Parser<'a> {
             }
 
             if self.is_at_end() {
-                let offset = if self.position > 0 {
-                    let prev = &self.tokens[self.position - 1];
-                    prev.offset + prev.text.len()
-                } else {
-                    0
-                };
-                self.error(offset, "Unclosed array, expected ']'");
+                self.error(opening, "Unclosed array, expected ']'");
                 break;
             }
 
@@ -1032,6 +1023,23 @@ mod tests {
             .len()
             .into();
         assert_eq!(text_len, src.len());
+    }
+
+    #[test]
+    fn test_unclosed_container_errors_point_at_the_opening_delimiter() {
+        let src = "{\n  list: [web, api]\n}\n";
+        let parsed = parse_text(src);
+        let object_offset = 0;
+        let array_offset = src.find('[').unwrap();
+
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.offset == object_offset && e.message.contains("Unclosed object")));
+        assert!(parsed
+            .errors
+            .iter()
+            .any(|e| e.offset == array_offset && e.message.contains("Unclosed array")));
     }
 
     #[test]

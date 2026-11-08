@@ -110,3 +110,46 @@ fn warnings_count_characters_too() {
         warnings[0]
     );
 }
+
+#[test]
+fn path_not_found_prints_the_path_as_written() {
+    let doc = HjsonDocument::parse("{\n  server: {\n    port: 8080\n  }\n}\n").unwrap();
+    let error = doc
+        .get(HjsonObjectPath::parse("server.host").unwrap())
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("server.host"), "{error}");
+    assert!(!error.contains("Key("), "{error}");
+}
+
+#[test]
+fn invalid_target_prints_the_requested_path() {
+    let doc = HjsonDocument::parse("a: 1\n").unwrap();
+    let error = doc
+        .set(HjsonObjectPath::parse("a.b").unwrap(), 2)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("a.b"), "{error}");
+    assert!(!error.contains("Key("), "{error}");
+}
+
+#[test]
+fn invalid_path_reports_the_raw_path() {
+    let error = HjsonObjectPath::parse("a..b").unwrap_err().to_string();
+
+    assert!(error.contains("a..b"), "{error}");
+    assert!(error.contains("consecutive dots"), "{error}");
+    assert_eq!(error.matches("Invalid path:").count(), 1, "{error}");
+}
+
+#[test]
+fn invalid_comment_path_prints_the_raw_path() {
+    use hjson_edit::high_level::path::HjsonCommentPath;
+
+    let error = HjsonCommentPath::try_from("a:b").unwrap_err().to_string();
+
+    assert!(error.contains("a:b"), "{error}");
+    assert!(!error.contains("\"a:b\""), "{error}");
+}

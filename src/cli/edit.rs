@@ -224,12 +224,12 @@ fn format_config(matches: &ArgMatches, doc: &HjsonDocument) -> FormatConfig {
 
 /// コメントパスを解釈する。
 fn parse_comment_path(raw: &str) -> Result<HjsonCommentPath> {
-    HjsonCommentPath::try_from(raw).with_context(|| format!("Invalid comment path: {raw}"))
+    Ok(HjsonCommentPath::try_from(raw)?)
 }
 
 /// オブジェクトパスを解釈する。
 fn parse_object_path(raw: &str) -> Result<HjsonObjectPath> {
-    HjsonObjectPath::parse(raw.to_string()).with_context(|| format!("Invalid path: {raw}"))
+    Ok(HjsonObjectPath::parse(raw.to_string())?)
 }
 
 /// `--set` の値を HJSON の値として解釈する。

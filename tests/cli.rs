@@ -973,3 +973,35 @@ fn cli_edit_format_verifies_the_formatting_phase() {
     );
     assert!(stdout.contains("/* c */"), "{stdout}");
 }
+
+#[test]
+fn cli_error_messages_do_not_leak_internal_paths() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "a: 1").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--set", "a.b", "2"])
+        .arg(file.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid target a.b"))
+        .stderr(predicate::str::contains("Key(").not());
+}
+
+#[test]
+fn cli_invalid_path_is_not_doubled() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "a: 1").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .args(["edit", "--set", "a..b", "1"])
+        .arg(file.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid path: a..b"))
+        .stderr(predicate::str::contains("Invalid path:").count(1));
+}
