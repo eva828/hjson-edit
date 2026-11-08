@@ -196,11 +196,7 @@ pub(crate) fn rebuild_tree_with_remove(
     let ParentResolution { parent, last } = PathResolver::new(root.clone()).resolve_parent(path)?;
     let new_parent = apply_remove_to_node(&parent, &last)?;
 
-    if parent.kind() == SyntaxKind::Root {
-        Ok(new_parent)
-    } else {
-        Ok(parent.replace_with(new_parent))
-    }
+    Ok(parent.replace_with(new_parent))
 }
 
 /// Root / Value を降りて、実際に要素を書き換えるコンテナへ適用する。
@@ -599,7 +595,7 @@ fn with_segment(error: HjsonEditError, last: &PathSegment) -> HjsonEditError {
 }
 
 /// `set` が実際に書き込むコンテナ（実在する最深の祖先）のパス。
-fn receiving_container(root: &RedNode, path: &HjsonObjectPath) -> HjsonObjectPath {
+pub(crate) fn receiving_container(root: &RedNode, path: &HjsonObjectPath) -> HjsonObjectPath {
     let Some((parent, _)) = path.split_last() else {
         return path.clone();
     };
@@ -664,6 +660,84 @@ fn resolve_insert_style(
         (Prefer::Preserve, None) => None,
         _ => Some(resolve_quote_style(string_style, detected)),
     }
+}
+
+/// 既存の値を、パース済みの値ノードでそのまま差し替える。
+///
+/// 値の綴り（数値の表記・区切りの空白・引用符）をそのまま残す。
+pub(crate) fn replace_value_with_node(
+    root: &RedNode,
+    path: &HjsonObjectPath,
+    value: &RedNode,
+) -> Result<GreenNode, HjsonEditError> {
+    let ParentResolution { parent, last } = PathResolver::new(root.clone()).resolve_parent(path)?;
+    // 文書直下は Value に包まれていることがあるため、実体のコンテナまで降りる
+    let container = match parent.kind() {
+        SyntaxKind::Value | SyntaxKind::Root => resolve_body(&parent)?,
+        _ => parent,
+    };
+
+    let new_parent = match (&last, container.kind()) {
+        (PathSegment::Key(key), SyntaxKind::Object) => {
+            let mut green: GreenNode = container.green().clone().into_owned();
+            let mut found = false;
+            for child in container.children() {
+                if child.kind() != SyntaxKind::Member || !member_key_matches(&child, key) {
+                    continue;
+                }
+                let member = Member::cast(child.clone())?;
+                let Some(value_child) = member.value() else {
+                    continue;
+                };
+                let value_index = value_child.syntax().index();
+                let updated_member = child.green().clone().splice_children(
+                    value_index..value_index + 1,
+                    vec![value.green().clone().into()],
+                );
+                let member_index = child.index();
+                green = green
+                    .splice_children(member_index..member_index + 1, vec![updated_member.into()]);
+                found = true;
+            }
+
+            if !found {
+                return Err(HjsonEditError::PathNotFound(path.clone()));
+            }
+
+            green
+        }
+        (PathSegment::Array(seg), SyntaxKind::Array) => {
+            let index = match seg {
+                ArrayPathSegment::Index(index) => *index,
+                ArrayPathSegment::Push | ArrayPathSegment::InsertAt(_) => {
+                    return Err(HjsonEditError::InvalidTarget {
+                        path: path.clone(),
+                        reason: "set_value_text needs an existing element".to_string(),
+                    })
+                }
+            };
+            let current = container
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::Value)
+                .nth(index)
+                .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+            let at = current.index();
+
+            container
+                .green()
+                .clone()
+                .into_owned()
+                .splice_children(at..at + 1, vec![value.green().clone().into()])
+        }
+        _ => {
+            return Err(HjsonEditError::InvalidTarget {
+                path: path.clone(),
+                reason: "the parent is not a container".to_string(),
+            })
+        }
+    };
+
+    Ok(container.replace_with(new_parent))
 }
 
 #[cfg(test)]

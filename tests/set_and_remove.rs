@@ -410,3 +410,43 @@ fn verify_value_edits_rejects_a_lost_comment() {
         hjson_edit::HjsonEditError::InvalidEdit { .. }
     ));
 }
+
+/// 値テキストをそのまま差し替える（体裁を正規化しない）。
+#[test]
+fn set_value_text_keeps_the_text_as_written() {
+    for (input, path, text) in [
+        ("{\n  a: {x: 1, y: 2}\n}\n", "a", "{x: 1,  y: 2}"),
+        ("{\n  a: 1\n}\n", "a", "1.0"),
+        ("{\n  a: 1\n}\n", "a", "1e3"),
+        ("{\n  a: 1\n}\n", "a", "{ \"k\": 1 }"),
+        ("{\n  items: [1, 2]\n}\n", "items[0]", "2.50"),
+    ] {
+        let doc = HjsonDocument::parse(input).unwrap();
+        let updated = doc
+            .set_value_text(HjsonObjectPath::parse(path).unwrap(), text)
+            .unwrap();
+
+        assert!(
+            updated.to_string().contains(text),
+            "text: {text:?}, document: {:?}",
+            updated.to_string()
+        );
+    }
+}
+
+#[test]
+fn set_value_text_rejects_texts_that_cannot_be_placed_inline() {
+    let doc = HjsonDocument::parse("{\n  a: 1\n  b: 2\n}\n").unwrap();
+    for (path, text) in [
+        ("a", "1\n2"),
+        ("a", "a: 1"),
+        ("a", "hello world"),
+        ("a", "1 // comment"),
+        ("missing", "1"),
+    ] {
+        let result = doc
+            .clone()
+            .set_value_text(HjsonObjectPath::parse(path).unwrap(), text);
+        assert!(result.is_err(), "path: {path}, text: {text:?}");
+    }
+}

@@ -26,8 +26,8 @@ use crate::high_level::path::HjsonObjectPath;
 use crate::high_level::style::detect_newline_from_ast;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::parser::Parser;
-use crate::syntax::NewlineKind;
 use crate::syntax::MAX_INPUT_BYTES;
+use crate::syntax::{NewlineKind, SyntaxKind};
 use crate::RedNode;
 use line_index::LineIndex;
 use rowan::GreenNode;
@@ -242,6 +242,91 @@ impl HjsonDocument {
             .resolve_node(path)?;
 
         Ok(crate::high_level::indent::is_at_line_start(&resolved))
+    }
+
+    /// 既存の値を、値テキストのまま差し替える。
+    ///
+    /// [`HjsonDocumentEdit::set`](crate::high_level::ops::object::HjsonDocumentEdit::set) は
+    /// 値ノードを作り直すため、数値の表記（`1e3`）・区切りの空白（`{a: 1, b: 2}`）・
+    /// 引用符の使い方が正規化される。この関数はテキストを解釈した結果をそのまま置くので、
+    /// 書いたとおりの体裁が残る。
+    ///
+    /// インラインに置ける値だけを受け付ける。
+    ///
+    /// - 1 行であること（改行を含むテキストは [`HjsonEditError::InvalidEdit`]）
+    /// - コメントを含まないこと
+    /// - 引用符なし文字列で終わらないこと（直後の文字を飲み込むため）
+    /// - ブレースレス（`a: 1` のようなキー行）でないこと
+    ///
+    /// パスは既存の値を指している必要がある（新規作成は `set` を使う）。
+    ///
+    /// # Errors
+    ///
+    /// 上の条件を満たさないテキスト、パスが存在しない場合、検証に失敗した場合。
+    pub fn set_value_text(self, path: HjsonObjectPath, text: &str) -> Result<Self, HjsonEditError> {
+        if text.contains('\n') || text.contains('\r') {
+            return Err(HjsonEditError::InvalidEdit {
+                target: path.to_string(),
+                detail: "multi-line value text is not supported (use set instead)".to_string(),
+            });
+        }
+
+        let parsed = HjsonDocument::parse(text)?;
+        if parsed
+            .syntax_root()
+            .descendants_with_tokens()
+            .any(|element| match element {
+                rowan::NodeOrToken::Node(node) => node.kind().is_comment(),
+                rowan::NodeOrToken::Token(token) => token.kind().is_comment(),
+            })
+        {
+            return Err(HjsonEditError::InvalidEdit {
+                target: path.to_string(),
+                detail: "comments are not allowed in the value text".to_string(),
+            });
+        }
+
+        let body = crate::high_level::resolve::resolve_body(parsed.syntax_root())?;
+        let braceless_object = body.kind() == SyntaxKind::Object
+            && crate::ast::Object::cast(body.clone())
+                .map(|object| object.delimiter_style == crate::ast::DelimiterStyle::Braceless)
+                .unwrap_or(false);
+        if braceless_object {
+            return Err(HjsonEditError::InvalidEdit {
+                target: path.to_string(),
+                detail: "a key line cannot be a value (use set instead)".to_string(),
+            });
+        }
+        if body
+            .last_token()
+            .is_some_and(|token| token.kind() == SyntaxKind::UnquotedString)
+        {
+            return Err(HjsonEditError::InvalidEdit {
+                target: path.to_string(),
+                detail: "a value that ends with an unquoted string cannot be placed inline \
+                         (quote the string to place it inline)"
+                    .to_string(),
+            });
+        }
+
+        let root = self.syntax_root().clone();
+        let verify = self.current_verify();
+        let touched = crate::high_level::ops::object::receiving_container(&root, &path);
+        let updated = crate::high_level::ops::object::replace_value_with_node(&root, &path, &body)?;
+        let document = self.root(updated).note_touched(touched);
+
+        if verify {
+            let value = crate::high_level::value::HjsonValue::from_node(&body)?;
+            crate::high_level::verify::value_edit(
+                &root,
+                document.syntax_root(),
+                &path,
+                |previous| crate::high_level::value_ops::set_path(previous, &path, value),
+                crate::high_level::verify::EditedRegion::Node,
+            )?;
+        }
+
+        Ok(document)
     }
 
     /// この文書で検出した改行コード。
