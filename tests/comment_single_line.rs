@@ -4,8 +4,9 @@
 //! 直前の要素と同じ行にあるコメントは、その要素の `:inline` としてだけ数える。
 
 use hjson_edit::high_level::ops::comment::HjsonDocumentCommentEdit;
-use hjson_edit::high_level::path::HjsonCommentPath;
-use hjson_edit::HjsonDocument;
+use hjson_edit::high_level::ops::object::HjsonDocumentEdit;
+use hjson_edit::high_level::path::{HjsonCommentPath, HjsonObjectPath};
+use hjson_edit::{HjsonDocument, HjsonEditError, HjsonValue};
 
 fn comment_path(raw: &str) -> HjsonCommentPath {
     HjsonCommentPath::try_from(raw).unwrap()
@@ -59,4 +60,111 @@ fn inline_on_a_single_line_array_works_for_every_element() {
             "{slot} -> {updated}"
         );
     }
+}
+
+#[test]
+fn before_moves_a_comment_of_a_single_line_object_to_its_own_line() {
+    for (src, slot) in [
+        ("{a: 1, b: 2}\n", "a:before"),
+        ("{a: 1, b: 2}\n", "b:before"),
+        ("{a: 1\n  b: 2\n}\n", "a:before"),
+        ("[1, 2]\n", "[0]:before"),
+        ("[1, 2]\n", "[1]:before"),
+        ("x: {a: 1}\n", "x.a:before"),
+    ] {
+        let updated = doc(src)
+            .set_comment(comment_path(slot), "note")
+            .unwrap_or_else(|error| panic!("{src:?} {slot}: {error}"));
+
+        assert_eq!(
+            updated.get_comment(comment_path(slot)).unwrap().as_deref(),
+            Some("note"),
+            "{src:?} {slot} -> {updated}"
+        );
+        assert!(
+            updated.to_string().contains("\n  /* note */\n"),
+            "{src:?} {slot} -> {updated}"
+        );
+    }
+}
+
+#[test]
+fn before_keeps_the_values_of_a_single_line_object() {
+    let updated = doc("{a: 1, b: 2}\n")
+        .set_comment(comment_path("b:before"), "note")
+        .unwrap();
+
+    assert_eq!(
+        updated.get(HjsonObjectPath::parse("a").unwrap()).unwrap(),
+        HjsonValue::Integer(1)
+    );
+    assert_eq!(
+        updated.get(HjsonObjectPath::parse("b").unwrap()).unwrap(),
+        HjsonValue::Integer(2)
+    );
+}
+
+#[test]
+fn before_on_the_first_member_of_a_braceless_document_suggests_the_header() {
+    let error = doc("a: 1\nb: 2\n")
+        .set_comment(comment_path("a:before"), "note")
+        .unwrap_err();
+
+    assert!(
+        matches!(error, HjsonEditError::InvalidTarget { .. }),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("use :header"), "{error}");
+}
+
+#[test]
+fn append_adds_a_line_and_remove_clears_the_slot() {
+    let updated = doc("{a: 1, b: 2}\n")
+        .append_comment(comment_path("a:before"), "first")
+        .unwrap()
+        .append_comment(comment_path("a:before"), "second")
+        .unwrap();
+    assert_eq!(
+        updated
+            .get_comment(comment_path("a:before"))
+            .unwrap()
+            .as_deref(),
+        Some("first\nsecond")
+    );
+
+    let removed = updated.remove_comment(comment_path("a:before")).unwrap();
+    assert_eq!(removed.get_comment(comment_path("a:before")).unwrap(), None);
+    assert!(removed.all_comments().is_empty(), "{removed}");
+}
+
+#[test]
+fn setting_the_same_slot_twice_replaces_the_comment() {
+    let updated = doc("{a: 1, b: 2}\n")
+        .set_comment(comment_path("a:before"), "first")
+        .unwrap()
+        .set_comment(comment_path("a:before"), "second")
+        .unwrap();
+
+    assert_eq!(updated.all_comments(), vec!["second".to_string()]);
+}
+
+#[test]
+fn formatting_keeps_the_comment_of_a_single_line_document() {
+    let updated = doc("{a: 1, b: 2}\n")
+        .set_comment(comment_path("b:before"), "note")
+        .unwrap();
+    let config = updated.detected_format_config();
+    let formatted = updated
+        .format_container(&HjsonObjectPath::parse("").unwrap(), &config)
+        .unwrap();
+    let reparsed = HjsonDocument::parse(&formatted.to_string()).unwrap();
+
+    assert_eq!(
+        reparsed
+            .get_comment(comment_path("b:before"))
+            .unwrap()
+            .as_deref(),
+        Some("note"),
+        "{formatted}"
+    );
 }

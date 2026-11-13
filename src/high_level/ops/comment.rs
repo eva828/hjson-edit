@@ -23,6 +23,12 @@ use crate::{
 /// - `<path>:inline`: 要素の値の後ろのコメント
 /// - `<path>:footer`: コンテナの閉じ区切りの直前のコメント（要素の後の行）
 ///
+/// `:before` はコメントを独立した行に置く。要素が前の内容と同じ行にある場合は、
+/// 要素を新しい行へ移す。直前の要素と同じ行にあるコメントは、その要素の `:inline`
+/// としてだけ数える（整形の規則と同じ）。ブレースレス文書の先頭メンバーの前には
+/// 要素の外しか無いため、`:before` は [`HjsonEditError::InvalidTarget`] を返す。
+/// `:header` を使う。
+///
 /// `<path>` はメンバーでも配列要素でもよい。行末でしか終端できない値
 /// （引用符なし文字列）の直後にはコメントを置けないため、`:inline` は
 /// [`HjsonEditError::InvalidTarget`] を返す。`:before` を使うか値を引用符で囲む。
@@ -740,31 +746,74 @@ fn build_slot_comment(
 
     let existing_style = trivia_comment_style(&slot_trivia(&container, index, location)?);
     let existing_range = comment_range(&container, index, location)?;
-    let green_after_remove = match &existing_range {
-        Some(range) => container.green().splice_children(range.clone(), vec![]),
-        None => container.green().clone().into_owned(),
-    };
 
     let Some(comment) = comment else {
-        return Ok(container.replace_with(green_after_remove));
+        let green = match &existing_range {
+            Some(range) => container.green().splice_children(range.clone(), vec![]),
+            None => container.green().clone().into_owned(),
+        };
+        return Ok(container.replace_with(green));
     };
 
     let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
     let children = children_of(&container);
 
-    let (insert_at, inserted) = match location {
+    let (replace_from, replace_to, inserted) = match location {
         CommentLocation::Before => {
-            let mut inserted = make_comment_nodes(resolved_style, &comment, newline);
-            inserted.push(SyntaxKind::Newline.create_token(newline).into());
-            // 要素の字下げを新しい行にも引き継ぐ
-            if let Some(indent) = trailing_whitespace(&children, &span) {
-                inserted.push(indent);
+            // ブレースレス文書の先頭メンバーの前には、要素の外（文書ヘッダー）しか無い
+            if index == 0 && is_braceless_object(&container) {
+                return Err(HjsonEditError::InvalidTarget {
+                    path: path.clone(),
+                    reason: "a braceless document has no place before its first member; \
+                             use :header"
+                        .to_string(),
+                });
             }
-            let at = existing_range
+
+            let mut at = existing_range
                 .as_ref()
                 .map(|range| range.start)
                 .unwrap_or_else(|| span.elem().start);
-            (at, inserted)
+
+            // 直前の内容と同じ行にあるなら、コメントを行として切り離す。
+            // 同じ行のコメントは再パースすると前の要素の inline になり、before に戻らない。
+            let at_line_start = children[..at]
+                .iter()
+                .rev()
+                .find(|element| !is_whitespace(element))
+                .is_some_and(is_newline);
+
+            let indent = if at_line_start {
+                trailing_whitespace(&children, &span)
+                    .map(|indent| vec![indent])
+                    .unwrap_or_default()
+            } else {
+                // 行頭でない要素は、コンテナの行の字下げ + 1 段へ移す
+                let base = crate::high_level::indent::line_indent(&container);
+                let indent = crate::high_level::indent::container_indent(&container, &base);
+                let indent: GreenElement =
+                    SyntaxKind::Whitespace.create_token(indent.as_str()).into();
+                // 前の内容との区切り（同じ行の空白）は残さない
+                while at > 0 && is_whitespace(&children[at - 1]) {
+                    at -= 1;
+                }
+                vec![indent]
+            };
+
+            let mut inserted = Vec::new();
+            if !at_line_start {
+                inserted.push(SyntaxKind::Newline.create_token(newline).into());
+                inserted.extend(indent.clone());
+            }
+            inserted.extend(make_comment_nodes(resolved_style, &comment, newline));
+            inserted.push(SyntaxKind::Newline.create_token(newline).into());
+            inserted.extend(indent);
+
+            let replace_to = existing_range
+                .as_ref()
+                .map(|range| range.end)
+                .unwrap_or_else(|| span.elem().start);
+            (at, replace_to, inserted)
         }
         CommentLocation::Inline => {
             // 引用符なし文字列は行末までを飲み込むため、その直後にコメントを置けない。
@@ -790,23 +839,31 @@ fn build_slot_comment(
             let mut inserted = vec![SyntaxKind::Whitespace.create_token(" ").into()];
             inserted.extend(make_comment_nodes(style, &comment, newline));
 
-            let at = match &existing_range {
-                Some(range) => range.start,
+            let (at, replace_to) = match &existing_range {
+                Some(range) => (range.start, range.end),
                 None => {
                     // 区切りカンマがある場合はその直後に置く
                     let mut at = span.trail().start;
                     if children.get(at).is_some_and(is_comma) {
                         at += 1;
                     }
-                    at
+                    (at, at)
                 }
             };
-            (at, inserted)
+            (at, replace_to, inserted)
         }
     };
 
-    let updated = green_after_remove.splice_children(insert_at..insert_at, inserted);
+    let updated = container
+        .green()
+        .splice_children(replace_from..replace_to, inserted);
     Ok(container.replace_with(updated))
+}
+
+/// ブレースレス（文書直下）のオブジェクトか。
+fn is_braceless_object(container: &RedNode) -> bool {
+    crate::ast::Object::cast(container.clone())
+        .is_ok_and(|object| object.delimiter_style == crate::ast::DelimiterStyle::Braceless)
 }
 
 /// コンテナの閉じ区切りの直前にあるコメントを差し替える。`None` なら削除する。

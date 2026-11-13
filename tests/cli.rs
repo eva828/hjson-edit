@@ -1081,3 +1081,39 @@ fn cli_parse_warns_about_duplicate_keys() {
         .success()
         .stderr(predicate::str::contains("Warning: duplicate key \"a\""));
 }
+
+#[test]
+fn cli_comment_before_works_on_a_single_line_document() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "{{a: 1, b: 2}}").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("edit")
+        .arg(file.path())
+        .arg("--comment-set")
+        .arg("a:before")
+        .arg("note")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\n  /* note */\n"));
+}
+
+#[test]
+fn cli_comment_before_on_a_braceless_first_member_errors() {
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "a: 1\nb: 2\n").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("edit")
+        .arg(file.path())
+        .arg("--comment-set")
+        .arg("a:before")
+        .arg("note")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("use :header"));
+}

@@ -48,6 +48,9 @@ pub enum HjsonCommentPath {
     /// 文書全体の末尾（`:footer`）。
     Footer,
     /// 要素の前の行（`<path>:before`。接尾辞を省略した場合も同じ）。
+    ///
+    /// 要素が前の内容と同じ行にある場合は、コメントを独立した行に置くため要素を
+    /// 新しい行へ移す。ブレースレス文書の先頭メンバーには置けない（`:header` を使う）。
     Before(HjsonObjectPath),
     /// 要素の値の後ろ、同じ行の末尾（`<path>:inline`）。
     Inline(HjsonObjectPath),
