@@ -134,7 +134,55 @@ pub(crate) fn plan_remove(
     container: &RedNode,
     index: usize,
 ) -> Result<Range<usize>, HjsonEditError> {
-    Ok(slot_at(container, index)?.span())
+    let span = slot_at(container, index)?;
+    let children: Vec<_> = container.children_with_tokens().collect();
+
+    Ok(removal_range(&children, &span))
+}
+
+/// 要素の削除で一緒に消す範囲。
+///
+/// 直前の要素と同じ行にあるコメントはその要素の行末コメントなので残す。要素の前の行に
+/// あるコメントは要素のものなので、要素と一緒に消す。
+pub(crate) fn removal_range(
+    children: &[NodeOrToken<RedNode, crate::RedToken>],
+    span: &SlotSpan,
+) -> Range<usize> {
+    let lead = span.lead();
+    // 直前が改行なら、lead のコメントはすべて要素の前の行にある
+    let starts_at_line_start = lead.start > 0 && is_newline_element(&children[lead.start - 1]);
+    let first_newline = lead
+        .clone()
+        .find(|index| is_newline_element(&children[*index]));
+
+    let start = if starts_at_line_start {
+        lead.start
+    } else {
+        match first_newline {
+            // 改行より前（前の要素と同じ行）のコメントは残し、その改行から消す
+            Some(newline)
+                if (lead.start..newline).any(|index| is_comment_element(&children[index])) =>
+            {
+                newline
+            }
+            Some(_) => lead.start,
+            // 改行が無い場合は、行内のコメントを残してその後ろから消す
+            None => lead
+                .clone()
+                .rev()
+                .find(|index| is_comment_element(&children[*index]))
+                .map_or(lead.start, |index| index + 1),
+        }
+    };
+
+    start..span.trail().end
+}
+
+fn is_comment_element(element: &NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    match element {
+        NodeOrToken::Node(node) => node.kind() == SyntaxKind::Comment,
+        NodeOrToken::Token(token) => token.kind().is_comment(),
+    }
 }
 
 /// コンテナの要素位置を返す。

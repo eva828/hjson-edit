@@ -261,14 +261,15 @@ fn slot_range(root: &RedNode, path: &HjsonObjectPath) -> Option<TextRange> {
     slot_text_range(&children, &span)
 }
 
-/// スロット（要素と前後のトリビア）が占めるテキスト範囲。
+/// 削除で変化してよいテキスト範囲（要素と、一緒に消えるトリビア）。
 fn slot_text_range(
     children: &[NodeOrToken<RedNode, crate::RedToken>],
     span: &crate::ast::SlotSpan,
 ) -> Option<TextRange> {
-    let start = children.get(span.lead().start)?.text_range().start();
+    let range = crate::high_level::ops::insert::removal_range(children, span);
+    let start = children.get(range.start)?.text_range().start();
     let end = children
-        .get(span.trail().end.saturating_sub(1))?
+        .get(range.end.saturating_sub(1))?
         .text_range()
         .end();
 

@@ -521,3 +521,39 @@ fn set_value_text_reports_a_scalar_parent_as_invalid_target() {
         other => panic!("unexpected error: {other:?}"),
     }
 }
+
+#[test]
+fn remove_keeps_the_inline_comment_of_the_previous_member() {
+    for (input, expected) in [
+        ("{a: 1, /* c */ b: 2}\n", "{a: 1, /* c */}\n"),
+        ("{a: 1, /* c */\n  b: 2}\n", "{a: 1, /* c */\n}\n"),
+        ("[1, /* c */ 2]\n", "[1, /* c */]\n"),
+    ] {
+        let doc = HjsonDocument::parse(input).unwrap();
+        let path = if input.starts_with('[') { "[1]" } else { "b" };
+        let updated = doc.remove(HjsonObjectPath::parse(path).unwrap()).unwrap();
+
+        assert_eq!(updated.to_string(), expected, "{input:?}");
+        assert_eq!(updated.all_comments(), vec!["c".to_string()], "{input:?}");
+    }
+}
+
+#[test]
+fn remove_deletes_the_before_comment_of_the_removed_member() {
+    let input = "{\n  a: 1\n  /* c */\n  b: 2\n}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc.remove(HjsonObjectPath::parse("b").unwrap()).unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  a: 1\n}\n");
+    assert!(updated.all_comments().is_empty());
+}
+
+#[test]
+fn remove_keeps_the_inline_comment_and_drops_the_before_comment() {
+    let input = "{a: 1, /* x */\n  /* y */\n  b: 2}\n";
+    let doc = HjsonDocument::parse(input).unwrap();
+    let updated = doc.remove(HjsonObjectPath::parse("b").unwrap()).unwrap();
+
+    assert_eq!(updated.to_string(), "{a: 1, /* x */\n}\n");
+    assert_eq!(updated.all_comments(), vec!["x".to_string()]);
+}

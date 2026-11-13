@@ -575,11 +575,12 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         ));
     }
 
+    let children: Vec<_> = parent.children_with_tokens().collect();
     let mut ranges: Vec<_> = members
         .iter()
         .zip(object.slots())
         .filter(|(member, _)| member.member_key().as_deref() == Some(key.as_str()))
-        .map(|(_, slot)| slot.span())
+        .map(|(_, slot)| crate::high_level::ops::insert::removal_range(&children, &slot))
         .collect();
     ranges.sort_by_key(|range| range.start);
 
