@@ -160,6 +160,13 @@ fn value_mismatch(
                     detail: format!("expected no value at this path, found {found:?}"),
                 }
             }
+            // 追加した値が文書に現れない（行末でしか終端できない値の後ろへ足した場合など）
+            (Some(want), None) => {
+                return HjsonEditError::InvalidEdit {
+                    target: path.to_string(),
+                    detail: format!("expected {want:?}, found no value at this path"),
+                }
+            }
             _ => {}
         }
     }
