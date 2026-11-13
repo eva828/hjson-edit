@@ -47,7 +47,8 @@ pub(crate) fn value_edit(
     if !values_equal(&expected, &actual) {
         return Err(HjsonEditError::InvalidEdit {
             target: path.to_string(),
-            detail: format!("expected {expected:?}, found {actual:?}"),
+            detail: path_mismatch(&expected, &actual, path)
+                .unwrap_or_else(|| format!("expected {expected:?}, found {actual:?}")),
         });
     }
 
@@ -144,36 +145,39 @@ fn value_mismatch(
 ) -> HjsonEditError {
     for edit in edits.iter().rev() {
         let path = edit.path();
-        match (
-            crate::high_level::value_ops::get_in(expected, path),
-            crate::high_level::value_ops::get_in(actual, path),
-        ) {
-            (Some(want), Some(found)) if !values_equal(want, found) => {
-                return HjsonEditError::InvalidEdit {
-                    target: path.to_string(),
-                    detail: format!("expected {want:?}, found {found:?}"),
-                }
-            }
-            (None, Some(found)) => {
-                return HjsonEditError::InvalidEdit {
-                    target: path.to_string(),
-                    detail: format!("expected no value at this path, found {found:?}"),
-                }
-            }
-            // 追加した値が文書に現れない（行末でしか終端できない値の後ろへ足した場合など）
-            (Some(want), None) => {
-                return HjsonEditError::InvalidEdit {
-                    target: path.to_string(),
-                    detail: format!("expected {want:?}, found no value at this path"),
-                }
-            }
-            _ => {}
+        if let Some(detail) = path_mismatch(expected, actual, path) {
+            return HjsonEditError::InvalidEdit {
+                target: path.to_string(),
+                detail,
+            };
         }
     }
 
     HjsonEditError::InvalidEdit {
         target: "(document)".to_string(),
         detail: "values changed".to_string(),
+    }
+}
+
+/// パスごとの値の食い違いを説明する。食い違いが無ければ `None`。
+///
+/// 文書全体を Debug 表示すると読みにくいため、編集したパスの値だけを比べる。
+fn path_mismatch(
+    expected: &HjsonValue,
+    actual: &HjsonValue,
+    path: &HjsonObjectPath,
+) -> Option<String> {
+    match (
+        crate::high_level::value_ops::get_in(expected, path),
+        crate::high_level::value_ops::get_in(actual, path),
+    ) {
+        (Some(want), Some(found)) if !values_equal(want, found) => {
+            Some(format!("expected {want:?}, found {found:?}"))
+        }
+        (None, Some(found)) => Some(format!("expected no value at this path, found {found:?}")),
+        // 追加した値が文書に現れない（行末でしか終端できない値の後ろへ足した場合など）
+        (Some(want), None) => Some(format!("expected {want:?}, found no value at this path")),
+        _ => None,
     }
 }
 

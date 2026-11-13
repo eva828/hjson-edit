@@ -175,6 +175,25 @@ fn relexed_errors_are_reported_once() {
 }
 
 #[test]
+fn adding_a_member_after_an_unterminated_comment_names_the_missing_value_in_a_single_edit() {
+    use hjson_edit::high_level::ops::object::HjsonDocumentEdit;
+    use hjson_edit::high_level::path::HjsonObjectPath;
+
+    let document = HjsonDocument::parse("x: 5/*c").unwrap();
+    let error = document
+        .set(HjsonObjectPath::parse("a").unwrap(), 7)
+        .unwrap_err();
+
+    assert!(
+        matches!(error, HjsonEditError::InvalidEdit { ref target, .. } if target == "a"),
+        "{error:?}"
+    );
+    // 文書全体ではなく、編集したパスの値だけを報告する
+    assert!(error.to_string().contains("found no value"), "{error}");
+    assert!(!error.to_string().contains("Object(["), "{error}");
+}
+
+#[test]
 fn adding_a_member_after_an_unterminated_comment_names_the_missing_value() {
     use hjson_edit::high_level::ops::object::HjsonDocumentEdit;
     use hjson_edit::high_level::path::HjsonObjectPath;
