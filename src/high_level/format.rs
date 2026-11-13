@@ -105,8 +105,18 @@ impl HjsonDocument {
 
     /// 複数の要素をまとめて整える（`format_slot` の一括版）。
     ///
-    /// 親コンテナの解決と字下げ 1 段分の検出を 1 回だけ行う。検証も最後に 1 回だけ。
-    pub(crate) fn format_slots(
+    /// 親コンテナの解決と字下げ 1 段分の検出を 1 回だけ行うため、同じコンテナの要素を
+    /// 多数整形するときは `format_slot` を繰り返すより速い。検証は最後に 1 回だけ行う。
+    ///
+    /// 値は変えない。行頭にない要素と、複数行の Block 文字列を持たない要素は
+    /// そのまま残す（インラインの配置を崩さない）。
+    ///
+    /// # エラー
+    ///
+    /// - パスが存在しない場合は [`HjsonEditError::PathNotFound`]
+    /// - パスが空の場合は [`HjsonEditError::InvalidPath`]
+    /// - 親がコンテナでない場合は [`HjsonEditError::InvalidTarget`]
+    pub fn format_slots(
         &self,
         paths: &[HjsonObjectPath],
         config: &FormatConfig,
@@ -144,26 +154,36 @@ impl HjsonDocument {
             // 同じキーのメンバーが複数ある場合は、すべてを同じように整える
             let elements = match container.kind() {
                 SyntaxKind::Object => {
-                    let keys: Vec<&PathSegment> =
-                        group.items.iter().map(|(last, _)| last).collect();
+                    // 同じキーが複数指定されても照合は 1 回でよい
+                    let mut keys: Vec<(&str, &HjsonObjectPath)> = Vec::new();
+                    for (last, path) in &group.items {
+                        let PathSegment::Key(key) = last else {
+                            return Err(HjsonEditError::InvalidTarget {
+                                path: path.clone(),
+                                reason: "the parent is not a container".to_string(),
+                            });
+                        };
+                        if !keys.iter().any(|(existing, _)| *existing == key.as_str()) {
+                            keys.push((key.as_str(), path));
+                        }
+                    }
+
                     let mut matched: Vec<RedNode> = Vec::new();
                     let mut found = vec![false; keys.len()];
                     for child in container.children() {
                         if child.kind() != SyntaxKind::Member {
                             continue;
                         }
-                        for (index, last) in keys.iter().enumerate() {
-                            if let PathSegment::Key(key) = last {
-                                if crate::high_level::ops::object::member_key_matches(&child, key) {
-                                    matched.push(child.clone());
-                                    found[index] = true;
-                                    break;
-                                }
+                        for (index, (key, _)) in keys.iter().enumerate() {
+                            if crate::high_level::ops::object::member_key_matches(&child, key) {
+                                matched.push(child.clone());
+                                found[index] = true;
+                                break;
                             }
                         }
                     }
                     if let Some(index) = found.iter().position(|found| !found) {
-                        return Err(HjsonEditError::PathNotFound(group.items[index].1.clone()));
+                        return Err(HjsonEditError::PathNotFound(keys[index].1.clone()));
                     }
                     matched
                 }

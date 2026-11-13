@@ -588,17 +588,26 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
             }
         }
 
-        for slot in edited_slots {
-            // 空のパスは文書全体なので、要素の整形はしない（コンテナ側で処理済み）
-            if slot.depth() == 0 {
-                continue;
-            }
-            match doc.format_slot(&slot, &config) {
-                Ok(updated) => doc = updated,
-                Err(
-                    HjsonEditError::PathNotFound(_) | HjsonEditError::UnexpectedStructure { .. },
-                ) => {}
-                Err(error) => return Err(error.into()),
+        // 空のパスは文書全体なので、要素の整形はしない（コンテナ側で処理済み）
+        let slots: Vec<HjsonObjectPath> = edited_slots
+            .into_iter()
+            .filter(|slot| slot.depth() > 0)
+            .collect();
+        // まとめて整える（親コンテナの解決は 1 回）。解決できないパスが混ざっていたら
+        // 従来どおり 1 つずつ試す。
+        match doc.format_slots(&slots, &config) {
+            Ok(updated) => doc = updated,
+            Err(_) => {
+                for slot in &slots {
+                    match doc.format_slot(slot, &config) {
+                        Ok(updated) => doc = updated,
+                        Err(
+                            HjsonEditError::PathNotFound(_)
+                            | HjsonEditError::UnexpectedStructure { .. },
+                        ) => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
             }
         }
     }
