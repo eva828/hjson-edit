@@ -73,6 +73,13 @@ pub(crate) fn push_leading(
     }
 }
 
+/// 閉じていないブロックコメントか。
+///
+/// 後ろに改行を足すとコメントの一部になり、整形のたびに改行が増える。
+pub(crate) fn is_unterminated_block_comment(ct: &CommentTrivia) -> bool {
+    ct.kind == CommentKind::Block && !ct.text.ends_with("*/")
+}
+
 pub(crate) fn make_comment_node(ct: &CommentTrivia) -> GreenElement {
     let kind = match ct.kind {
         CommentKind::Line => SyntaxKind::LineComment,

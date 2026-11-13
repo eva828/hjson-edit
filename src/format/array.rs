@@ -51,7 +51,9 @@ impl Format for AstArray {
                             .into(),
                     );
                     children.push(make_comment_node(&comment));
-                    children.push(SyntaxKind::Newline.create_token(nl).into());
+                    if !super::is_unterminated_block_comment(&comment) {
+                        children.push(SyntaxKind::Newline.create_token(nl).into());
+                    }
                 }
             }
         }
@@ -86,8 +88,18 @@ impl Format for AstArray {
                 }
             }
 
+            // 閉じていないブロックコメントの後ろに改行を足すとコメントの一部になる
+            let ends_unterminated = item
+                .trailing_trivia
+                .iter()
+                .filter_map(|triv| match triv {
+                    Trivia::Comment(ct) => Some(ct),
+                    _ => None,
+                })
+                .next_back()
+                .is_some_and(super::is_unterminated_block_comment);
             let has_more = i + 1 < items.len() || !self.trailing_trivia.is_empty() || is_braced;
-            if has_more {
+            if has_more && !ends_unterminated {
                 children.push(SyntaxKind::Newline.create_token(nl).into());
             }
         }

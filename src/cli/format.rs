@@ -56,8 +56,12 @@ pub fn run_format(matches: &clap::ArgMatches) -> Result<()> {
         .context("Failed to format the document")?;
     let mut result = formatted.to_string();
 
-    // 出力は改行で終える（末尾に改行の無い入力でも 1 行として扱えるようにする）
-    if !result.is_empty() && !result.ends_with('\n') {
+    // 出力は改行で終える（末尾に改行の無い入力でも 1 行として扱えるようにする）。
+    // 閉じていないブロックコメントの後ろには足さない（コメントの一部になる）。
+    let ends_in_unterminated_comment = formatted.syntax_root().last_token().is_some_and(|token| {
+        token.kind() == hjson_edit::SyntaxKind::BlockComment && !token.text().ends_with("*/")
+    });
+    if !result.is_empty() && !result.ends_with('\n') && !ends_in_unterminated_comment {
         result.push_str(config.newline());
     }
 

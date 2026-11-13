@@ -65,7 +65,9 @@ impl Format for AstObject {
                             .into(),
                     );
                     children.push(make_comment_node(&comment));
-                    children.push(SyntaxKind::Newline.create_token(nl).into());
+                    if !super::is_unterminated_block_comment(&comment) {
+                        children.push(SyntaxKind::Newline.create_token(nl).into());
+                    }
                 }
             }
         }
@@ -99,7 +101,13 @@ impl Format for AstObject {
                 children.push(make_comment_node(ct));
             }
 
-            if i + 1 < members.len() || is_braced || !member.trailing_trivia.is_empty() {
+            // 閉じていないブロックコメントの後ろに改行を足すとコメントの一部になる
+            let ends_unterminated = member_trailing_comments
+                .last()
+                .is_some_and(super::is_unterminated_block_comment);
+            if !ends_unterminated
+                && (i + 1 < members.len() || is_braced || !member.trailing_trivia.is_empty())
+            {
                 children.push(SyntaxKind::Newline.create_token(nl).into());
             }
         }
