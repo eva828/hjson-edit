@@ -102,12 +102,14 @@ pub(crate) fn value_edits_unchanged(
     let empty = HjsonObjectPath::from_segments(Vec::new());
     let mut expected = value_of(original, &empty)?;
     for edit in edits {
-        expected = match edit {
+        match edit {
             ValueEdit::Set(path, value) => {
-                crate::high_level::value_ops::set_path(&expected, path, value.clone())?
+                crate::high_level::value_ops::set_path_in(&mut expected, path, value.clone())?
             }
-            ValueEdit::Remove(path) => crate::high_level::value_ops::remove_path(&expected, path)?,
-        };
+            ValueEdit::Remove(path) => {
+                crate::high_level::value_ops::remove_path_in(&mut expected, path)?
+            }
+        }
     }
 
     // 編集後のテキストが再パースでき、値が期待どおりであること
@@ -117,14 +119,8 @@ pub(crate) fn value_edits_unchanged(
     }
 
     // 編集した範囲の外側でコメントが変化していないこと
-    let previous_allowed: Vec<TextRange> = edits
-        .iter()
-        .filter_map(|edit| edited_range(original, edit.path(), edit.region()))
-        .collect();
-    let updated_allowed: Vec<TextRange> = edits
-        .iter()
-        .filter_map(|edit| edited_range(updated, edit.path(), edit.region()))
-        .collect();
+    let previous_allowed = edited_ranges(original, edits);
+    let updated_allowed = edited_ranges(updated, edits);
     let previous_comments = comments_outside(original, &previous_allowed);
     let updated_comments = comments_outside(updated, &updated_allowed);
     if previous_comments != updated_comments {
@@ -261,6 +257,15 @@ fn slot_range(root: &RedNode, path: &HjsonObjectPath) -> Option<TextRange> {
     };
     let span = slot_at(&container, index).ok()?;
     let children: Vec<_> = container.children_with_tokens().collect();
+
+    slot_text_range(&children, &span)
+}
+
+/// スロット（要素と前後のトリビア）が占めるテキスト範囲。
+fn slot_text_range(
+    children: &[NodeOrToken<RedNode, crate::RedToken>],
+    span: &crate::ast::SlotSpan,
+) -> Option<TextRange> {
     let start = children.get(span.lead().start)?.text_range().start();
     let end = children
         .get(span.trail().end.saturating_sub(1))?
@@ -268,6 +273,87 @@ fn slot_range(root: &RedNode, path: &HjsonObjectPath) -> Option<TextRange> {
         .end();
 
     Some(TextRange::new(start, end))
+}
+
+/// 編集で変化してよい範囲をまとめて求める。
+///
+/// 編集ごとにパスを根から解決すると、編集の数だけ文書全体を走査することになる。
+/// 親コンテナごとに 1 回だけ解決し、コンテナごとに 1 回だけ子を並べて求める。
+fn edited_ranges(root: &RedNode, edits: &[ValueEdit]) -> Vec<TextRange> {
+    struct Group {
+        parent: HjsonObjectPath,
+        items: Vec<(usize, PathSegment, EditedRegion)>,
+    }
+
+    let mut groups: Vec<Group> = Vec::new();
+    let mut ranges: Vec<Option<TextRange>> = vec![None; edits.len()];
+    for (index, edit) in edits.iter().enumerate() {
+        let Some((parent, last)) = edit.path().split_last() else {
+            // 空のパスは文書全体の差し替えで、本文もその中のコメントも置き換わる
+            ranges[index] = Some(root.text_range());
+            continue;
+        };
+        match groups.iter_mut().find(|group| group.parent == parent) {
+            Some(group) => group.items.push((index, last, edit.region())),
+            None => groups.push(Group {
+                parent,
+                items: vec![(index, last, edit.region())],
+            }),
+        }
+    }
+
+    for group in groups {
+        let Ok(parent) = PathResolver::new(root.clone()).resolve_node(&group.parent) else {
+            continue;
+        };
+        let Ok(container) = resolve_body(&parent) else {
+            continue;
+        };
+
+        let elements: Vec<RedNode> = container
+            .children()
+            .filter(|child| matches!(child.kind(), SyntaxKind::Member | SyntaxKind::Value))
+            .collect();
+        // スロットの範囲は削除のときだけ要る（コンテナごとに 1 回だけ求める）
+        let spans = group
+            .items
+            .iter()
+            .any(|(_, _, region)| *region == EditedRegion::Slot)
+            .then(|| crate::high_level::ops::insert::container_slots(&container).ok())
+            .flatten();
+        let children: Vec<_> = container.children_with_tokens().collect();
+
+        for (index, last, region) in group.items {
+            let position = match (container.kind(), &last) {
+                (SyntaxKind::Object, PathSegment::Key(key)) => elements.iter().position(|member| {
+                    crate::high_level::ops::object::member_key_matches(member, key)
+                }),
+                (SyntaxKind::Array, PathSegment::Array(segment)) => {
+                    let len = elements.len();
+                    match segment {
+                        ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => {
+                            (*index < len).then_some(*index)
+                        }
+                        ArrayPathSegment::Push => len.checked_sub(1),
+                    }
+                }
+                _ => None,
+            };
+            let Some(position) = position else {
+                continue;
+            };
+
+            ranges[index] = match region {
+                EditedRegion::Node => elements.get(position).map(|node| node.text_range()),
+                EditedRegion::Slot => spans
+                    .as_ref()
+                    .and_then(|spans| spans.get(position))
+                    .and_then(|span| slot_text_range(&children, span)),
+            };
+        }
+    }
+
+    ranges.into_iter().flatten().collect()
 }
 
 /// 指定した範囲の外側でコメントが変化していないか。

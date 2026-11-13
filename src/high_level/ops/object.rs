@@ -268,7 +268,7 @@ fn apply_remove_to_node(node: &RedNode, last: &PathSegment) -> Result<GreenNode,
 /// メンバーのキーが `key` と一致するか。
 ///
 /// 大半のキーは引用符なしなので、生テキストの比較で済ませる（デコードしない）。
-fn member_key_matches(member: &RedNode, key: &str) -> bool {
+pub(crate) fn member_key_matches(member: &RedNode, key: &str) -> bool {
     let Some(key_node) = member
         .children()
         .find(|child| child.kind() == SyntaxKind::Key)

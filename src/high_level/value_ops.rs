@@ -336,6 +336,162 @@ pub(crate) fn values_equal(left: &HjsonValue, right: &HjsonValue) -> bool {
     }
 }
 
+/// `set_path` を値の木の上で直接行う（検証で使う。毎回の木の複製を避ける）。
+pub(crate) fn set_path_in(
+    root: &mut HjsonValue,
+    path: &HjsonObjectPath,
+    value: HjsonValue,
+) -> Result<(), HjsonEditError> {
+    if path.depth() == 0 {
+        *root = value;
+        return Ok(());
+    }
+
+    set_in_place(root, path.segments(), value)
+}
+
+fn set_in_place(
+    current: &mut HjsonValue,
+    segments: &[PathSegment],
+    value: HjsonValue,
+) -> Result<(), HjsonEditError> {
+    let (first, rest) = segments
+        .split_first()
+        .ok_or_else(|| HjsonEditError::InvalidPath("empty path".to_string()))?;
+
+    match (current, first) {
+        (HjsonValue::Object(entries), PathSegment::Key(key)) => {
+            match entries.iter_mut().find(|(existing, _)| existing == key) {
+                Some(entry) => {
+                    if rest.is_empty() {
+                        entry.1 = value;
+                    } else {
+                        set_in_place(&mut entry.1, rest, value)?;
+                    }
+                }
+                None => {
+                    let created = if rest.is_empty() {
+                        value
+                    } else {
+                        build_nested_value(rest, value)?
+                    };
+                    entries.push((key.clone(), created));
+                }
+            }
+            Ok(())
+        }
+        (HjsonValue::Array(items), PathSegment::Array(segment)) => {
+            let len = items.len();
+            match segment {
+                ArrayPathSegment::Index(index) => {
+                    if *index >= len {
+                        return Err(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len });
+                    }
+                    if rest.is_empty() {
+                        items[*index] = value;
+                    } else {
+                        set_in_place(&mut items[*index], rest, value)?;
+                    }
+                }
+                ArrayPathSegment::InsertAt(index) => {
+                    if *index > len {
+                        return Err(HjsonEditError::ArrayIndexOutOfBounds { index: *index, len });
+                    }
+                    if rest.is_empty() {
+                        items.insert(*index, value);
+                    } else if *index < len {
+                        set_in_place(&mut items[*index], rest, value)?;
+                    } else {
+                        items.push(build_nested_value(rest, value)?);
+                    }
+                }
+                ArrayPathSegment::Push => {
+                    if rest.is_empty() {
+                        items.push(value);
+                    } else if len > 0 {
+                        set_in_place(&mut items[len - 1], rest, value)?;
+                    } else {
+                        items.push(build_nested_value(rest, value)?);
+                    }
+                }
+            }
+            Ok(())
+        }
+        (HjsonValue::Object(_), PathSegment::Array(_)) => {
+            Err(HjsonEditError::UnexpectedStructure {
+                expected: crate::SyntaxKind::Array,
+                found: crate::SyntaxKind::Object,
+            })
+        }
+        (HjsonValue::Array(_), PathSegment::Key(_)) => Err(HjsonEditError::UnexpectedStructure {
+            expected: crate::SyntaxKind::Object,
+            found: crate::SyntaxKind::Array,
+        }),
+        (current, _) => Err(HjsonEditError::UnexpectedStructure {
+            expected: crate::SyntaxKind::Object,
+            found: value_kind(current),
+        }),
+    }
+}
+
+/// `remove_path` を値の木の上で直接行う（検証で使う）。
+pub(crate) fn remove_path_in(
+    root: &mut HjsonValue,
+    path: &HjsonObjectPath,
+) -> Result<(), HjsonEditError> {
+    if path.depth() == 0 {
+        return Err(HjsonEditError::InvalidPath(
+            "cannot remove the document body".to_string(),
+        ));
+    }
+
+    remove_in_place(root, path.segments(), path)
+}
+
+fn remove_in_place(
+    current: &mut HjsonValue,
+    segments: &[PathSegment],
+    path: &HjsonObjectPath,
+) -> Result<(), HjsonEditError> {
+    let (first, rest) = segments
+        .split_first()
+        .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+
+    match (current, first) {
+        (HjsonValue::Object(entries), PathSegment::Key(key)) => {
+            let position = entries
+                .iter()
+                .position(|(existing, _)| existing == key)
+                .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+
+            if rest.is_empty() {
+                entries.remove(position);
+            } else {
+                remove_in_place(&mut entries[position].1, rest, path)?;
+            }
+            Ok(())
+        }
+        (HjsonValue::Array(items), PathSegment::Array(segment)) => {
+            let len = items.len();
+            let index = match segment {
+                ArrayPathSegment::Index(index) | ArrayPathSegment::InsertAt(index) => *index,
+                ArrayPathSegment::Push => len.saturating_sub(1),
+            };
+            if index >= len {
+                return Err(HjsonEditError::PathNotFound(path.clone()));
+            }
+
+            if rest.is_empty() {
+                items.remove(index);
+            } else {
+                remove_in_place(&mut items[index], rest, path)?;
+            }
+            Ok(())
+        }
+        _ => Err(HjsonEditError::PathNotFound(path.clone())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
