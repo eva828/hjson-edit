@@ -280,6 +280,13 @@ fn slot_text_range(
 /// 編集ごとにパスを根から解決すると、編集の数だけ文書全体を走査することになる。
 /// 親コンテナごとに 1 回だけ解決し、コンテナごとに 1 回だけ子を並べて求める。
 fn edited_ranges(root: &RedNode, edits: &[ValueEdit]) -> Vec<TextRange> {
+    // 1 件だけなら、コンテナの子をすべて並べるよりパスを直接たどる方が速い
+    if let [edit] = edits {
+        return edited_range(root, edit.path(), edit.region())
+            .into_iter()
+            .collect();
+    }
+
     struct Group {
         parent: HjsonObjectPath,
         items: Vec<(usize, PathSegment, EditedRegion)>,

@@ -3,7 +3,7 @@
 //! 編集の核心（`set`/`remove` など）は最小限のテキスト変更に留め、インデントなどの
 //! 体裁はこの層で整える。これにより「構造編集と整形を分離する」という設計を保つ。
 
-use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Member, Object as AstObject, Value};
+use crate::ast::{Array as AstArray, AstNode, DelimiterStyle, Object as AstObject, Value};
 use crate::format::value::multiline_block_node;
 use crate::format::{Format, FormatConfig};
 use crate::high_level::error::HjsonEditError;
@@ -100,80 +100,141 @@ impl HjsonDocument {
         path: &HjsonObjectPath,
         config: &FormatConfig,
     ) -> Result<Self, HjsonEditError> {
-        let (parent_path, last) = path.split_last().ok_or_else(|| {
-            HjsonEditError::InvalidPath("format_slot needs an element path".to_string())
-        })?;
-        let parent = PathResolver::new(self.syntax_root().clone()).resolve_node(&parent_path)?;
-        let container = resolve_body(&parent)?;
-        // 同じキーのメンバーが複数ある場合は、すべてを同じように整える
-        let elements: Vec<RedNode> = match (container.kind(), &last) {
-            (SyntaxKind::Object, PathSegment::Key(key)) => {
-                let members: Vec<RedNode> = container
-                    .children()
-                    .filter(|child| child.kind() == SyntaxKind::Member)
-                    .collect();
-                let matched: Vec<RedNode> = members
-                    .into_iter()
-                    .filter(|member| {
-                        Member::cast(member.clone())
-                            .ok()
-                            .and_then(|member: Member| member.member_key())
-                            .as_deref()
-                            == Some(key.as_str())
-                    })
-                    .collect();
-                if matched.is_empty() {
-                    return Err(HjsonEditError::PathNotFound(path.clone()));
-                }
-                matched
-            }
-            (SyntaxKind::Array, PathSegment::Array(segment)) => {
-                let index = array_slot_index(&container, segment)
-                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
-                vec![container
-                    .children()
-                    .filter(|child| child.kind() == SyntaxKind::Value)
-                    .nth(index)
-                    .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?]
-            }
-            _ => {
-                return Err(HjsonEditError::InvalidTarget {
-                    path: path.clone(),
-                    reason: "the parent is not a container".to_string(),
-                })
-            }
-        };
+        self.format_slots(std::slice::from_ref(path), config)
+    }
 
-        // 字下げ 1 段分は要素ごとに求めず 1 回だけ求める（文書全体の走査になるため）
-        let indent_unit = crate::high_level::indent::indent_unit(self.syntax_root());
-        let mut green: rowan::GreenNode = container.green().clone().into_owned();
-        let mut changed = false;
-        for element in elements {
-            let Some(formatted) = formatted_block_element(&element, &indent_unit, config)? else {
-                continue;
-            };
-
-            let value_index = element
-                .children()
-                .find(|child| child.kind() == SyntaxKind::Value)
-                .map(|value| value.index())
-                .ok_or_else(|| HjsonEditError::InvalidTarget {
-                    path: path.clone(),
-                    reason: "the element has no value".to_string(),
-                })?;
-            let updated = element
-                .green()
-                .splice_children(value_index..value_index + 1, vec![formatted.into()]);
-            let at = element.index();
-            green = green.splice_children(at..at + 1, vec![updated.into()]);
-            changed = true;
+    /// 複数の要素をまとめて整える（`format_slot` の一括版）。
+    ///
+    /// 親コンテナの解決と字下げ 1 段分の検出を 1 回だけ行う。検証も最後に 1 回だけ。
+    pub(crate) fn format_slots(
+        &self,
+        paths: &[HjsonObjectPath],
+        config: &FormatConfig,
+    ) -> Result<Self, HjsonEditError> {
+        struct Group {
+            parent: HjsonObjectPath,
+            /// 同じコンテナの要素（セグメントと、エラー表示用のパス）。
+            items: Vec<(PathSegment, HjsonObjectPath)>,
         }
 
-        if !changed {
+        let mut groups: Vec<Group> = Vec::new();
+        for path in paths {
+            let (parent, last) = path.split_last().ok_or_else(|| {
+                HjsonEditError::InvalidPath("format_slot needs an element path".to_string())
+            })?;
+            match groups.iter_mut().find(|group| group.parent == parent) {
+                Some(group) => group.items.push((last, path.clone())),
+                None => groups.push(Group {
+                    parent,
+                    items: vec![(last, path.clone())],
+                }),
+            }
+        }
+
+        // 字下げ 1 段分は文書全体の走査になるため、要素ごとではなく 1 回だけ求める
+        let mut indent_unit: Option<String> = None;
+        let mut document = self.clone();
+        let mut any_changed = false;
+
+        for group in groups {
+            let parent =
+                PathResolver::new(document.syntax_root().clone()).resolve_node(&group.parent)?;
+            let container = resolve_body(&parent)?;
+
+            // 同じキーのメンバーが複数ある場合は、すべてを同じように整える
+            let elements = match container.kind() {
+                SyntaxKind::Object => {
+                    let keys: Vec<&PathSegment> =
+                        group.items.iter().map(|(last, _)| last).collect();
+                    let mut matched: Vec<RedNode> = Vec::new();
+                    let mut found = vec![false; keys.len()];
+                    for child in container.children() {
+                        if child.kind() != SyntaxKind::Member {
+                            continue;
+                        }
+                        for (index, last) in keys.iter().enumerate() {
+                            if let PathSegment::Key(key) = last {
+                                if crate::high_level::ops::object::member_key_matches(&child, key) {
+                                    matched.push(child.clone());
+                                    found[index] = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(index) = found.iter().position(|found| !found) {
+                        return Err(HjsonEditError::PathNotFound(group.items[index].1.clone()));
+                    }
+                    matched
+                }
+                SyntaxKind::Array => {
+                    let values: Vec<RedNode> = container
+                        .children()
+                        .filter(|child| child.kind() == SyntaxKind::Value)
+                        .collect();
+                    let mut matched = Vec::new();
+                    for (last, path) in &group.items {
+                        let PathSegment::Array(segment) = last else {
+                            return Err(HjsonEditError::InvalidTarget {
+                                path: path.clone(),
+                                reason: "the parent is not a container".to_string(),
+                            });
+                        };
+                        let index = array_slot_index(&container, segment)
+                            .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?;
+                        matched.push(
+                            values
+                                .get(index)
+                                .ok_or_else(|| HjsonEditError::PathNotFound(path.clone()))?
+                                .clone(),
+                        );
+                    }
+                    matched
+                }
+                _ => {
+                    return Err(HjsonEditError::InvalidTarget {
+                        path: group.items[0].1.clone(),
+                        reason: "the parent is not a container".to_string(),
+                    })
+                }
+            };
+
+            let indent_unit =
+                indent_unit.get_or_insert_with(|| self.current_indent_unit().to_string());
+            let mut green: rowan::GreenNode = container.green().clone().into_owned();
+            let mut changed = false;
+            for element in elements {
+                let Some(formatted) = formatted_block_element(&element, indent_unit, config)?
+                else {
+                    continue;
+                };
+
+                let value_index = element
+                    .children()
+                    .find(|child| child.kind() == SyntaxKind::Value)
+                    .map(|value| value.index())
+                    .ok_or_else(|| HjsonEditError::InvalidTarget {
+                        path: group.items[0].1.clone(),
+                        reason: "the element has no value".to_string(),
+                    })?;
+                let updated = element
+                    .green()
+                    .splice_children(value_index..value_index + 1, vec![formatted.into()]);
+                let at = element.index();
+                green = green.splice_children(at..at + 1, vec![updated.into()]);
+                changed = true;
+            }
+
+            if changed {
+                document = document.root(container.replace_with(green));
+                any_changed = true;
+            }
+        }
+
+        if !any_changed {
             return Ok(self.clone());
         }
 
-        let document = self.clone().root(container.replace_with(green));
         if self.current_verify() {
             verify::formatting_unchanged(self.syntax_root(), document.syntax_root())?;
         }

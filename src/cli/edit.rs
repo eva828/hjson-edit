@@ -180,6 +180,21 @@ fn created_container(original: &HjsonDocument, path: &HjsonObjectPath) -> Option
     None
 }
 
+/// この編集で新しいコンテナが生まれうるか。
+///
+/// コンテナを値にしたときと、深いパスを作ったときだけ。既存のキーへスカラーを
+/// 書いただけなら、`created_container` の探索（文書サイズに比例）を省ける。
+fn may_create_container(path: &HjsonObjectPath, edits: &[ValueEdit]) -> bool {
+    edits.iter().any(|edit| match edit {
+        ValueEdit::Set(edited, value) => {
+            edited == path
+                && (path.depth() > 1
+                    || matches!(value, HjsonValue::Object(_) | HjsonValue::Array(_)))
+        }
+        ValueEdit::Remove(_) => false,
+    })
+}
+
 /// コンテナの整形を行うか。`--format` か、整形オプションの明示指定で有効になる。
 fn format_requested(matches: &ArgMatches) -> bool {
     matches.get_flag("format")
@@ -553,7 +568,11 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     } else {
         // 編集で新しく作られたコンテナは既存の体裁が無いので整形する。
         // 行の途中に作られた場合は、インラインの配置を保つため触らない。
+        // コンテナが生まれうるのは、コンテナを値にしたときと、深いパスを作ったときだけ。
         for slot in &edited_slots {
+            if !may_create_container(slot, &value_edits) {
+                continue;
+            }
             if let Some(created) = created_container(&original, slot) {
                 if !doc.starts_at_line(&created)? {
                     continue;

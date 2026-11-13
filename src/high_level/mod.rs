@@ -54,6 +54,8 @@ pub struct HjsonDocument {
     format: Option<FormatConfig>,
     touched: Vec<HjsonObjectPath>,
     newline: String,
+    /// 字下げ 1 段分（文書から推定する。編集では変わらない）。
+    indent_unit: String,
     warnings: Vec<String>,
 }
 
@@ -139,6 +141,7 @@ impl HjsonDocument {
         let root = RedNode::new_root(result.green);
         warnings.extend(duplicate_key_warnings(&root, input));
         let newline = detect_newline_from_ast(&root).as_str().to_string();
+        let indent_unit = crate::high_level::indent::indent_unit(&root);
 
         Ok(Self {
             root,
@@ -148,6 +151,7 @@ impl HjsonDocument {
             format: None,
             touched: Vec::new(),
             newline,
+            indent_unit,
             warnings,
         })
     }
@@ -387,6 +391,11 @@ impl HjsonDocument {
     }
 
     /// この文書で検出した改行コード（編集の描画に使う）。
+    /// 字下げ 1 段分（文書から推定したもの）。
+    pub(crate) fn current_indent_unit(&self) -> &str {
+        &self.indent_unit
+    }
+
     pub(crate) fn current_newline_kind(&self) -> NewlineKind {
         match self.newline.as_str() {
             "\r\n" => NewlineKind::CrLf,
