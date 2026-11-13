@@ -844,6 +844,28 @@ fn cli_edit_batch_set_and_remove() {
 }
 
 #[test]
+fn cli_edit_set_then_remove_of_the_same_path_formats_the_rest() {
+    // 設定したパスを同じ実行で削除すると、まとめ整形の対象が 1 つ減る。
+    // まとめて整形できないときは 1 つずつ整形する経路を通る。
+    let stdout = edit_stdout(
+        &["edit", "--set", "a", "9", "--remove", "a"],
+        "{\n  a: 1\n  b: 2\n}\n",
+    );
+
+    assert_eq!(stdout, "{\n  b: 2\n}\n");
+}
+
+#[test]
+fn cli_edit_set_then_remove_with_format() {
+    let stdout = edit_stdout(
+        &["edit", "--format", "--set", "a", "9", "--remove", "a"],
+        "{\n  a: 1\n  b: 2\n}\n",
+    );
+
+    assert_eq!(stdout, "{\n  b: 2\n}\n");
+}
+
+#[test]
 fn cli_edit_batch_set_creates_nested_paths() {
     let stdout = edit_stdout(
         &["edit", "--set", "a.b.c", "1", "--set", "d", "[1, 2]"],
