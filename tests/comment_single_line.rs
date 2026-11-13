@@ -168,3 +168,69 @@ fn formatting_keeps_the_comment_of_a_single_line_document() {
         "{formatted}"
     );
 }
+
+#[test]
+fn a_comment_on_the_opening_delimiter_line_is_the_first_element_before() {
+    for (src, slot, expected) in [
+        ("{/* c */\na: 1}\n", "a:before", "c"),
+        ("{#c\n a: 1}\n", "a:before", "c"),
+        ("{ /* c */\n  a: 1}\n", "a:before", "c"),
+        ("[/* c */\n1]\n", "[0]:before", "c"),
+        ("x: {/* c */\na: 1}\n", "x.a:before", "c"),
+    ] {
+        let parsed = doc(src);
+
+        assert_eq!(
+            parsed.get_comment(comment_path(slot)).unwrap().as_deref(),
+            Some(expected),
+            "{src:?} {slot}"
+        );
+    }
+}
+
+#[test]
+fn setting_before_replaces_a_comment_on_the_opening_delimiter_line() {
+    for (src, slot, expected) in [
+        ("{/* c */\na: 1}\n", "a:before", "{/* note */\na: 1}\n"),
+        ("{#c\n a: 1}\n", "a:before", "{# note\n a: 1}\n"),
+        ("[/* c */\n1]\n", "[0]:before", "[/* note */\n1]\n"),
+    ] {
+        let updated = doc(src).set_comment(comment_path(slot), "note").unwrap();
+
+        assert_eq!(updated.to_string(), expected, "{src:?}");
+        assert_eq!(updated.all_comments(), vec!["note".to_string()], "{src:?}");
+    }
+}
+
+#[test]
+fn removing_before_clears_a_comment_on_the_opening_delimiter_line() {
+    let updated = doc("{/* c */\na: 1}\n")
+        .remove_comment(comment_path("a:before"))
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "{a: 1}\n");
+    assert!(updated.all_comments().is_empty());
+}
+
+#[test]
+fn a_new_before_comment_still_gets_its_own_line() {
+    let updated = doc("{a: 1, b: 2}\n")
+        .set_comment(comment_path("a:before"), "note")
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  /* note */\n  a: 1, b: 2}\n");
+}
+
+#[test]
+fn a_braceless_document_keeps_its_header_separate() {
+    let parsed = doc("/* header */\na: 1\n");
+
+    assert_eq!(
+        parsed
+            .get_comment(comment_path(":header"))
+            .unwrap()
+            .as_deref(),
+        Some("header")
+    );
+    assert_eq!(parsed.get_comment(comment_path("a:before")).unwrap(), None);
+}

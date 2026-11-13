@@ -260,7 +260,7 @@ fn collect_container_comment_slots(
             continue;
         };
 
-        let before = extract_comment_bodies(&leading_trivia_in(&children, span.lead()));
+        let before = extract_comment_bodies(&leading_trivia_in(&children, span.lead(), index == 0));
         slots.push((CommentSlot::Before(element_path.clone()), before));
 
         let inline = comments_in(&children, span.trail());
@@ -471,7 +471,11 @@ fn slot_trivia(
 ) -> Result<Vec<Trivia>, HjsonEditError> {
     let span = slot_at(container, index)?;
     match location {
-        CommentLocation::Before => Ok(leading_trivia_in(&children_of(container), span.lead())),
+        CommentLocation::Before => Ok(leading_trivia_in(
+            &children_of(container),
+            span.lead(),
+            index == 0,
+        )),
         CommentLocation::Inline => Ok(children_of(container)[span.trail()]
             .iter()
             .filter_map(trivia_from_element)
@@ -479,12 +483,44 @@ fn slot_trivia(
     }
 }
 
+/// 先頭要素の `Before` の範囲。開き区切りの直後から要素の直前まで。
+///
+/// `container_slots` の `lead` は最初の改行より後ろから始まるため、開き区切りと同じ行の
+/// コメントが入らない。先頭要素には「前の要素」が無いので、そこも `Before` に含める。
+fn first_lead_range(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    lead: Range<usize>,
+) -> Range<usize> {
+    let start = children[..lead.start]
+        .iter()
+        .rposition(|element| {
+            matches!(
+                element,
+                rowan::NodeOrToken::Token(token)
+                    if matches!(token.kind(), SyntaxKind::LBrace | SyntaxKind::LBracket)
+            )
+        })
+        .map_or(lead.start, |index| index + 1);
+
+    start..lead.end
+}
+
 /// `Before` として数えるトリビア。直前の要素と同じ行にあるコメントは、その要素の
 /// inline（または無所属）なので含めない。判定は `collect_leading_trivia` と同じ規則。
+///
+/// `first` はコンテナの先頭要素か。先頭には「前の要素」が無いため、開き区切りと同じ行の
+/// コメントも `Before` として数える（整形はそのコメントを先頭要素の前に出す）。
 fn leading_trivia_in(
     children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
-    range: Range<usize>,
+    lead: Range<usize>,
+    first: bool,
 ) -> Vec<Trivia> {
+    let range = if first {
+        first_lead_range(children, lead)
+    } else {
+        lead
+    };
+
     // 直前が改行なら、その行境界も含めて「前の要素の行末」を探す
     let start = if range.start > 0 && is_newline(&children[range.start - 1]) {
         range.start - 1
@@ -496,6 +532,10 @@ fn leading_trivia_in(
         .iter()
         .filter_map(trivia_from_element)
         .collect();
+
+    if first {
+        return items;
+    }
 
     match items
         .iter()
@@ -514,13 +554,24 @@ fn leading_trivia_in(
 /// `Before` として数える最初のコメントの位置。
 fn leading_comment_start(
     children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
-    range: Range<usize>,
+    lead: Range<usize>,
+    first: bool,
 ) -> Option<usize> {
+    let range = if first {
+        first_lead_range(children, lead)
+    } else {
+        lead
+    };
+
     let start = if range.start > 0 && is_newline(&children[range.start - 1]) {
         range.start - 1
     } else {
         range.start
     };
+    if first {
+        return (range.start..range.end).find(|index| is_comment(&children[*index]));
+    }
+
     let first_comment = (start..range.end).find(|index| is_comment(&children[*index]))?;
     let newline = (start..first_comment).find(|index| is_newline(&children[*index]))?;
 
@@ -542,7 +593,8 @@ fn comment_range(
     match location {
         CommentLocation::Before => {
             let lead = span.lead();
-            Ok(leading_comment_start(&children, lead.clone()).map(|start| start..lead.end))
+            Ok(leading_comment_start(&children, lead.clone(), index == 0)
+                .map(|start| start..lead.end))
         }
         CommentLocation::Inline => {
             let trail = span.trail();
@@ -582,6 +634,15 @@ fn is_comment(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
 
 fn is_whitespace(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
     matches!(element, rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Whitespace)
+}
+
+/// コンテナの開き区切り（`{` / `[`）か。
+fn is_opening(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
+    matches!(
+        element,
+        rowan::NodeOrToken::Token(token)
+            if matches!(token.kind(), SyntaxKind::LBrace | SyntaxKind::LBracket)
+    )
 }
 
 fn is_comma(element: &rowan::NodeOrToken<RedNode, crate::RedToken>) -> bool {
@@ -777,11 +838,19 @@ fn build_slot_comment(
 
             // 直前の内容と同じ行にあるなら、コメントを行として切り離す。
             // 同じ行のコメントは再パースすると前の要素の inline になり、before に戻らない。
-            let at_line_start = children[..at]
+            // ただし先頭要素の開き区切りの直後にある既存コメントは、そのままでも before として
+            // 読めるので、置き換えで行を動かさない（新しく足すときは独立した行に置く）。
+            let at_line_start = match children[..at]
                 .iter()
                 .rev()
                 .find(|element| !is_whitespace(element))
-                .is_some_and(is_newline);
+            {
+                Some(element) => {
+                    is_newline(element)
+                        || (index == 0 && existing_range.is_some() && is_opening(element))
+                }
+                None => true,
+            };
 
             let indent = if at_line_start {
                 trailing_whitespace(&children, &span)
@@ -1323,6 +1392,10 @@ mod equivalence_tests {
                 "[1, /* c */ 2]\n",
                 "[/* c */\n1]\n",
                 "a: 1\n// c\nb: 2\n",
+                "{#c\n a: 1}\n",
+                "{/* c */\na: 1}\n",
+                "{ /* c */ a: 1}\n",
+                "[/* c */ 1]\n",
             ]
             .map(str::to_string),
         );
@@ -1330,6 +1403,8 @@ mod equivalence_tests {
         documents
     }
 
+    /// 先頭要素の `Before` は、コンテナの先頭トリビア（開き区切りの行のコメントを含む）と
+    /// 一致する。2 番目以降は、その要素の `leading_trivia` と一致する。
     #[test]
     fn leading_rule_matches_the_ast() {
         let mut checked = 0;
@@ -1347,10 +1422,14 @@ mod equivalence_tests {
                     SyntaxKind::Object => {
                         let object = Object::cast(node.clone()).unwrap();
                         for (index, span) in object.slots().iter().enumerate() {
-                            let member = &object.members()[index];
+                            let expected = if index == 0 {
+                                comments(&object.leading_trivia)
+                            } else {
+                                comments(&object.members()[index].leading_trivia)
+                            };
                             assert_eq!(
-                                comments(&leading_trivia_in(&children, span.lead())),
-                                comments(&member.leading_trivia),
+                                comments(&leading_trivia_in(&children, span.lead(), index == 0)),
+                                expected,
                                 "object {src:?} member {index}"
                             );
                             checked += 1;
@@ -1359,10 +1438,14 @@ mod equivalence_tests {
                     SyntaxKind::Array => {
                         let array = Array::cast(node.clone()).unwrap();
                         for (index, span) in array.slots().iter().enumerate() {
-                            let item = &array.items()[index];
+                            let expected = if index == 0 {
+                                comments(&array.leading_trivia)
+                            } else {
+                                comments(&array.items()[index].leading_trivia)
+                            };
                             assert_eq!(
-                                comments(&leading_trivia_in(&children, span.lead())),
-                                comments(&item.leading_trivia),
+                                comments(&leading_trivia_in(&children, span.lead(), index == 0)),
+                                expected,
                                 "array {src:?} item {index}"
                             );
                             checked += 1;
