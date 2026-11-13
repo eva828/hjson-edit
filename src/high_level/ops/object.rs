@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use rowan::{GreenNode, NodeOrToken};
 
 use crate::{
@@ -565,8 +567,18 @@ fn remove_object_child(parent: &RedNode, last: &PathSegment) -> Result<GreenNode
         .collect();
     ranges.sort_by_key(|range| range.start);
 
+    // 直前トリビアを含む範囲は前の要素の行末と重なる。重なったまま順に消すと
+    // インデックスがずれて別の要素まで消えるため、先にまとめる。
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => merged.push(range),
+        }
+    }
+
     let mut green: GreenNode = parent.green().clone().into_owned();
-    for range in ranges.into_iter().rev() {
+    for range in merged.into_iter().rev() {
         green = green.splice_children(range, Vec::new());
     }
 

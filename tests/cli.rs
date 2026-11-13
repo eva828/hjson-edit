@@ -1117,3 +1117,20 @@ fn cli_comment_before_on_a_braceless_first_member_errors() {
         .failure()
         .stderr(predicate::str::contains("use :header"));
 }
+
+#[test]
+fn cli_remove_of_a_duplicate_key_does_not_panic() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "{{a: 1, a: 2, a: 3}}").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("edit")
+        .arg(file.path())
+        .arg("--remove")
+        .arg("a")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("{}\n"));
+}
