@@ -438,7 +438,7 @@ fn lexer_warning(
 
 /// 値の層で後勝ちになる重複キーの警告（出現順）。
 fn duplicate_key_warnings(root: &RedNode, input: &str) -> Vec<String> {
-    use crate::ast::{AstNode, Member};
+    use crate::ast::{AstNode, Key};
     use std::collections::HashSet;
 
     let line_index = LineIndex::new(input);
@@ -449,18 +449,21 @@ fn duplicate_key_warnings(root: &RedNode, input: &str) -> Vec<String> {
         .filter(|node| node.kind() == SyntaxKind::Object)
     {
         let mut seen: HashSet<String> = HashSet::new();
-        for child in object
+        for member in object
             .children()
             .filter(|child| child.kind() == SyntaxKind::Member)
         {
-            let Ok(member) = Member::cast(child) else {
-                continue;
-            };
-            let Some(key) = member.member_key() else {
+            // メンバー全体（レイアウトとトリビア）を組み立てず、キーだけを読む
+            let Some(key) = member
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Key)
+                .and_then(|node| Key::cast(node).ok())
+                .and_then(|key| key.body_text())
+            else {
                 continue;
             };
             if !seen.insert(key.clone()) {
-                let offset: u32 = member.syntax().text_range().start().into();
+                let offset: u32 = member.text_range().start().into();
                 let (line, column) =
                     crate::syntax::char_line_col(&line_index, input, offset as usize)
                         .unwrap_or((0, offset as usize));
