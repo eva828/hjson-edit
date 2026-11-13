@@ -77,7 +77,7 @@ hjson-edit get in.hjson --raw name
 |---|---|
 | `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
 | `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定）, `--no-verify`, `--in-place`, `--output <file>` |
-| `edit <file>` | `--set <PATH> <VALUE>`, `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
+| `edit <file>` | `-s` / `--set <PATH> <VALUE>`, `-r` / `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
 | `get <file> <PATH>` | `--raw`（文字列を引用符なしで出力） |
 
 `PATH` は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（配列の末尾）、
