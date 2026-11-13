@@ -32,6 +32,26 @@ fn an_unterminated_block_comment_does_not_grow_on_each_format() {
 }
 
 #[test]
+fn an_unterminated_comment_in_the_container_tail_does_not_grow() {
+    // ブレースレス文書で、閉じていないブロックコメントが独立した行にある場合
+    for (input, expected) in [
+        ("a: 1\n/*c", "a: 1\n/*c"),
+        ("a: 1\n/*c\n", "a: 1\n/*c\n"),
+        ("a: 1\n\n/*c", "a: 1\n\n/*c"),
+        ("a: 1\n//c\n/*c", "a: 1\n//c\n/*c"),
+        ("{\n  a: 1\n}\n/*c", "{\n  a: 1\n}\n/*c"),
+        ("a: 1\r\n/*c", "a: 1\r\n/*c"),
+        // 字下げはコンテナの桁に揃える（コメントの本文は変えない）
+        ("a: 1\n  /*c", "a: 1\n/*c"),
+    ] {
+        let once = format(input);
+
+        assert_eq!(once, expected, "input {input:?}");
+        assert_eq!(format(&once), once, "input {input:?}");
+    }
+}
+
+#[test]
 fn a_terminated_comment_still_ends_the_line() {
     for (input, expected) in [
         ("x: 5 //c", "x: 5 //c\n"),
@@ -51,6 +71,8 @@ fn formatting_keeps_the_values_and_comments_of_these_documents() {
         "x: 5 //c",
         "x: 5 /*c*/",
         "[1, 2]/*c",
+        "a: 1\n/*c",
+        "a: 1\n//c\n/*c",
         "{a: 1, /* c */ b: 2}\n",
         "{\n  a: 1\n  // c\n}\n",
     ] {

@@ -117,7 +117,9 @@ impl Format for AstArray {
                             .into(),
                     );
                     children.push(make_comment_node(&comment));
-                    children.push(SyntaxKind::Newline.create_token(nl).into());
+                    if !super::is_unterminated_block_comment(&comment) {
+                        children.push(SyntaxKind::Newline.create_token(nl).into());
+                    }
                 }
             }
         }
