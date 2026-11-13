@@ -142,7 +142,7 @@ pub fn edit_command() -> Command {
             Arg::new("indent-width")
                 .long("indent-width")
                 .value_parser(clap::value_parser!(u8).range(1..=8))
-                .help("Indent width in spaces for the formatted containers (default: detected)"),
+                .help("Indent width in spaces, 1-8, for the formatted containers (default: detected)"),
         )
         .arg(
             Arg::new("newline")

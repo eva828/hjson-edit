@@ -219,7 +219,7 @@ fn format_command() -> Command {
             Arg::new("indent-width")
                 .long("indent-width")
                 .value_parser(clap::value_parser!(u8).range(1..=8))
-                .help("Indent width in spaces (default: detected from the document)"),
+                .help("Indent width in spaces, 1-8 (default: detected from the document)"),
         )
         .arg(
             Arg::new("newline")

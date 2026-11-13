@@ -1156,3 +1156,20 @@ fn cli_remove_of_a_duplicate_key_does_not_panic() {
         .success()
         .stdout(predicate::str::contains("{}\n"));
 }
+
+#[test]
+fn cli_help_documents_the_indent_width_range() {
+    for subcommand in ["format", "edit"] {
+        let output = Command::cargo_bin("hjson-edit")
+            .unwrap()
+            .args([subcommand, "--help"])
+            .output()
+            .unwrap();
+        let help = String::from_utf8(output.stdout).unwrap();
+
+        assert!(
+            help.contains("Indent width in spaces, 1-8"),
+            "{subcommand}: {help}"
+        );
+    }
+}
