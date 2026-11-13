@@ -128,7 +128,6 @@ fn newline_at(container: &RedNode, index: usize) -> Option<NewlineKind> {
         })
 }
 
-/// 要素本体だけを差し替える位置と要素を返す。
 /// 要素をトリビアごと削除する範囲を返す。
 pub(crate) fn plan_remove(
     container: &RedNode,
