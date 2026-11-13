@@ -396,8 +396,8 @@ fn set_object_child(
         Some(node) => {
             let member = Member::cast(node)?;
             (
-                member.before_colon_trivia.clone(),
-                member.after_colon_trivia.clone(),
+                style_whitespace(&member.before_colon_trivia),
+                style_whitespace(&member.after_colon_trivia),
             )
         }
         None => (vec![], vec![Trivia::Whitespace(" ".to_string())]),
@@ -416,6 +416,22 @@ fn set_object_child(
 
     let (at, elements) = plan_insert(parent, InsertPosition::End, element, newline, None)?;
     Ok(parent.green().splice_children(at..at, elements))
+}
+
+/// 新しいメンバーの体裁として写すトリビア。
+///
+/// 写すのは `:` の直後の空白の並びだけ。コメントと改行はそのメンバーの内容・レイアウトで
+/// あり、複製すると新しいメンバーへコメントが増える。
+fn style_whitespace(trivia: &[Trivia]) -> Vec<Trivia> {
+    match trivia.first() {
+        Some(Trivia::Whitespace(_)) => trivia
+            .iter()
+            .take_while(|item| matches!(item, Trivia::Whitespace(_)))
+            .cloned()
+            .collect(),
+        Some(_) => vec![Trivia::Whitespace(" ".to_string())],
+        None => Vec::new(),
+    }
 }
 
 fn set_array_child(
