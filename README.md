@@ -176,7 +176,7 @@ assert!(document.to_string().contains("port: 8080"));
 | 入力長 | `MAX_INPUT_BYTES`（`u32::MAX` バイト）まで。超過は `HjsonEditError::InputTooLong` |
 | ネスト | `MAX_NESTING_DEPTH`（128）まで。パース時も編集時も `NestingTooDeep` を返す。1 行のブレースレス文書でも単一値として読み直さない（本文も 1 段として数える） |
 | 不正な入力 | 暗黙に補正せず、行・列付きのエラーとして返す（1 始まり。列は行頭からの文字数で、タブも全角も 1 文字。端末の表示幅とは一致しない）。閉じ忘れのコンテナは開き区切りの位置を指す |
-| 未終端のブロックコメント `/*` | 基準実装と同じく読み飛ばし、`warnings()` に「skipped input at line …」として記録する（CLI は stderr に `Warning: …` を出す） |
+| 未終端のブロックコメント `/*` | 基準実装と同じく読み飛ばし、`warnings()` に「skipped input at line …」として記録する（CLI は stderr に `Warning: …` を出す）。コメントは EOF までを飲み込むため、その後ろに要素を足す編集は検証で失敗する（`expected …, found no value at this path`）。整形はコメントの後ろに改行を足さない |
 | 重複キー | 値の層では後勝ち（パスで読む値も最後の出現）。lossless な木と `to_string()` は元のテキストを保持する。`parse` 時に `warnings()` へ「duplicate key "a" at line 3, column 3 (the last value wins)」を記録する（CLI は stderr に出す） |
 | BOM | パーサーは通常の文字として扱い、CLI がファイル読み込み時に除去する |
 | キーと `:` の間の空白 | lossless な木にトリビアとして残し、`to_string()` は元のテキストを再現する。`format` は値の前後の空白だけを正規化する |
