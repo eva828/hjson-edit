@@ -254,7 +254,7 @@ fn collect_container_comment_slots(
             continue;
         };
 
-        let before = comments_in(&children, span.lead());
+        let before = extract_comment_bodies(&leading_trivia_in(&children, span.lead()));
         slots.push((CommentSlot::Before(element_path.clone()), before));
 
         let inline = comments_in(&children, span.trail());
@@ -464,15 +464,61 @@ fn slot_trivia(
     location: CommentLocation,
 ) -> Result<Vec<Trivia>, HjsonEditError> {
     let span = slot_at(container, index)?;
-    let range = match location {
-        CommentLocation::Before => span.lead(),
-        CommentLocation::Inline => span.trail(),
+    match location {
+        CommentLocation::Before => Ok(leading_trivia_in(&children_of(container), span.lead())),
+        CommentLocation::Inline => Ok(children_of(container)[span.trail()]
+            .iter()
+            .filter_map(trivia_from_element)
+            .collect()),
+    }
+}
+
+/// `Before` として数えるトリビア。直前の要素と同じ行にあるコメントは、その要素の
+/// inline（または無所属）なので含めない。判定は `collect_leading_trivia` と同じ規則。
+fn leading_trivia_in(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    range: Range<usize>,
+) -> Vec<Trivia> {
+    // 直前が改行なら、その行境界も含めて「前の要素の行末」を探す
+    let start = if range.start > 0 && is_newline(&children[range.start - 1]) {
+        range.start - 1
+    } else {
+        range.start
     };
 
-    Ok(children_of(container)[range]
+    let mut items: Vec<Trivia> = children[start..range.end]
         .iter()
         .filter_map(trivia_from_element)
-        .collect())
+        .collect();
+
+    match items
+        .iter()
+        .position(|item| matches!(item, Trivia::Newline { .. }))
+    {
+        Some(position) => {
+            items.drain(..=position);
+        }
+        None if items.iter().any(|item| matches!(item, Trivia::Comment(_))) => items.clear(),
+        None => {}
+    }
+
+    items
+}
+
+/// `Before` として数える最初のコメントの位置。
+fn leading_comment_start(
+    children: &[rowan::NodeOrToken<RedNode, crate::RedToken>],
+    range: Range<usize>,
+) -> Option<usize> {
+    let start = if range.start > 0 && is_newline(&children[range.start - 1]) {
+        range.start - 1
+    } else {
+        range.start
+    };
+    let first_comment = (start..range.end).find(|index| is_comment(&children[*index]))?;
+    let newline = (start..first_comment).find(|index| is_newline(&children[*index]))?;
+
+    (newline + 1..range.end).find(|index| is_comment(&children[*index]))
 }
 
 /// 既存コメントが占める範囲。無ければ `None`。
@@ -490,10 +536,7 @@ fn comment_range(
     match location {
         CommentLocation::Before => {
             let lead = span.lead();
-            let start = lead
-                .clone()
-                .find(|position| is_comment(&children[*position]));
-            Ok(start.map(|start| start..lead.end))
+            Ok(leading_comment_start(&children, lead.clone()).map(|start| start..lead.end))
         }
         CommentLocation::Inline => {
             let trail = span.trail();
@@ -1180,5 +1223,99 @@ mod tests {
             } => {}
             _ => panic!("expected Slot Inline"),
         }
+    }
+}
+
+/// 読みの規則（`leading_trivia_in`）が AST の `leading_trivia` と一致すること。
+///
+/// コメントの帰属を 2 か所で別々に決めると、整形と読みで違う位置にコメントが
+/// 見えるようになる。フィクスチャの全入力で両者を突き合わせる。
+#[cfg(test)]
+mod equivalence_tests {
+    use super::*;
+    use crate::ast::{Array, Object};
+    use crate::syntax::lexer::Lexer;
+    use crate::syntax::parser::{ParseResult, Parser};
+
+    fn parse_text(src: &str) -> ParseResult {
+        let tokens = Lexer::new(src).lex();
+        Parser::new(src, tokens.tokens).parse()
+    }
+
+    fn comments(trivia: &[Trivia]) -> Vec<String> {
+        extract_comment_bodies(trivia)
+    }
+
+    fn documents() -> Vec<String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/hjson-cs/inputs.tsv");
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut documents: Vec<String> = text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| line.split('\t').nth(1))
+            .map(crate::conformance::unescape)
+            .collect();
+
+        documents.extend(
+            [
+                "{a: 1, /* c */ b: 2}\n",
+                "{a: 1,\n  /* c */\n  b: 2}\n",
+                "{\n  /* c */\n  a: 1\n}\n",
+                "{\n  a: 1\n  // c\n  b: 2\n}\n",
+                "[1, /* c */ 2]\n",
+                "[/* c */\n1]\n",
+                "a: 1\n// c\nb: 2\n",
+            ]
+            .map(str::to_string),
+        );
+
+        documents
+    }
+
+    #[test]
+    fn leading_rule_matches_the_ast() {
+        let mut checked = 0;
+
+        for src in documents() {
+            let parsed = parse_text(&src);
+            if !parsed.errors.is_empty() {
+                continue;
+            }
+            let root = RedNode::new_root(parsed.green);
+
+            for node in root.descendants() {
+                let children: Vec<_> = node.children_with_tokens().collect();
+                match node.kind() {
+                    SyntaxKind::Object => {
+                        let object = Object::cast(node.clone()).unwrap();
+                        for (index, span) in object.slots().iter().enumerate() {
+                            let member = &object.members()[index];
+                            assert_eq!(
+                                comments(&leading_trivia_in(&children, span.lead())),
+                                comments(&member.leading_trivia),
+                                "object {src:?} member {index}"
+                            );
+                            checked += 1;
+                        }
+                    }
+                    SyntaxKind::Array => {
+                        let array = Array::cast(node.clone()).unwrap();
+                        for (index, span) in array.slots().iter().enumerate() {
+                            let item = &array.items()[index];
+                            assert_eq!(
+                                comments(&leading_trivia_in(&children, span.lead())),
+                                comments(&item.leading_trivia),
+                                "array {src:?} item {index}"
+                            );
+                            checked += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(checked > 50, "checked {checked}");
     }
 }
