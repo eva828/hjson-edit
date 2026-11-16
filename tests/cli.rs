@@ -965,6 +965,29 @@ fn cli_edit_removes_a_comment_after_a_value_operation() {
 }
 
 #[test]
+fn cli_edit_rejects_a_quoted_path_without_changing_the_document() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "{{\"a.b\": 1}}").unwrap();
+    file.flush().unwrap();
+
+    Command::cargo_bin("hjson-edit")
+        .unwrap()
+        .arg("edit")
+        .arg(file.path())
+        .arg("--set")
+        .arg("\"a.b\"")
+        .arg("9")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "must not start or end with a quote",
+        ));
+
+    let text = std::fs::read_to_string(file.path()).unwrap();
+    assert_eq!(text, "{\"a.b\": 1}\n");
+}
+
+#[test]
 fn cli_edit_batch_set_creates_nested_paths() {
     let stdout = edit_stdout(
         &["edit", "--set", "a.b.c", "1", "--set", "d", "[1, 2]"],

@@ -221,6 +221,15 @@ impl HjsonObjectPath {
             }
 
             if !key.is_empty() {
+                // 引用符で囲んだセグメントは未対応。黙って別のキーを作らないよう拒否する。
+                let starts_with_quote = key.starts_with(['"', '\'']);
+                let ends_with_quote = key.ends_with(['"', '\'']);
+                if starts_with_quote != ends_with_quote {
+                    return Err(HjsonEditError::InvalidPath(format!(
+                        "{path}: a path segment must not start or end with a quote \
+                         (quoting is not supported in paths)"
+                    )));
+                }
                 segments.push(PathSegment::Key(key));
             }
 

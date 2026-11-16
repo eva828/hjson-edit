@@ -166,3 +166,27 @@ fn comment_path_equality_compares_kind_and_target() {
     );
     assert_ne!(HjsonCommentPath::Header, HjsonCommentPath::Footer);
 }
+
+#[test]
+fn quoted_segments_are_rejected() {
+    // 引用符セグメントは未対応。黙って `"a` / `b"` のような別のキーにしない。
+    for raw in ["\"a.b\"", "'a.b'", "a.b\"", "\"a.b", "a.\"b.c\""] {
+        let error = HjsonObjectPath::parse(raw).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("must not start or end with a quote"),
+            "{raw}: {error}"
+        );
+    }
+}
+
+#[test]
+fn a_quote_inside_a_segment_is_still_a_key() {
+    // 端以外の引用符はキーの一部として扱う
+    let path = HjsonObjectPath::parse("a\"b").unwrap();
+
+    assert_eq!(path.depth(), 1);
+    assert_eq!(path.segment(0), Some(&PathSegment::Key("a\"b".to_string())));
+}
