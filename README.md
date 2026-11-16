@@ -217,21 +217,36 @@ assert!(document.to_string().contains("port: 8080"));
 |---|---|---|
 | cs 固有ケース（オフライン） | 96 | 一致 93 / 逸脱 3（いずれも許容） |
 | 公式テスト資産（`--features net-conformance`） | 78 | 逸脱 0 |
-| 実運用コーパス（`tools/corpus_diff.sh`） | 542 | 逸脱 0（最終記録時。`corpus_deviations.tsv` は空） |
-| 種固定の差分ファズ（`tools/diff_fuzz.sh`） | `SEED=20260101` / `COUNT=2000` | 逸脱 5（許容、`fuzz0132` / `fuzz0292` / `fuzz0316` / `fuzz0760` / `fuzz0901`） |
+| 実運用コーパス（`tools/corpus_diff.sh`） | 542 | 一致 542 / 逸脱 0（`corpus_deviations.tsv` は空） |
+| 種固定の差分ファズ（`tools/diff_fuzz.sh`） | `SEED=20260101` / `COUNT=2000` | 一致 1995 / 逸脱 5（許容、`fuzz0132` / `fuzz0292` / `fuzz0316` / `fuzz0760` / `fuzz0901`） |
+
+最終確認: 78 件は逸脱 0、542 件は一致 542、2000 件は一致 1995 + 宣言済み 5（未宣言の差分 0）。
 
 ```bash
-# ケース（オフライン）: cs 固有ケース + 逸脱リストの整合検証
+# 1. ケース（オフライン）: cs 固有ケース + 逸脱リストの整合検証
 cargo test --test conformance_cs
 
-# 公式テスト資産 78 件（ネットワーク必須）
+# 2. 公式テスト資産 78 件（ネットワークのみ。.NET SDK は不要）
 cargo test --features net-conformance --test conformance_assets -- --ignored
 
-# 実運用コーパス 542 件を基準と突き合わせる（ネットワークと .NET SDK が必要）
+# 3. 実運用コーパス 542 件のパース（ネットワークのみ）
+cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
+
+# 4. 実運用コーパス 542 件を基準と突き合わせる（ネットワークと dotnet が必要）
 tools/corpus_diff.sh
 
-# 種固定の差分ファズ
-tools/diff_fuzz.sh
+# 5. 種固定の差分ファズ（ネットワークと dotnet が必要）
+SEED=20260101 COUNT=2000 tools/diff_fuzz.sh
+```
+
+`tools/cs-oracle/*.sh` は `dotnet` が PATH にあればそれを使い、無ければ
+`nix shell nixpkgs#dotnet-sdk_10` で用意する。sandbox やコンテナで走らせるときは、
+dotnet の初回起動が書き込み可能なランタイムディレクトリを必要とするため
+`XDG_RUNTIME_DIR` を用意し、診断ソケットを無効にする。
+
+```bash
+mkdir -p /tmp/xdg && chmod 700 /tmp/xdg
+XDG_RUNTIME_DIR=/tmp/xdg DOTNET_EnableDiagnostics=0 tools/corpus_diff.sh
 ```
 
 期待値の再生成は `tools/gen_fixtures.sh`（hjson-cs を固定コミットで取得して実行する）。
@@ -258,11 +273,13 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo test --features net-conformance --test conformance_assets -- --ignored
+cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
 ```
 
 `tools/` には hjson-cs との突き合わせ用のスクリプトがある（`src/bin/canon.rs` は
-`--features dev-tools --bin canon` でビルドする）。CI はネットワーク必須のテストを除いて
-同じコマンドを実行する。
+`--features dev-tools --bin canon` でビルドする）。ネットワークが要るのは上の 2 テストと
+`tools/corpus_diff.sh` / `tools/diff_fuzz.sh` で、dotnet が要るのは後半の 2 つだけ。
+CI はネットワーク必須のテストを除いて同じコマンドを実行する。
 
 ## ライセンス
 
