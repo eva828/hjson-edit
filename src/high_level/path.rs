@@ -263,14 +263,14 @@ impl HjsonObjectPath {
                 } else if let Some(stripped) = op_str.strip_prefix('+') {
                     let idx: usize = stripped.parse().map_err(|_| {
                         HjsonEditError::InvalidPath(format!(
-                            "{path}: an array index must be a number"
+                            "{path}: an array index must be a non-negative number"
                         ))
                     })?;
                     segments.push(PathSegment::Array(ArrayPathSegment::InsertAt(idx)));
                 } else {
                     let idx: usize = op_str.parse().map_err(|_| {
                         HjsonEditError::InvalidPath(format!(
-                            "{path}: an array index must be a number"
+                            "{path}: an array index must be a non-negative number"
                         ))
                     })?;
                     segments.push(PathSegment::Array(ArrayPathSegment::Index(idx)));
