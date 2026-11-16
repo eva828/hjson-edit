@@ -119,6 +119,19 @@ impl HjsonDocumentCommentEdit for HjsonDocument {
         comment: impl Into<String>,
     ) -> Result<Self, HjsonEditError> {
         let comment = comment.into();
+        // ブロックコメントの本文に `*/` があると、そこでコメントが閉じてしまう。
+        // 明示指定ならエラーにし、推定・希望なら行コメントへ切り替える（下の resolve）。
+        if matches!(
+            self.current_comment_style(),
+            Prefer::Explicit(CommentKind::Block)
+        ) && comment.contains("*/")
+        {
+            return Err(HjsonEditError::InvalidTarget {
+                path: comment_element_path(&path),
+                reason: "a block comment cannot contain '*/'; use the line or hash style"
+                    .to_string(),
+            });
+        }
         let previous = self.clone();
         let updated = update_comment(&self, path.clone(), Some(comment.clone()))?;
 
@@ -777,7 +790,8 @@ fn build_document_comment(
     };
 
     if let Some(comment) = comment {
-        let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
+        let resolved_style =
+            resolve_comment_style_for_body(preferred, existing_style.or(document_style), &comment);
         let comment_elements = make_comment_nodes(resolved_style, &comment, newline);
 
         let mut inserted: Vec<GreenElement> = comment_elements;
@@ -816,7 +830,8 @@ fn build_slot_comment(
         return Ok(container.replace_with(green));
     };
 
-    let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
+    let resolved_style =
+        resolve_comment_style_for_body(preferred, existing_style.or(document_style), &comment);
     let children = children_of(&container);
 
     let (replace_from, replace_to, inserted) = match location {
@@ -905,6 +920,14 @@ fn build_slot_comment(
             } else {
                 CommentKind::Block
             };
+            // 行末でない位置は行コメントを置けないため、ブロックで書けない本文は拒否する
+            if style == CommentKind::Block && comment.contains("*/") {
+                return Err(HjsonEditError::InvalidTarget {
+                    path: path.clone(),
+                    reason: "an inline comment cannot contain '*/'; use :before or the line style"
+                        .to_string(),
+                });
+            }
             let mut inserted = vec![SyntaxKind::Whitespace.create_token(" ").into()];
             inserted.extend(make_comment_nodes(style, &comment, newline));
 
@@ -982,7 +1005,8 @@ fn build_container_footer_comment(
 
     let mut inserted: Vec<GreenElement> = Vec::new();
     if let Some(comment) = comment {
-        let resolved_style = resolve_comment_style(preferred, existing_style.or(document_style));
+        let resolved_style =
+            resolve_comment_style_for_body(preferred, existing_style.or(document_style), &comment);
         // コメントは要素の後の行に置くため、直前が行末でなければ改行を足す
         if !at_line_start {
             inserted.push(SyntaxKind::Newline.create_token(newline).into());
@@ -1138,6 +1162,34 @@ fn resolve_comment_style(
     match preferred {
         Prefer::Preserve => existing_style.unwrap_or(CommentKind::Block),
         Prefer::Preferred(kind) | Prefer::Explicit(kind) => kind,
+    }
+}
+
+/// 本文を書けるコメント種別を決める。
+///
+/// ブロックコメントの本文に `*/` が含まれると、そこでコメントが閉じてしまう。
+/// 明示指定は `set_comment` の入口で拒否するので、ここでは行コメントへ切り替える。
+fn resolve_comment_style_for_body(
+    preferred: Prefer<CommentKind>,
+    existing_style: Option<CommentKind>,
+    body: &str,
+) -> CommentKind {
+    let style = resolve_comment_style(preferred, existing_style);
+    if style == CommentKind::Block && body.contains("*/") {
+        return CommentKind::Line;
+    }
+    style
+}
+
+/// コメント位置に対応する要素のパス（エラー表示用）。
+fn comment_element_path(path: &HjsonCommentPath) -> HjsonObjectPath {
+    match path {
+        HjsonCommentPath::Header | HjsonCommentPath::Footer => {
+            HjsonObjectPath::from_segments(Vec::new())
+        }
+        HjsonCommentPath::Before(path)
+        | HjsonCommentPath::Inline(path)
+        | HjsonCommentPath::ContainerFooter(path) => path.clone(),
     }
 }
 

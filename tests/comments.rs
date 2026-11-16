@@ -281,3 +281,58 @@ fn inserted_comment_falls_back_to_a_block_comment() {
 
     assert_eq!(updated.to_string(), "{\n  /* note */\n  a: 1\n}\n");
 }
+
+#[test]
+fn a_block_comment_body_with_the_closing_marker_falls_back_to_a_line_comment() {
+    // 既定（ブロック）スタイルでも、`*/` を含む本文は行コメントで書く
+    let doc = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from("a:before").unwrap(), "x */ y")
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  // x */ y\n  a: 1\n}\n");
+    assert_eq!(updated.all_comments(), vec!["x */ y".to_string()]);
+}
+
+#[test]
+fn an_explicit_block_style_rejects_the_closing_marker() {
+    let doc = HjsonDocument::parse("{\n  a: 1\n}\n")
+        .unwrap()
+        .comment_style(Prefer::Explicit(CommentKind::Block));
+    let error = doc
+        .set_comment(HjsonCommentPath::try_from("a:before").unwrap(), "x */ y")
+        .unwrap_err();
+
+    assert!(error.to_string().contains("cannot contain '*/'"), "{error}");
+}
+
+#[test]
+fn a_header_comment_with_the_closing_marker_falls_back_to_a_line_comment() {
+    let doc = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from(":header").unwrap(), "x */ y")
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "// x */ y\n{\n  a: 1\n}\n");
+}
+
+#[test]
+fn an_inline_comment_that_must_be_a_block_rejects_the_closing_marker() {
+    // 行末でない位置は行コメントを置けないので、ブロックで書けない本文は拒否する
+    let doc = HjsonDocument::parse("{a: 1}\n").unwrap();
+    let error = doc
+        .set_comment(HjsonCommentPath::try_from("a:inline").unwrap(), "x */ y")
+        .unwrap_err();
+
+    assert!(error.to_string().contains("cannot contain '*/'"), "{error}");
+}
+
+#[test]
+fn an_inline_comment_at_the_end_of_a_line_uses_a_line_comment() {
+    let doc = HjsonDocument::parse("{\n  a: 1\n}\n").unwrap();
+    let updated = doc
+        .set_comment(HjsonCommentPath::try_from("a:inline").unwrap(), "x */ y")
+        .unwrap();
+
+    assert_eq!(updated.to_string(), "{\n  a: 1 // x */ y\n}\n");
+}
