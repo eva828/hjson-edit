@@ -866,6 +866,105 @@ fn cli_edit_set_then_remove_with_format() {
 }
 
 #[test]
+fn cli_edit_mixes_value_and_comment_operations() {
+    // 値の一括検証がコメント操作の変更を「対象外の変更」と見なさない
+    let input = "{\n  a: 1\n  b: 2\n}\n";
+    for (args, expected) in [
+        (
+            vec![
+                "edit",
+                "--set",
+                "a",
+                "9",
+                "--comment-set",
+                "b:before",
+                "note",
+            ],
+            "{\n  a: 9\n  /* note */\n  b: 2\n}\n",
+        ),
+        (
+            vec![
+                "edit",
+                "--comment-set",
+                "b:before",
+                "note",
+                "--set",
+                "a",
+                "9",
+            ],
+            "{\n  a: 9\n  /* note */\n  b: 2\n}\n",
+        ),
+        (
+            vec!["edit", "--remove", "b", "--comment-set", "a:inline", "note"],
+            "{\n  a: 1 /* note */\n}\n",
+        ),
+        (
+            vec![
+                "edit",
+                "--set",
+                "a",
+                "9",
+                "--comment-set",
+                ":header",
+                "note",
+            ],
+            "/* note */\n{\n  a: 9\n  b: 2\n}\n",
+        ),
+        (
+            vec![
+                "edit",
+                "--set",
+                "a",
+                "9",
+                "--comment-set",
+                ".:footer",
+                "note",
+            ],
+            "{\n  a: 9\n  b: 2\n  /* note */\n}\n",
+        ),
+        (
+            vec![
+                "edit",
+                "--set",
+                "a",
+                "9",
+                "--comment-append",
+                "b:before",
+                "more",
+            ],
+            "{\n  a: 9\n  /* more */\n  b: 2\n}\n",
+        ),
+        (
+            vec![
+                "edit",
+                "--format",
+                "--set",
+                "a",
+                "9",
+                "--comment-set",
+                "b:before",
+                "note",
+            ],
+            "{\n  a: 9\n  /* note */\n  b: 2\n}\n",
+        ),
+    ] {
+        let stdout = edit_stdout(&args, input);
+
+        assert_eq!(stdout, expected, "{args:?}");
+    }
+}
+
+#[test]
+fn cli_edit_removes_a_comment_after_a_value_operation() {
+    let stdout = edit_stdout(
+        &["edit", "--set", "a", "9", "--comment-remove", "a:before"],
+        "{\n  /* old */\n  a: 1\n}\n",
+    );
+
+    assert_eq!(stdout, "{\n  a: 9\n}\n");
+}
+
+#[test]
 fn cli_edit_batch_set_creates_nested_paths() {
     let stdout = edit_stdout(
         &["edit", "--set", "a.b.c", "1", "--set", "d", "[1, 2]"],

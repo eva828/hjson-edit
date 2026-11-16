@@ -504,6 +504,12 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     }
 
     let original = doc.clone();
+    let has_comment_ops = ops.iter().any(|op| {
+        matches!(
+            op,
+            EditOp::CommentSet { .. } | EditOp::CommentAppend { .. } | EditOp::CommentRemove { .. }
+        )
+    });
     let mut edited_slots: Vec<HjsonObjectPath> = Vec::new();
     let mut value_edits: Vec<ValueEdit> = Vec::new();
     for op in ops {
@@ -545,7 +551,20 @@ pub fn run_edit(matches: &clap::ArgMatches) -> Result<()> {
     }
 
     if verify && !value_edits.is_empty() {
-        doc.verify_value_edits(&original, &value_edits)?;
+        // コメント操作が混ざると、最終文書のコメントは値操作以外でも変わる。
+        // 値操作だけを元の文書に適用した写しで、値とコメントの保存を検証する。
+        if has_comment_ops {
+            let mut shadow = original.clone().verify_edits(false);
+            for edit in &value_edits {
+                shadow = match edit {
+                    ValueEdit::Set(path, value) => shadow.set(path.clone(), value.clone())?,
+                    ValueEdit::Remove(path) => shadow.remove(path.clone())?,
+                };
+            }
+            shadow.verify_value_edits(&original, &value_edits)?;
+        } else {
+            doc.verify_value_edits(&original, &value_edits)?;
+        }
     }
 
     // ここから先は整形だけを行う。整形も値とコメントを変えてはいけないので、
