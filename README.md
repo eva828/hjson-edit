@@ -206,7 +206,7 @@ assert!(document.to_string().contains("port: 8080"));
 | `merge_from` の性能 | 既存メンバーの位置を 1 回だけ調べ、新規メンバーはまとめて挿入する（要素数に対して線形） |
 | 配列の追加 | `[-]` と `[+]` はどちらも末尾を指す（読み取りは末尾要素、書き込みは末尾への追加） |
 | コンテナの footer | `<path>:footer` は閉じ区切りの直前のコメント。1 行で書かれたコンテナに付ける場合は行を分ける。文書直下は `.` で指定する（`.:footer`） |
-| パスで区別できないキー | `.` や `[` を含むキー（`"a.b"` など）はパスで指せない。引用符セグメントは未対応なので、セグメントが `"` / `'` で始まるか終わるパスは `InvalidPath` を返す（`a"b` のように端以外に引用符を含むキーは指せる）。重複キーは値の層（後勝ち）に合わせ、`get` は最後の出現を返し、`set` / `remove` はすべての出現に適用する。コメント操作は最初の出現を指す。重複キーの整形はすべての出現に適用し、検証は値の層で行う |
+| パスで区別できないキー | `.` や `[` を含むキー（`"a.b"` など）はパスで指せない。引用符セグメントは未対応なので、セグメントが `"` / `'` で始まるか終わるパスは `InvalidPath` を返す（`a"b` のように端以外に引用符を含むキーは指せる）。このため **引用符で始まる／終わるキー（`"a` など）は CLI のパスから指せない**。重複キーは値の層（後勝ち）に合わせ、`get` は最後の出現を返し、`set` / `remove` はすべての出現に適用する。コメント操作は最初の出現を指す。重複キーの整形はすべての出現に適用し、検証は値の層で行う |
 
 ## hjson-cs 準拠
 
@@ -239,9 +239,9 @@ tools/corpus_diff.sh
 SEED=20260101 COUNT=2000 tools/diff_fuzz.sh
 ```
 
-`tools/cs-oracle/*.sh` は `dotnet` が PATH にあればそれを使い、無ければ
-`nix shell nixpkgs#dotnet-sdk_10` で用意する。sandbox やコンテナで走らせるときは、
-dotnet の初回起動が書き込み可能なランタイムディレクトリを必要とするため
+`tools/cs-oracle/*.sh` は `nix shell nixpkgs#dotnet-sdk_10` で dotnet を用意する
+（`tools/cs-oracle/reference.env` のバージョンに固定）。コンテナなど `/run/user/<uid>` が
+無い環境では、dotnet の初回起動が書き込み可能なランタイムディレクトリを必要とするため
 `XDG_RUNTIME_DIR` を用意し、診断ソケットを無効にする。
 
 ```bash
@@ -278,8 +278,8 @@ cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
 
 `tools/` には hjson-cs との突き合わせ用のスクリプトがある（`src/bin/canon.rs` は
 `--features dev-tools --bin canon` でビルドする）。ネットワークが要るのは上の 2 テストと
-`tools/corpus_diff.sh` / `tools/diff_fuzz.sh` で、dotnet が要るのは後半の 2 つだけ。
-CI はネットワーク必須のテストを除いて同じコマンドを実行する。
+`tools/corpus_diff.sh` / `tools/diff_fuzz.sh` で、dotnet が要るのは後半の 2 つだけ
+（dotnet は nix で用意する）。CI はネットワーク必須のテストを除いて同じコマンドを実行する。
 
 ## ライセンス
 
