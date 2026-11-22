@@ -31,6 +31,12 @@ impl IndentStyle {
 }
 
 /// 整形の設定。
+///
+/// 未指定の項目は文書から推定する
+/// （[`HjsonDocument::detected_format_config`](crate::HjsonDocument::detected_format_config)）。CLI で
+/// `--indent-style` / `--indent-width` / `--newline` を指定したときも `edit` は変更した
+/// コンテナを整形し、指定は整形の対象にだけ作用する。文書全体を整形するときは `format`
+/// サブコマンドを使う。
 #[derive(Clone, Debug)]
 pub struct FormatConfig {
     pub(crate) newline: String,

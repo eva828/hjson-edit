@@ -1,6 +1,8 @@
 /// 入力の最大バイト数。
 ///
 /// 構文木の位置情報（rowan の `TextSize`）が u32 のため、これを超える入力は扱えない。
+/// 上限を超える入力は [`HjsonEditError::InputTooLong`](crate::HjsonEditError::InputTooLong)
+/// になる。
 pub const MAX_INPUT_BYTES: usize = u32::MAX as usize;
 
 pub mod lexer;

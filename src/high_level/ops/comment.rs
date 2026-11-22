@@ -32,6 +32,12 @@ use crate::{
 /// `<path>` はメンバーでも配列要素でもよい。行末でしか終端できない値
 /// （引用符なし文字列）の直後にはコメントを置けないため、`:inline` は
 /// [`HjsonEditError::InvalidTarget`] を返す。`:before` を使うか値を引用符で囲む。
+///
+/// # コメントの種別
+///
+/// [`Prefer::Explicit`] を指定しないときは、その位置に既存のコメントがあればその種別、
+/// 無ければ文書で最も多く使われている種別（同数なら先に現れたもの）、それも無ければ
+/// `/* */` を使う。
 pub trait HjsonDocumentCommentEdit {
     /// パスが指す位置のコメント。複数行は `\n` で連結して返す。
     fn get_comment(&self, path: HjsonCommentPath) -> Result<Option<String>, HjsonEditError>;

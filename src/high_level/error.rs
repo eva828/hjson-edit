@@ -72,7 +72,7 @@ pub enum HjsonEditError {
     /// マージできない。
     #[error("Cannot merge: {0}")]
     MergeConflict(String),
-    /// 入力が長すぎる。
+    /// 入力が長すぎる（[`MAX_INPUT_BYTES`](crate::MAX_INPUT_BYTES) を超えた）。
     #[error("Input too long: {len} bytes, limit is {limit} bytes")]
     InputTooLong {
         /// 入力の長さ。
@@ -80,7 +80,7 @@ pub enum HjsonEditError {
         /// 上限。
         limit: usize,
     },
-    /// ネストが深すぎる。
+    /// ネストが深すぎる（[`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH) を超えた）。
     #[error("Nesting too deep: depth {depth}, limit is {limit}")]
     NestingTooDeep {
         /// 実際の深さ。
@@ -89,6 +89,10 @@ pub enum HjsonEditError {
         limit: usize,
     },
     /// その値を HJSON では書けない。
+    ///
+    /// NaN・無限大などの非有限数と、[`Prefer::Explicit`](crate::Prefer::Explicit) で指定した
+    /// スタイルで書けない文字列が該当する。[`Prefer::Preserve`](crate::Prefer::Preserve) と
+    /// [`Prefer::Preferred`](crate::Prefer::Preferred) で書けない文字列は二重引用符へ切り替える。
     #[error("Value cannot be represented in HJSON: {reason}")]
     ValueNotRepresentable {
         /// 理由。

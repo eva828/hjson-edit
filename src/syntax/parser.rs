@@ -7,6 +7,8 @@ use super::SyntaxKind;
 use line_index::LineIndex;
 
 /// 構文解析エラー（エラーメッセージと発生したバイトオフセットを保持）
+///
+/// 表示する行・列は 1 始まり。閉じ忘れのコンテナは開き区切りの位置を指す。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     /// エラーの説明。
@@ -25,8 +27,8 @@ impl ParseError {
 
     /// 行・列（1 始まり）付きの表示にする。
     ///
-    /// 列は行頭からの**文字数**（Unicode スカラー値）で数える。位置を求められない
-    /// 場合はバイト位置をそのまま使う。
+    /// 列は行頭からの**文字数**（Unicode スカラー値）で数える。タブも全角も 1 文字で、
+    /// 端末の表示幅とは一致しない。位置を求められない場合はバイト位置をそのまま使う。
     pub fn format_with_source(&self, line_index: &LineIndex, source: &str) -> String {
         let (line, column) =
             super::char_line_col(line_index, source, self.offset).unwrap_or((0, self.offset));
@@ -66,6 +68,11 @@ pub struct ParseResult {
 /// 再帰下降の深さを制限し、スタックオーバーフローと深さに由来する
 /// 二次関数的な処理時間を防ぐ。一般的な設定ファイルの深さ（実運用の
 /// 設定ファイル群 542 件での最大は 7）に対して十分な余裕がある。
+///
+/// パース時だけでなく編集時も同じ上限を検査し、超える場合は
+/// [`HjsonEditError::NestingTooDeep`](crate::HjsonEditError::NestingTooDeep) を返す。
+/// ブレースレス文書の本文も 1 段として数える（1 行で書かれた文書を単一の値として
+/// 読み直すことはない）。
 pub const MAX_NESTING_DEPTH: usize = 128;
 
 /// 構文解析の結果と、ルートをブレースレスとして解釈したかどうか。

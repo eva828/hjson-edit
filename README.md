@@ -3,11 +3,8 @@
 位置情報とコメントを保持しつつ、構造編集と整形を分離して扱える Rust 製 HJSON エディタ。
 
 - **編集**: `set` / `remove` / コメント操作 / `merge_from` は最小限のテキスト変更だけを行う
-  （対象の値ノードの外側は変えない。差し替える値の中身は、値と既存の引用スタイルから描き直す）
 - **検証**: 編集結果は毎回、再パース・値の一致・コメントの保存を検査する（崩れた結果はエラー）
-- **整形**: 全体整形（`format`）と、指定したコンテナだけの部分整形（`format_container`）、
-  1 要素だけの整形（`format_slot`）、複数要素をまとめて整える `format_slots`。
-  `format` のインデントと改行は文書から推定する
+- **整形**: 全体整形（`format`）と、指定したコンテナ・要素だけの部分整形を分けて行える
 - **CLI**: `edit` は既定で最小限の変更だけを行い、`--format` で変更したコンテナを整形する
 
 ## インストール
@@ -18,116 +15,49 @@ cargo install --git https://github.com/eva828/hjson-edit
 
 ## 使い方
 
-### CLI
-
 ```bash
-# パースして確認
-hjson-edit parse config.hjson
-
-# 意味ASTを木表示（--show-trivia で空白・改行・コメントも表示）
-hjson-edit parse --ast config.hjson
-
-# ドキュメント全体を整形して出力
-hjson-edit format config.hjson
-
-# 編集して出力（体裁はそのまま）
-hjson-edit edit config.hjson --set server.host localhost --set items[-] newValue
-
-# 変更したコンテナを整形して出力
-hjson-edit edit config.hjson --format --set server.host localhost
+hjson-edit parse config.hjson                                      # パースして確認（--ast, --show-trivia）
+hjson-edit format config.hjson                                     # 文書全体を整形
+hjson-edit edit config.hjson --set server.host localhost           # 編集（体裁はそのまま）
+hjson-edit edit config.hjson --format --set server.host localhost  # 変更したコンテナも整形
+hjson-edit edit in.hjson --comment-set 'server:footer' 'TODO: …'   # コメント操作
+hjson-edit get in.hjson server.port                                # 値を JSON で読む
 ```
 
-`edit` は既定で**最小限のテキスト変更**だけを行う。変更した行と挿入した行の字下げを揃え、
-空行・インラインの `{...}` / `[...]`・既存の体裁はそのまま残す。
-**同じ値**を設定しても書き換えない（`--string-style` を指定したときを除く）。
-差し替える値そのものの体裁は値テキストから描き直す（下記 `--set` の項を参照）。
-`--format` を付けると、変更したコンテナ（複数行に整形する）を文書の体裁に合わせて整形する。
-整形した結果も値とコメントの保存を検査する（`--no-verify` で無効）。
-`--indent-style` / `--indent-width` / `--newline` を指定した場合も整形を行う
-（指定は整形対象にだけ作用する）。文書全体を整形する場合は `format` を使う。
+全オプションは `hjson-edit <command> --help`。
 
-```bash
-# 入力 in.hjson が {a: 1} のとき
-hjson-edit edit in.hjson --set b hello
-# {a: 1, b: hello
-# }
-
-hjson-edit edit in.hjson --format --set b hello
-# {
-#   a: 1
-#   b: hello
-# }
-
-# 配列要素にコメントを付ける（`:before` は要素の前の行、`:inline` は値の後ろ）
-hjson-edit edit in.hjson --comment-set 'items[0]:inline' '先頭の要素'
-
-# コンテナの閉じ区切りの直前（文書全体の footer は `:footer`）
-hjson-edit edit in.hjson --comment-set 'server:footer' 'TODO: タイムアウトを見直す'
-
-# 値は HJSON の値として解釈される
-hjson-edit edit in.hjson --set name '"true"'   # 文字列 "true"
-hjson-edit edit in.hjson --set flag true       # 真偽値
-hjson-edit edit in.hjson --set items '[1, 2]'  # 配列
-
-# 値を読む（既定は JSON、--raw は文字列を引用符なしで）
-hjson-edit get in.hjson server.port
-hjson-edit get in.hjson --raw name
-```
-
-| コマンド | 主なオプション |
+| コマンド | 内容 |
 |---|---|
-| `parse <file>` | `--ast`, `--show-trivia`, `--simple`, `--color <always\|auto\|never>` |
-| `format <file>` | `--indent-style <spaces\|tabs>`, `--indent-width <1-8>`, `--newline <lf\|crlf>`（未指定の項目は文書から推定）, `--no-verify`, `--in-place`, `--output <file>` |
-| `edit <file>` | `-s` / `--set <PATH> <VALUE>`, `-r` / `--remove <PATH>`, `--comment-set` / `--comment-append` / `--comment-remove`, `--comment-style <line\|hash\|block>`, `--string-style <preserve\|double\|block\|unquoted>`, `--format`, `--no-verify`, `--in-place`, `--output <file>`, `--indent-style`, `--indent-width`, `--newline` |
-| `get <file> <PATH>` | `--raw`（文字列を引用符なしで出力） |
+| `parse <file>` | パースして木／AST を表示（`--ast`, `--show-trivia`, `--simple`, `--color`） |
+| `format <file>` | 文書全体を整形（`--indent-style`, `--indent-width`, `--newline`, `--in-place`, `--output`, `--no-verify`） |
+| `edit <file>` | 値を編集・コメントを操作（`--set`, `--remove`, `--comment-*`, `--string-style`, `--format`, `--no-verify`, `--indent-style`, `--indent-width`, `--newline`, `--in-place`, `--output`） |
+| `get <file> <PATH>` | パスの値を JSON で出力（`--raw`） |
 
-`PATH` は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（配列の末尾）、
-`items[+2]`（0 始まりの index 2 へ挿入）の形式。`get` は値を読み、`PATH` が空文字列なら
-文書全体を返す。出力は正規化した JSON（コンテナは複数行）で、`--raw` は文字列専用
-（文字列以外には使えない）。JSON にできない非有限数（`1e999` など）はエラーにする。
-`--set` は中間のコンテナが無ければ作成する（`{}` に `--set a.b 1` で `a` と `b` を作る）。
-中間がスカラーの場合はエラーになる。空の `PATH` は文書全体の差し替えで、本文が置き換わる
-（`Root` 直下のヘッダー/フッターは残る。ブレースレス文書の末尾コメントは本文の内側なので
-置き換わる）。
+`--set` の `VALUE` は HJSON の値として解釈する。`hello` は文字列、`8080` は数値、`"true"` は
+文字列、`[1, 2]` は配列になる。ファイル名に `-` を渡すと標準入力から読む。
+`--in-place` と `--output` は `edit` と `format` で使える。書き込みは一時ファイルを経て置き換えるので、
+失敗しても元のファイルは壊れない。`edit` の出力は入力の末尾改行を踏襲する。
 
-`VALUE` は **HJSON の値**として解釈する（文書と同じ文法）。`hello` は引用符なし文字列、
-`8080` は数値、`true` / `null` はキーワード、`"true"` は文字列、`[1, 2]` は配列、
-`{a: 1}` はオブジェクト、`"a\nb"` は `\n` を解釈した文字列になる。空のテキストはエラーなので、
-空文字列を設定する場合は `""` を渡す。値テキストに引用符（`"..."` / `'...'` / `'''...'''`）を
-書いた場合はその値だけの**希望**のスタイルとなり、そのスタイルで書けない値は二重引用符へ
-切り替わる（行頭に空白のある行を含む Block など）。`--string-style` を指定したときは
-値テキストの引用より優先され、`--string-style preserve` なら値テキストの引用は使わない。
+### PATH
 
-値テキストは意味として解釈し、値ノードを作り直す。そのため値の**中身の体裁**は正規化される。
+| 記法 | 指す位置 |
+|---|---|
+| `key` / `server.host` | メンバーの値 |
+| `items[0]` | 配列の要素 |
+| `items[+2]` | 配列の index 2（書き込みは挿入） |
+| `items[-]` / `items[+]` | 末尾（書き込みは追加） |
+| （空文字列） | 文書全体 |
 
-- 配列・オブジェクトは 1 行になる（区切りは `,` で空白なし、キーは書けるなら引用符なし）
-- 複数行の値テキストも 1 行になる（`{⏎  x: 1⏎}` は `{x: 1}`）
-- 数値は値から書き直す（`1e3` → `1000`、`1.50` → `1.5`、i64 を超える整数は f64 で丸める）
-- 文字列は既存の引用スタイル（`--string-style` の指定があればそれ）で書き、書けない場合は二重引用符
+`[n]` の `n` は 0 始まり。コメントは要素のパスに接尾辞を付ける（`items[0]:inline` も可）。
 
-同じ値の設定では値ノードを差し替えない（`--string-style` を指定したときを除く）ので、
-`{x: 1, y: 2}` や `1.0` はそのまま残る。値の比較は数値で行うため、`1` と `1.0` は同じ値として扱う。
+| 記法 | 指す位置 |
+|---|---|
+| `server:before` | 要素の前の行（接尾辞なしも同じ） |
+| `server:inline` | 値と同じ行の後ろ |
+| `server:footer` | コンテナの閉じ区切りの直前 |
+| `:header` / `:footer` | 文書全体の先頭 / 末尾 |
 
-コメントの `PATH` は `key:before` / `key:inline`（要素の前の行／値の後ろ）に加えて
-配列要素（`items[0]:inline`）も指定できる。`:header` / `:footer` は文書全体のコメント、
-`obj:footer` はそのコンテナの閉じ区切りの直前のコメント（要素の後の行）になる。
-文書直下のコンテナは `.` で指す（`.:footer` は `}` の直前、`:footer` は `}` の後ろ）。
-引用符なし文字列は行末までを飲み込むため、その直後への `:inline` はエラーになる。
-
-`--comment-style` と `--string-style` はその実行全体に適用する。`--comment-style` を指定しない
-ときのコメント種別は、その位置に既存のコメントがあればその種別、無ければ文書で最も多く使われて
-いる種別（同数なら先に現れたもの）、それも無ければ `/* */` になる。
-`--no-verify` は編集の検証（再パース・値の一致・コメントの保存）を無効化する。
-
-`--in-place` と `--output` は `edit` と `format` の両方で使える。書き込みは同じディレクトリの一時
-ファイルを作ってから置き換えるため、途中で失敗しても元のファイルは壊れない
-（`format f > f` のような自己リダイレクトでファイルを空にしないために使う）。
-置き換えはファイルの実体（inode）を入れ替える。書き込み権限の無い既存ファイルはエラーにする。
-
-ファイル名に `-` を渡すと標準入力から読む（`format -`、`parse -`、`edit -`、`get -`）。標準入力には
-`--in-place` を使えない（`--output` は使える）。
-
-### ライブラリ
+## ライブラリ
 
 ```rust
 use hjson_edit::{HjsonDocument, HjsonDocumentEdit, HjsonObjectPath};
@@ -138,133 +68,24 @@ let input = r#"{
     port: 8080
 }"#;
 
-let document = HjsonDocument::parse(input).unwrap();
-
-// 編集はテキストを最小限だけ変更する（既存の引用スタイルを保つ）。
-// 編集結果は毎回、再パースと値の一致、コメントの保存が検査される。
-let edited = document
+// 編集はテキストを最小限だけ変え、結果は再パース・値・コメントで検証される。
+let edited = HjsonDocument::parse(input)
+    .unwrap()
     .set(HjsonObjectPath::parse("name").unwrap(), "api")
     .unwrap();
 assert!(edited.to_string().contains("name: \"api\""));
 
-// 変更したコンテナは `touched_containers` で分かる。
-// 体裁を整えたいときは、そのコンテナだけを整形する（インデント・改行は文書から推定する）。
+// 変更したコンテナだけを、文書から推定した体裁で整形する。
 let config = edited.current_format_config();
 let mut formatted = edited.clone();
 for container in edited.touched_containers().to_vec() {
     formatted = formatted.format_container(&container, &config).unwrap();
 }
-assert_eq!(
-    formatted.to_string(),
-    "{\n    // Configuration\n    name: \"api\"\n    port: 8080\n}"
-);
-
-// スタイルと検証は文書ごとに設定できる
-let document = HjsonDocument::parse(input)
-    .unwrap()
-    .string_style(hjson_edit::Prefer::Explicit(hjson_edit::ast::QuoteStyle::DoubleQuoted))
-    .verify_edits(false);
-assert!(document.to_string().contains("port: 8080"));
+assert_eq!(formatted.to_string(), "{\n    // Configuration\n    name: \"api\"\n    port: 8080\n}");
 ```
 
-値の比較は `HjsonValue::same_value`（整数と浮動小数は数値として比較する）、文書内のコメントは
-`HjsonDocument::all_comments`（本文のみを出現順に返す）で行える。
-
-## 制限と挙動
-
-| 項目 | 挙動 |
-|---|---|
-| 入力長 | `MAX_INPUT_BYTES`（`u32::MAX` バイト）まで。超過は `HjsonEditError::InputTooLong` |
-| ネスト | `MAX_NESTING_DEPTH`（128）まで。パース時も編集時も `NestingTooDeep` を返す。1 行のブレースレス文書でも単一値として読み直さない（本文も 1 段として数える） |
-| 不正な入力 | 暗黙に補正せず、行・列付きのエラーとして返す（1 始まり。列は行頭からの文字数で、タブも全角も 1 文字。端末の表示幅とは一致しない）。閉じ忘れのコンテナは開き区切りの位置を指す |
-| 未終端のブロックコメント `/*` | 基準実装と同じく読み飛ばし、`warnings()` に「skipped input at line …」として記録する（CLI は stderr に `Warning: …` を出す）。コメントは EOF までを飲み込むため、その後ろに要素を足す編集は検証で失敗する（`expected …, found no value at this path`）。整形はコメントの後ろに改行を足さない |
-| 重複キー | 値の層では後勝ち（パスで読む値も最後の出現）。lossless な木と `to_string()` は元のテキストを保持する。`parse` 時に `warnings()` へ「duplicate key "a" at line 3, column 3 (the last value wins)」を記録する（CLI は stderr に出す） |
-| `warnings()` の範囲 | 警告はパースした入力についてのもので、編集した文書でも保持される（重複キーを削除しても警告は残る） |
-| BOM | パーサーは通常の文字として扱い、CLI がファイル読み込み時に除去する |
-| キーと `:` の間の空白 | lossless な木にトリビアとして残し、`to_string()` は元のテキストを再現する。`format` は値の前後の空白だけを正規化する |
-| 編集結果の妥当性 | 行末でしか終端できない値（引用符なし文字列など）を挿入する場合は改行を補い、常に再パースできるテキストを返す |
-| 整形の検証 | `format` / `format_container` / `format_slot` / `format_slots` は、整形の前後で**値とコメント**が変わっていないことを検査する（`--no-verify` で無効化）。`edit --format` も整形した後に 1 回だけ同じ検査をする（`HjsonDocument::verify_formatting`） |
-| 編集の検証 | 各編集の後に再パース・編集した値と**文書全体の値**の一致（`HjsonValue` を基準にし、数値は値で比較する）・対象外コメントの保存を検査し、崩れた結果は `HjsonEditError::InvalidEdit` として返す。整形（`format` / `format_container` / `format_slot` / `format_slots`）も値を変えないことを検査する（`verify_edits(false)` で無効化） |
-| バッチ編集の検証 | 多数の編集をまとめて行う場合は `HjsonDocument::verify_value_edits`（`ValueEdit` の列）を使うと、再パースを 1 回だけにして同じ検査ができる。CLI の `edit` は値の操作をこの方法で検証する（コメント操作は操作ごとに検証する）。値が食い違った場合は適用順の後ろから見て最初に食い違った編集のパスを、コメントが変わった場合は最初の差分を報告する |
-| 値をテキストのまま差し替える | `HjsonDocument::set_value_text` は値テキストを解釈した結果をそのまま置く（`1e3` や `{a: 1, b: 2}` の体裁が残る）。要素パスでは 1 行・コメントなし・引用符なし文字列で終わらない・ブレースレスでない値だけを受け付け、条件を満たさないテキストはエラーにする。空のパスは文書全体の差し替えで、複数行やキー行も受け付ける（本文が置き換わり、`Root` 直下のヘッダー/フッターは残る。ブレースレス文書の末尾コメントは本文の内側なので置き換わる） |
-| 挿入位置 | 新しい要素は末尾の要素の後ろ、閉じ区切りの直前にあるコメント（footer）の手前に入る。字下げは既存の要素に揃える（空のコンテナではコンテナの行の字下げ＋1 段） |
-| 複数行文字列の整形 | `'''` の桁が変わるときは本文の字下げも同じだけ動かし、値を変えない。1 行の `'''...'''` は複数行になるときだけ整形する |
-| `edit` の既定 | 変更した行と挿入した行だけを整える。空行・インラインの `{...}` / `[...]`・既存の体裁はそのまま残す。`--format`（または整形オプションの指定）で変更したコンテナを整形する |
-| 整形と空行 | `format` は空行を保つ（要素間・コメントの前後・閉じ区切りの前・文書末尾）。空行はレイアウトであり、整形の対象にしない。要素もコメントも無いコンテナは、元が複数行なら 1 行に畳まない |
-| 同じ行のコメント | 改行を挟まずに次の要素へ続くコメント（カンマの後ろ・次の要素と同じ行で終わるブロックコメント）は、前の要素の行末コメントとして 1 回だけ出力する。整形で二重に出さない |
-| ブレースレス文書の末尾コメント | 本文（Object）の末尾トリビアとして保持し、`format` / `format_container` でも失わない。ルートを差し替えると本文ごと置き換わる（`Root` 直下のヘッダー/フッターは残る） |
-| 出力の末尾改行 | `edit` は入力の末尾改行を踏襲し、`format` は改行で終える。ただし閉じていないブロックコメント（`/*`）があるときは、そのコメントの後ろに改行を足さない（足すとコメントの一部になり、整形のたびに改行が増えるため） |
-| 整形と複数行文字列の配置 | `:` の後ろで改行している値はその行に置いたまま、`'''` の桁に合わせて本文を書き直す（値は変えない）。`:` と値の間のコメントも保つ |
-| インライン位置のコンテナ | `--format` で整形するとき、対象が行頭になければ行頭になる祖先コンテナまで遡って整形する（親のレイアウトと混ざらないようにする） |
-| 書けない値 | HJSON で表現できない値（NaN・無限大、指定スタイルで書けない文字列）は `HjsonEditError::ValueNotRepresentable`。`Prefer::Preserve` と `Prefer::Preferred` で書けない文字列は二重引用符へ切り替え、`Prefer::Explicit` はエラーにする |
-| 配列の作成 | 途中のコンテナを作るとき、`[n]` / `[+n]` は `n = 0` だけを受け付ける（それ以外は `ArrayIndexOutOfBounds`） |
-| `--set` の値のコメント | 値テキストにコメントを書くと、値に含まれないためエラーにする（引用符なし文字列は行末までを値として飲み込むので、コメントにはならない） |
-| 引用符なし文字列への `:inline` | 値が行末までを飲み込むため付けられない。`HjsonEditError::InvalidTarget` を返す（`:before` か引用符付きの値を使う） |
-| コメントの位置と行 | `:before` はコメントを独立した行に置く。要素が前の内容と同じ行にある場合（`{a: 1, b: 2}` など）は要素を新しい行へ移す。直前の要素と同じ行にあるコメントは、その要素の `:inline` としてだけ数える（整形の規則と同じ）。先頭要素では開き区切りと同じ行のコメント（`{/* c */` の `c`）も `:before` として数え、置き換えでは行を動かさない。ブレースレス文書の先頭メンバーの前には要素の外しか無いため、`:before` は `HjsonEditError::InvalidTarget` を返す（`:header` を使う） |
-| `merge_from` のコメント | 新規メンバーは先頭コメント行と行末コメントごとコピーする。文書全体のヘッダー/フッターは対象外 |
-| `merge_from` の置き換え | 後勝ちで値だけを差し替え、キーとコメントはホスト側を保つ。同じキーが複数ある場合は `set` と同じくすべてを更新する。ソース側でキーが重複する場合は最後の出現だけを写す（捨てた側のコメントはコピーしない） |
-| `merge_from` の性能 | 既存メンバーの位置を 1 回だけ調べ、新規メンバーはまとめて挿入する（要素数に対して線形） |
-| 配列の追加 | `[-]` と `[+]` はどちらも末尾を指す（読み取りは末尾要素、書き込みは末尾への追加） |
-| コンテナの footer | `<path>:footer` は閉じ区切りの直前のコメント。1 行で書かれたコンテナに付ける場合は行を分ける。文書直下は `.` で指定する（`.:footer`） |
-| パスで区別できないキー | `.` や `[` を含むキー（`"a.b"` など）はパスで指せない。引用符セグメントは未対応なので、セグメントが `"` / `'` で始まるか終わるパスは `InvalidPath` を返す（`a"b` のように端以外に引用符を含むキーは指せる）。このため **引用符で始まる／終わるキー（`"a` など）は CLI のパスから指せない**。重複キーは値の層（後勝ち）に合わせ、`get` は最後の出現を返し、`set` / `remove` はすべての出現に適用する。コメント操作は最初の出現を指す。重複キーの整形はすべての出現に適用し、検証は値の層で行う |
-
-## hjson-cs 準拠
-
-基準実装は [hjson/hjson-cs](https://github.com/hjson/hjson-cs)（`777ec1a`, v4.0.0-rc.1）とし、
-**基準を実行して採取した期待値**と突き合わせるテストを持つ。
-
-| 対象 | 件数 | 結果 |
-|---|---|---|
-| cs 固有ケース（オフライン） | 96 | 一致 93 / 逸脱 3（いずれも許容） |
-| 公式テスト資産（`--features net-conformance`） | 78 | 逸脱 0 |
-| 実運用コーパス（`tools/corpus_diff.sh`） | 542 | 一致 542 / 逸脱 0（`corpus_deviations.tsv` は空） |
-| 種固定の差分ファズ（`tools/diff_fuzz.sh`） | `SEED=20260101` / `COUNT=2000` | 一致 1995 / 逸脱 5（許容、`fuzz0132` / `fuzz0292` / `fuzz0316` / `fuzz0760` / `fuzz0901`） |
-
-最終確認: 78 件は逸脱 0、542 件は一致 542、2000 件は一致 1995 + 宣言済み 5（未宣言の差分 0）。
-
-```bash
-# 1. ケース（オフライン）: cs 固有ケース + 逸脱リストの整合検証
-cargo test --test conformance_cs
-
-# 2. 公式テスト資産 78 件（ネットワークのみ。.NET SDK は不要）
-cargo test --features net-conformance --test conformance_assets -- --ignored
-
-# 3. 実運用コーパス 542 件のパース（ネットワークのみ）
-cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
-
-# 4. 実運用コーパス 542 件を基準と突き合わせる（ネットワークと dotnet が必要）
-tools/corpus_diff.sh
-
-# 5. 種固定の差分ファズ（ネットワークと dotnet が必要）
-SEED=20260101 COUNT=2000 tools/diff_fuzz.sh
-```
-
-`tools/cs-oracle/*.sh` は `nix shell nixpkgs#dotnet-sdk_10` で dotnet を用意する
-（`tools/cs-oracle/reference.env` のバージョンに固定）。コンテナなど `/run/user/<uid>` が
-無い環境では、dotnet の初回起動が書き込み可能なランタイムディレクトリを必要とするため
-`XDG_RUNTIME_DIR` を用意し、診断ソケットを無効にする。
-
-```bash
-mkdir -p /tmp/xdg && chmod 700 /tmp/xdg
-XDG_RUNTIME_DIR=/tmp/xdg DOTNET_EnableDiagnostics=0 tools/corpus_diff.sh
-```
-
-期待値の再生成は `tools/gen_fixtures.sh`（hjson-cs を固定コミットで取得して実行する）。
-差分は `tests/fixtures/hjson-cs/deviations.tsv`（ケース）と
-`asset_deviations.tsv` / `corpus_deviations.tsv` / `fuzz_deviations.tsv`（資産・コーパス・ファズ）に明示し、
-**実装の実差分と一致しなければテストが失敗する**（無言の逸脱を許さない）。
-
-現在許容している逸脱:
-
-| 対象 | 内容 | 判断 |
-|---|---|---|
-| `comment_only` / `ws_only` | 空文書を空オブジェクトとして受理する（基準は `Incomplete input` でエラー） | 許容 |
-| `ml_root_indent` | 文書がカラム 0 の `'''` で始まり、本文に `:` を含む場合、基準は根の解釈やり直しの経路（ブレースレス解釈で `''' ... :` をキーとして読む）で 3 文字分のインデントを除去する。HJSON の仕様と hjson-js は `'''` のカラム（= 0）に従うため除去しない | 許容 |
-| `fuzz0132` | 上記と同じ（カラム 0 の複数行文字列。本文に `:` を含む） | 許容 |
-| `fuzz0292` | 上記と同じ（本文の `:` がトリガ） | 許容 |
-| `fuzz0316` | 上記と同じ（本文の `:` がトリガ） | 許容 |
-| `fuzz0760` | 上記と同じ（本文の `:` がトリガ） | 許容 |
-| `fuzz0901` | 上記と同じ（本文の `:` がトリガ） | 許容 |
+細部は `cargo doc --open` の rustdoc を参照する。`PATH` の制限、コメント位置の規則、整形の仕様、
+検証、上限、エラーを説明している。
 
 ## 開発
 
@@ -272,20 +93,13 @@ XDG_RUNTIME_DIR=/tmp/xdg DOTNET_EnableDiagnostics=0 tools/corpus_diff.sh
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
-cargo test --features net-conformance --test conformance_assets -- --ignored
-cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
+cargo test --doc
 ```
 
-`tools/` には hjson-cs との突き合わせ用のスクリプトがある（`src/bin/canon.rs` は
-`--features dev-tools --bin canon` でビルドする）。ネットワークが要るのは上の 2 テストと
-`tools/corpus_diff.sh` / `tools/diff_fuzz.sh` で、dotnet が要るのは後半の 2 つだけ
-（dotnet は nix で用意する）。
-
-CI（`.github/workflows/ci.yml`）は同じコマンドを flake の devShell
-（`nix develop -c …`）で実行し、ツールチェーンを `flake.lock` に固定する。
-`nix flake check --no-build` と `nix build` で flake の評価とパッケージのビルドも検証する。
-準拠 4 層（公式資産 78・コーパス 542 のパースと比較・ファズ 2000）は、master への push と
-手動実行（`workflow_dispatch`）のときだけ別ジョブで回す。
+CI（`.github/workflows/ci.yml`）は同じコマンドを flake の devShell（`nix develop -c …`）で回す。
+あわせて `cargo doc`（警告はエラー）・`cargo package`・`nix flake check`・`nix build` も検証する。
+hjson-cs との準拠検証は 4 層ある。master への push と手動実行のときだけ別ジョブで回る
+（`tools/*.sh` と `tests/fixtures/hjson-cs/`）。
 
 ## ライセンス
 

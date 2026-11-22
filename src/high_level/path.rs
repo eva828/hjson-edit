@@ -3,6 +3,9 @@ use std::fmt::Debug;
 use crate::high_level::error::HjsonEditError;
 
 /// 配列を指すセグメント。
+///
+/// 設定で途中のコンテナを作るときは `[n]` / `[+n]` ともに `n = 0` だけを受け付ける
+/// （それ以外は [`HjsonEditError::ArrayIndexOutOfBounds`]）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArrayPathSegment {
     /// 位置 `n` の要素。
@@ -33,6 +36,17 @@ pub enum PathSegment {
 }
 
 /// 値の位置を指すパス（ドットで区切ったキーと `[n]` の並び）。
+///
+/// 書式は `key`、`server.host`、`items[0]`、`items[-]` / `items[+]`（末尾）、
+/// `items[+2]`（0 始まりの index 2 へ挿入）。空のパスは文書全体を指す。
+///
+/// キーに `.` や `[` を含む値（`"a.b"` など）はパスで指せない。引用符セグメントには
+/// 未対応で、セグメントが `"` / `'` で始まるか終わるパスは [`HjsonEditError::InvalidPath`]
+/// を返す（`a"b` のように端以外に引用符を含むキーは指せる）。
+///
+/// 重複キーは値の層（後勝ち）に合わせる。取得は最後の出現を返す。設定と削除は、最後の
+/// セグメントならすべての出現に適用し、中間のセグメントなら後勝ちの 1 つをたどる。
+/// コメント操作は最初の出現を指す。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HjsonObjectPath {
     segments: Vec<PathSegment>,
@@ -46,15 +60,26 @@ pub enum HjsonCommentPath {
     /// 文書全体の先頭（`:header`）。
     Header,
     /// 文書全体の末尾（`:footer`）。
+    ///
+    /// ブレースレス文書の末尾コメントは本文の内側にあるため、本文を差し替えると
+    /// 一緒に置き換わる。
     Footer,
     /// 要素の前の行（`<path>:before`。接尾辞を省略した場合も同じ）。
     ///
     /// 要素が前の内容と同じ行にある場合は、コメントを独立した行に置くため要素を
     /// 新しい行へ移す。ブレースレス文書の先頭メンバーには置けない（`:header` を使う）。
+    /// 先頭要素では開き区切りと同じ行のコメント（`{/* c */` の `c`）も `:before` として
+    /// 数え、置き換えでは行を動かさない。直前の要素と同じ行にあるコメントは、その要素の
+    /// `:inline` としてだけ数える。
     Before(HjsonObjectPath),
     /// 要素の値の後ろ、同じ行の末尾（`<path>:inline`）。
+    ///
+    /// 引用符なし文字列は行末までを飲み込むため、その直後には付けられない
+    /// （[`HjsonEditError::InvalidTarget`]）。`:before` を使うか値を引用符で囲む。
     Inline(HjsonObjectPath),
     /// コンテナの閉じ区切りの直前（`<path>:footer`）。要素の後の行に置く。
+    ///
+    /// 1 行で書かれたコンテナに付ける場合は行を分ける。
     ContainerFooter(HjsonObjectPath),
 }
 

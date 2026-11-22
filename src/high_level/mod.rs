@@ -44,7 +44,7 @@ pub enum Prefer<T> {
     Explicit(T),
 }
 
-/// HJSONドキュメント
+/// パースした HJSON 文書。
 #[derive(Debug, Clone)]
 pub struct HjsonDocument {
     root: RedNode,
@@ -74,7 +74,19 @@ pub(crate) fn check_input_len(len: usize) -> Result<(), HjsonEditError> {
 }
 
 impl HjsonDocument {
-    /// HJSON文字列をパースしてドキュメントを作成
+    /// HJSON 文字列をパースして文書を作成する。
+    ///
+    /// 先頭の BOM は通常の文字として扱う。CLI はファイルと標準入力のどちらも、
+    /// 読み込み時に先頭の BOM を除去してからこの関数に渡す。
+    ///
+    /// CLI の `edit --set` は値テキストもこの関数で解釈する。そのため `hello` は引用符
+    /// なし文字列、`8080` は数値、`"true"` は文字列になる。値テキストにコメントが含まれる
+    /// 場合は CLI がエラーにする（この関数はコメントを警告として読み飛ばすだけ）。
+    ///
+    /// # エラー
+    ///
+    /// - [`HjsonEditError::ParseError`] / [`HjsonEditError::LexError`]（行・列付き）
+    /// - [`HjsonEditError::InputTooLong`]（[`MAX_INPUT_BYTES`] を超える入力）
     pub fn parse(input: &str) -> Result<Self, HjsonEditError> {
         check_input_len(input.len())?;
 
@@ -160,21 +172,31 @@ impl HjsonDocument {
     ///
     /// 現在は次の 2 種類。
     ///
-    /// - 読み飛ばした入力（閉じていないブロックコメント）
-    /// - 値の層で後勝ちになる重複キー
+    /// - 読み飛ばした入力（閉じていないブロックコメント）。
+    ///   `skipped input at line N, column M: …` の形で、基準実装と同じく EOF までを
+    ///   コメントとして飲み込む。その後ろに要素を足す編集は検証で失敗し、整形も
+    ///   コメントの後ろに改行を足さない。
+    /// - 値の層で後勝ちになる重複キー。`duplicate key "a" at line 3, column 3
+    ///   (the last value wins)` の形。
     ///
-    /// 警告はパースした入力についてのもので、編集した文書でも保持される。
+    /// 警告はパースした入力についてのもので、編集した文書でも保持される
+    /// （重複キーを削除しても警告は残る）。
     pub fn warnings(&self) -> &[String] {
         &self.warnings
     }
 
     /// 文字列のスタイルを指定する（既定は `Prefer::Preserve`）。
+    ///
+    /// 文書全体に適用する。CLI の `--string-style` も 1 回の実行全体に作用する
+    /// （操作ごとには指定できない）。
     pub fn string_style(mut self, style: Prefer<QuoteStyle>) -> Self {
         self.string_style = style;
         self
     }
 
     /// コメントのスタイルを指定する（既定は `Prefer::Preserve`）。
+    ///
+    /// 文書全体に適用する。CLI の `--comment-style` も 1 回の実行全体に作用する。
     pub fn comment_style(mut self, style: Prefer<CommentKind>) -> Self {
         self.comment_style = style;
         self
@@ -198,7 +220,7 @@ impl HjsonDocument {
     /// 編集結果の検証（再パース・値一致・コメント差分）を有効にするか。既定は有効。
     ///
     /// 検証に失敗した編集は結果を返さずエラーになる。入力長に比例する追加コストが
-    /// かかるため、巨大な文書では無効化できる。
+    /// かかるため、巨大な文書では無効化できる。CLI の `--no-verify` はこれを無効化する。
     pub fn verify_edits(mut self, verify: bool) -> Self {
         self.verify = verify;
         self
@@ -390,7 +412,8 @@ impl HjsonDocument {
     ///
     /// `previous` は整形前の文書。`format_container` / `format_slot` は
     /// `verify_edits(true)` なら呼び出しごとに検証するが、複数のコンテナを
-    /// まとめて整形する場合はこの関数で 1 回だけ検証できる。
+    /// まとめて整形する場合はこの関数で 1 回だけ検証できる。CLI の `edit --format` も
+    /// 整形した後にこの検証を 1 回だけ行う。
     ///
     /// 検証に失敗した場合は [`HjsonEditError::InvalidEdit`] を返す。
     pub fn verify_formatting(&self, previous: &HjsonDocument) -> Result<(), HjsonEditError> {
