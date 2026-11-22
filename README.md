@@ -279,7 +279,13 @@ cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
 `tools/` には hjson-cs との突き合わせ用のスクリプトがある（`src/bin/canon.rs` は
 `--features dev-tools --bin canon` でビルドする）。ネットワークが要るのは上の 2 テストと
 `tools/corpus_diff.sh` / `tools/diff_fuzz.sh` で、dotnet が要るのは後半の 2 つだけ
-（dotnet は nix で用意する）。CI はネットワーク必須のテストを除いて同じコマンドを実行する。
+（dotnet は nix で用意する）。
+
+CI（`.github/workflows/ci.yml`）は同じコマンドを flake の devShell
+（`nix develop -c …`）で実行し、ツールチェーンを `flake.lock` に固定する。
+`nix flake check --no-build` と `nix build` で flake の評価とパッケージのビルドも検証する。
+準拠 4 層（公式資産 78・コーパス 542 のパースと比較・ファズ 2000）は、master への push と
+手動実行（`workflow_dispatch`）のときだけ別ジョブで回す。
 
 ## ライセンス
 
