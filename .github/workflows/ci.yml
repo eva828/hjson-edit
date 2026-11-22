@@ -57,3 +57,32 @@ jobs:
 
       - name: Nix build
         run: nix build --print-out-paths .#default
+
+  conformance:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v32
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-conformance-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-conformance-${{ runner.os }}-
+          gc-max-store-size-linux: 4G
+
+      - name: Official test assets (78)
+        run: nix develop -c cargo test --features net-conformance --test conformance_assets -- --ignored
+
+      - name: Corpus parse (542)
+        run: nix develop -c cargo test --features net-corpus --test tmlhonyaku_parse -- --ignored
+
+      - name: Corpus diff (542)
+        run: nix develop -c tools/corpus_diff.sh
+
+      - name: Fuzz diff (2000)
+        run: nix develop -c env SEED=20260101 COUNT=2000 tools/diff_fuzz.sh
