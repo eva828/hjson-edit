@@ -4,45 +4,56 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: cachix/install-nix-action@v32
         with:
-          components: rustfmt, clippy
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cmd-format: nix develop -c {0}
 
       - name: Format
-        run: cargo fmt --all -- --check
+        run: nix develop -c cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: nix develop -c cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --all-features
+        run: nix develop -c cargo test --all-features
 
       - name: Doc tests
-        run: cargo test --doc
+        run: nix develop -c cargo test --doc
 
       - name: Documentation
-        run: cargo doc --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: -D warnings
+        run: nix develop -c sh -c 'RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features'
 
       - name: Missing docs
-        run: cargo check --lib
-        env:
-          RUSTFLAGS: -W missing_docs
+        run: nix develop -c sh -c 'RUSTFLAGS="-W missing_docs" cargo check --lib'
 
       - name: Package
-        run: cargo package
+        run: nix develop -c cargo package
 
       - name: Examples
         run: |
-          cargo run --quiet --example basic_usage
-          cargo run --quiet --example comments_and_styles
+          nix develop -c cargo run --quiet --example basic_usage
+          nix develop -c cargo run --quiet --example comments_and_styles
+
+      - name: Flake check
+        run: nix flake check --no-build
+
+      - name: Nix build
+        run: nix build --print-out-paths .#default
